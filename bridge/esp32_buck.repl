@@ -1,0 +1,18 @@
+// ESP32 Platform Description with Co-Simulation ADC Hook
+// Board: ESP32 NodeMCU / DevKitC
+
+cpu0: CPU.Xtensa @ sysbus
+    cpuType: "esp32"
+    frequency: 240000000
+
+uart0: UART.Esp32UART @ sysbus 0x3FF40000
+    -> cpu0@0
+
+gpio: Python.PythonPeripheral @ sysbus 0x3FF44000
+    size: 0x1000
+    initable: true
+
+adc: Python.PythonPeripheral @ sysbus 0x3FF48800
+    size: 0x1000
+    initable: true
+    script: "bridge/renode_adc_peripheral.py"

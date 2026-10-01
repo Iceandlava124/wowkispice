@@ -1,0 +1,247 @@
+"""
+ngspice ctypes wrapper for PROJECT_WOWKISPICE
+Provides high-level Python interface to libngspice / ngspice.dll with native
+high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
+"""
+
+import ctypes
+import os
+import sys
+from typing import Callable, Optional, Dict, Any, List
+
+# Struct definitions from sharedspice.h
+class VectorInfo(ctypes.Structure):
+    _fields_ = [
+        ("v_name", ctypes.c_char_p),
+        ("v_type", ctypes.c_int),
+        ("v_flags", ctypes.c_short),
+        ("v_realdata", ctypes.POINTER(ctypes.c_double)),
+        ("v_compdata", ctypes.c_void_p),
+        ("v_length", ctypes.c_int)
+    ]
+
+class VecValues(ctypes.Structure):
+    _fields_ = [
+        ("name", ctypes.c_char_p),
+        ("creal", ctypes.c_double),
+        ("cimag", ctypes.c_double),
+        ("is_scale", ctypes.c_bool),
+        ("is_complex", ctypes.c_bool)
+    ]
+
+class VecValuesAll(ctypes.Structure):
+    _fields_ = [
+        ("veccount", ctypes.c_int),
+        ("vecindex", ctypes.c_int),
+        ("vecsa", ctypes.POINTER(ctypes.POINTER(VecValues)))
+    ]
+
+# Function callback prototypes matching sharedspice.h
+SendChar_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p)
+SendStat_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p)
+ControlledExit_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_bool, ctypes.c_bool, ctypes.c_int, ctypes.c_void_p)
+SendData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(VecValuesAll), ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
+SendInitData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)
+BGThreadRunning_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_bool, ctypes.c_int, ctypes.c_void_p)
+
+GetVSRCData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p)
+GetISRCData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p)
+GetSyncData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_double, ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
+
+
+class NgSpiceEngine:
+    def __init__(
+        self,
+        dll_path: Optional[str] = None,
+        verbose: bool = False,
+        vsrc_callback: Optional[Callable[[float, str], float]] = None,
+        data_callback: Optional[Callable[[float, Dict[str, float]], None]] = None
+    ):
+        self.verbose = verbose
+        self.output_logs: List[str] = []
+        self.user_vsrc_callback = vsrc_callback
+        self.user_data_callback = data_callback
+        
+        if dll_path is None:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            dll_path = os.path.join(base_dir, "tools", "ngspice_dll", "Spice64_dll", "dll-vs", "ngspice.dll")
+        
+        if not os.path.exists(dll_path):
+            raise FileNotFoundError(f"ngspice DLL not found at: {dll_path}")
+        
+        self.dll_path = dll_path
+        self._load_dll()
+        self._init_ngspice()
+
+    def _load_dll(self):
+        dll_dir = os.path.dirname(os.path.abspath(self.dll_path))
+        if hasattr(os, 'add_dll_directory'):
+            try:
+                os.add_dll_directory(dll_dir)
+            except Exception:
+                pass
+        if dll_dir not in os.environ.get('PATH', ''):
+            os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
+        
+        self.lib = ctypes.CDLL(self.dll_path)
+
+        self.lib.ngSpice_Init.argtypes = [
+            SendChar_t, SendStat_t, ControlledExit_t,
+            SendData_t, SendInitData_t, BGThreadRunning_t, ctypes.c_void_p
+        ]
+        self.lib.ngSpice_Init.restype = ctypes.c_int
+
+        self.lib.ngSpice_Init_Sync.argtypes = [
+            GetVSRCData_t, GetISRCData_t, GetSyncData_t, ctypes.POINTER(ctypes.c_int), ctypes.c_void_p
+        ]
+        self.lib.ngSpice_Init_Sync.restype = ctypes.c_int
+
+        self.lib.ngSpice_Command.argtypes = [ctypes.c_char_p]
+        self.lib.ngSpice_Command.restype = ctypes.c_int
+
+        self.lib.ngSpice_Circ.argtypes = [ctypes.POINTER(ctypes.c_char_p)]
+        self.lib.ngSpice_Circ.restype = ctypes.c_int
+
+        self.lib.ngSpice_CurPlot.argtypes = []
+        self.lib.ngSpice_CurPlot.restype = ctypes.c_char_p
+
+        self.lib.ngGet_Vec_Info.argtypes = [ctypes.c_char_p]
+        self.lib.ngGet_Vec_Info.restype = ctypes.POINTER(VectorInfo)
+
+        self.lib.ngSpice_running.argtypes = []
+        self.lib.ngSpice_running.restype = ctypes.c_bool
+
+    def _cb_send_char(self, output: bytes, id_: int, user_data: Any) -> int:
+        msg = output.decode('utf-8', errors='replace') if output else ""
+        self.output_logs.append(msg)
+        if self.verbose:
+            print(f"[ngspice] {msg}", end="")
+        return 0
+
+    def _cb_send_stat(self, status: bytes, id_: int, user_data: Any) -> int:
+        if self.verbose and status:
+            print(f"[ngspice stat] {status.decode('utf-8', errors='replace')}")
+        return 0
+
+    def _cb_exit(self, status: int, immediate: bool, quit_exit: bool, id_: int, user_data: Any) -> int:
+        if self.verbose:
+            print(f"[ngspice exit] status={status}")
+        return 0
+
+    def _cb_send_data(self, p_data: Any, count: int, id_: int, user_data: Any) -> int:
+        if not p_data or not self.user_data_callback:
+            return 0
+        try:
+            data = p_data.contents
+            time_val = 0.0
+            vec_dict = {}
+            for i in range(data.veccount):
+                v_ptr = data.vecsa[i]
+                if v_ptr:
+                    v = v_ptr.contents
+                    name = v.name.decode('utf-8', errors='replace') if v.name else ""
+                    if v.is_scale:
+                        time_val = v.creal
+                    else:
+                        vec_dict[name] = v.creal
+            self.user_data_callback(time_val, vec_dict)
+        except Exception as e:
+            if self.verbose:
+                print(f"[send_data error] {e}")
+        return 0
+
+    def _cb_get_vsrc(self, v_ret: Any, actual_time: float, node_name: bytes, id_: int, user_data: Any) -> int:
+        if self.user_vsrc_callback and v_ret:
+            name_str = node_name.decode('utf-8', errors='replace') if node_name else ""
+            v_val = self.user_vsrc_callback(actual_time, name_str)
+            v_ret[0] = float(v_val)
+        return 0
+
+    def _init_ngspice(self):
+        # Keep references to ctypes callback instances to prevent garbage collection
+        self._c_send_char = SendChar_t(self._cb_send_char)
+        self._c_send_stat = SendStat_t(self._cb_send_stat)
+        self._c_exit = ControlledExit_t(self._cb_exit)
+        self._c_send_data = SendData_t(self._cb_send_data)
+        self._c_send_init_data = SendInitData_t(lambda d, i, u: 0)
+        self._c_bg_running = BGThreadRunning_t(lambda r, i, u: 0)
+
+        self._c_get_vsrc = GetVSRCData_t(self._cb_get_vsrc)
+        self._c_get_isrc = GetISRCData_t(lambda v, t, n, i, u: 0)
+        self._c_get_sync = GetSyncData_t(lambda t, dt, odt, r, i, loc, u: 0)
+
+        ret = self.lib.ngSpice_Init(
+            self._c_send_char,
+            self._c_send_stat,
+            self._c_exit,
+            self._c_send_data,
+            self._c_send_init_data,
+            self._c_bg_running,
+            None
+        )
+        if ret != 0:
+            raise RuntimeError(f"ngSpice_Init failed with code {ret}")
+
+        ident = ctypes.c_int(0)
+        self.lib.ngSpice_Init_Sync(
+            self._c_get_vsrc,
+            self._c_get_isrc,
+            self._c_get_sync,
+            ctypes.byref(ident),
+            None
+        )
+
+    def set_vsrc_callback(self, callback: Callable[[float, str], float]):
+        """Register dynamic voltage source callback for `external` sources."""
+        self.user_vsrc_callback = callback
+
+    def set_data_callback(self, callback: Callable[[float, Dict[str, float]], None]):
+        """Register per-timestep vector data callback."""
+        self.user_data_callback = callback
+
+    def cmd(self, command: str) -> int:
+        return self.lib.ngSpice_Command(command.encode('utf-8'))
+
+    def load_circuit(self, netlist_lines: List[str]):
+        lines = [line.strip() for line in netlist_lines if line.strip()]
+        if not any(l.lower() == ".end" for l in lines):
+            lines.append(".end")
+
+        c_array = (ctypes.c_char_p * (len(lines) + 1))()
+        for idx, line in enumerate(lines):
+            c_array[idx] = line.encode('utf-8')
+        c_array[len(lines)] = None
+
+        ret = self.lib.ngSpice_Circ(c_array)
+        if ret != 0:
+            raise RuntimeError(f"ngSpice_Circ failed to load circuit (code {ret})")
+
+    def load_circuit_file(self, filepath: str):
+        with open(filepath, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        self.load_circuit(lines)
+
+    def alter_source_voltage(self, source_name: str, voltage: float):
+        self.cmd(f"alter {source_name} = {voltage}")
+
+    def get_node_voltage(self, node_name: str) -> float:
+        vec_ptr = self.lib.ngGet_Vec_Info(node_name.encode('utf-8'))
+        if not vec_ptr:
+            vec_ptr = self.lib.ngGet_Vec_Info(f"v({node_name})".encode('utf-8'))
+            
+        if not vec_ptr:
+            raise ValueError(f"Vector '{node_name}' not found in current ngspice plot.")
+        
+        vec = vec_ptr.contents
+        if vec.v_length <= 0 or not vec.v_realdata:
+            return 0.0
+        return float(vec.v_realdata[vec.v_length - 1])
+
+    def get_vector_array(self, vec_name: str) -> List[float]:
+        vec_ptr = self.lib.ngGet_Vec_Info(vec_name.encode('utf-8'))
+        if not vec_ptr:
+            vec_ptr = self.lib.ngGet_Vec_Info(f"v({vec_name})".encode('utf-8'))
+        if not vec_ptr:
+            return []
+        vec = vec_ptr.contents
+        return [float(vec.v_realdata[i]) for i in range(vec.v_length)]

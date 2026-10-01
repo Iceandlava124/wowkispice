@@ -1,0 +1,57 @@
+* ======================================================================
+* PROJECT_WOWKISPICE Component Library: Power & Mixed-Signal Subcircuits
+* Reverse-engineered high-fidelity SPICE models for hardware co-simulation
+* ======================================================================
+
+* 1. N-Channel Power MOSFET (IRF540N Equivalent)
+* Drain Gate Source
+.subckt POWER_MOSFET_IRF540N D G S
+M1 D G S S NMOS_MODEL W=1.0 L=1u
+D_BODY S D BODY_DIODE
+Cgs G S 1.2n
+Cgd G D 120p
+Cds D S 350p
+.model NMOS_MODEL NMOS(LEVEL=1 VTO=3.0 KP=35.0 RS=0.015 RD=0.015)
+.model BODY_DIODE D(IS=1e-11 RS=0.01 N=1.05 BV=100)
+.ends POWER_MOSFET_IRF540N
+
+* 2. High-Speed Schottky Barrier Diode (1N5819 Equivalent)
+* Anode Cathode
+.subckt SCHOTTKY_1N5819 A K
+D1 A K SCHOTTKY_MODEL
+Cj A K 110p
+.model SCHOTTKY_MODEL D(IS=3.5e-7 RS=0.03 N=1.08 BV=40 IBV=1e-4)
+.ends SCHOTTKY_1N5819
+
+* 3. DC Brushed Motor with Mechanical Inertia and Back-EMF (Ke * omega)
+* Term+ Term- Shaft_Speed_Node
+.subckt DC_MOTOR_MODEL IN_POS IN_NEG SPEED
+* Electrical Armature (R_armature = 1.5 ohm, L_armature = 2.5 mH)
+R_ARM IN_POS N1 1.5
+L_ARM N1 N2 2.5m
+* Back-EMF Voltage Source = Ke * V(SPEED) (Ke = 0.05 V/(rad/s))
+B_EMF N2 IN_NEG V = 0.05 * V(SPEED)
+
+* Mechanical Subsystem: Torque = Kt * I(R_ARM) -> accelerates rotor inertia J (J = 1e-4 kg*m^2, Friction B = 1e-5 N*m*s)
+B_TORQUE 0 SPEED I = 0.05 * I(R_ARM)
+C_INERTIA SPEED 0 100u IC=0
+R_FRICTION SPEED 0 100k
+.ends DC_MOTOR_MODEL
+
+* 4. NTC Temperature Sensor (Thermistor + Linearizing Divider)
+* VCC SENSOR_OUT GND
+.subckt NTC_THERMISTOR_SENSOR VCC OUT GND
+* R_ntc = R25 * exp(Beta * (1/T - 1/298.15)) (Simulated at 25°C = 10k, 50°C = 3.6k)
+R_NTC VCC OUT 10k
+R_BIAS OUT GND 10k
+C_FILTER OUT GND 100n
+.ends NTC_THERMISTOR_SENSOR
+
+* 5. General Purpose Rail-to-Rail Op-Amp (LM358 Equivalent)
+* NonInverting Inverting VCC VEE OUT
+.subckt OPAMP_LM358 INP INN VCC VEE OUT
+R_IN INP INN 10Meg
+E_GAIN N1 0 INP INN 100000
+R_OUT N1 OUT 50.0
+C_COMP N1 0 30p
+.ends OPAMP_LM358

@@ -1,0 +1,23 @@
+* Buck Converter Circuit for PROJECT_WOWKISPICE Co-Simulation
+* Input: 12V DC
+* Target Regulated Output: 3.3V DC (Hysteretic closed-loop control)
+* Switch: Voltage-Controlled Switch S1 driven by external gate source Vgate
+
+Vin in 0 DC 12.0
+Vgate gate 0 dc 0 external
+
+* Switch & freewheeling diode
+S1 in sw_node gate 0 SW_MODEL
+D1 0 sw_node DIODE_MODEL
+
+* Output LC Filter & Load
+L1 sw_node vout 47u IC=0
+C1 vout 0 100u IC=0
+Rload vout 0 5.0
+
+* Models
+.model SW_MODEL SW(Ron=0.02 Roff=1e6 Vt=1.65 Vh=0.05)
+.model DIODE_MODEL D(IS=1e-9 RS=0.01 N=1.0 BV=50 IBV=1e-4)
+
+.tran 0.5u 5m uic
+.end

@@ -1,0 +1,12 @@
+:name: ESP32 Buck Converter Co-Simulation
+:description: Runs compiled ESP32 firmware with external ngspice co-simulation bridge
+
+using sysbus
+mach create "esp32_buck"
+machine LoadPlatformDescription @bridge/esp32_buck.repl
+
+# Display UART logging output
+showAnalyzer uart0
+
+# Set execution mode to deterministic
+emulation SetGlobalQuantum "0.000010"

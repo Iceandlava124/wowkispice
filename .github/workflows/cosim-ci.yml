@@ -1,0 +1,52 @@
+name: Mixed-Signal Hardware-Software Co-Simulation CI
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  cosim-test-matrix:
+    name: Co-Sim Voltage & Load Matrix Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install System Dependencies (ngspice)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ngspice libngspice0 libngspice0-dev
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run ngspice Ctypes Bridge Sanity Test
+        run: |
+          python tests/test_ngspice_bridge.py
+
+      - name: Run Closed-Loop Buck Converter Physics & Regulation Test
+        run: |
+          python tests/test_closed_loop_buck.py
+
+      - name: Run Multi-Load Parameter Sweep Benchmark
+        run: |
+          python bridge/renode_orchestrator.py --mode benchmark --time 10.0 --plot tests/ci_waveform.png
+
+      - name: Upload Simulation Waveforms Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulation-waveforms
+          path: tests/*.png
+          retention-days: 7

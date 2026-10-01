@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  cosim-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wowkispice-cosim-runner
+    volumes:
+      - ./output:/app/output
+    environment:
+      - SIM_DURATION_MS=10.0
+      - SIM_TSTEP_US=0.5
+    command: python3 bridge/renode_orchestrator.py --mode benchmark --time 10.0 --plot output/waveform.png

@@ -1,0 +1,11 @@
+* RC Low-Pass Filter & Sensor Conditioner Circuit
+* Input: PWM / DAC signal driven by ESP32 GPIO
+* Output: Smoothed Analog Voltage for sensor calibration
+
+Vgpio in 0 DC 0.0 external
+R1 in vout 4.7k
+C1 vout 0 1u IC=0
+Rload vout 0 100k
+
+.tran 1u 5m uic
+.end

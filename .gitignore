@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.venv/
+env/
+venv/
+ENV/
+
+# Distribution / Packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Simulator Binaries & Large Tools
+tools/ngspice/
+tools/ngspice_dll/
+tools/renode/
+tools/*.zip
+tools/*.7z
+tools/*.tar.gz
+
+# Temporary / IDE / PlatformIO
+.pio/
+.vscode/
+*.log
+*.tmp
+output/
