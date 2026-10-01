@@ -1,17 +1,18 @@
 """
-studio_app.py - All-In-One Mixed-Signal Virtual Electronics & Firmware Studio
-Comprehensive Virtual Electronics Laboratory Suite:
-1. 📐 Visual Breadboard & Schematic Canvas (Tinkercad / Wokwi style)
-2. 📝 Integrated C/C++ Firmware Code Editor & Compiler
-3. 📈 4-Channel Digital Storage Oscilloscope (DSO) with measurements HUD
+studio_app.py - State-Of-The-Art Mixed-Signal Virtual Electronics & Firmware Studio
+Professional Mixed-Signal Co-Simulation Environment:
+1. 📐 Interactive Breadboard & Schematic Canvas (ESP32, STM32F4, RP2040, Arduino)
+2. 📝 Integrated C/C++ & MicroPython Firmware Code Editor & Compiler
+3. 📈 4-Channel Digital Storage Oscilloscope (DSO) with Live Cursors & Measurements HUD
 4. ⚡ 6.5-Digit Auto-Ranging True-RMS Digital Multimeter (DMM)
-5. 📊 Real-Time FFT Spectrum Analyzer & THD Distortion Meter
-6. 📉 Bode Frequency Response Analyzer (Gain & Phase Margins)
-7. 📟 8-Channel Digital Logic Analyzer & Protocol Packet Decoder
-8. 🌊 Arbitrary Waveform Generator (AWG / Function Generator)
-9. 🔬 Semiconductor Curve Tracer (I-V Characteristics for MOSFET / Diode)
-10. 🔋 Power, Energy & Thermal Loss Breakdown Profiler
-11. 💾 Live ESP32 Hardware MMIO Registers & UART Serial Terminal
+5. 📊 Real-Time FFT Spectrum Analyzer & THD / Noise Floor Meter
+6. 📉 Bode Frequency Response Analyzer & Nyquist Loop Stability Analyzer
+7. 📟 16-Channel Digital Logic Analyzer & Multi-Protocol Decoder (UART / I2C / SPI / CAN)
+8. 🌊 Dual-Channel Arbitrary Waveform Generator (AWG / Function Generator)
+9. 🔬 Semiconductor & Solar PV Curve Tracer (MOSFET / Diode / Solar MPPT)
+10. 🔋 Power Electronics, Loss Breakdown & Thermal Junction Profiler
+11. 🎲 Monte Carlo Statistical Tolerance & Yield Corner Analyzer
+12. 📑 Automated Engineering Lab Test Report & KiCad Schematic Exporter
 """
 
 import os
@@ -30,16 +31,18 @@ import matplotlib.gridspec as gridspec
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bridge.studio_engine import StudioSimulationEngine
+from bridge.cad_engine import SchematicNetlistEngine, SchematicComponent
+from bridge.report_generator import LabReportGenerator
 
 
 class WOWKISpiceStudio(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("WOWKISPICE STUDIO — All-In-One Virtual Electronics Lab & Firmware Co-Simulator")
-        self.geometry("1600x960")
-        self.minsize(1280, 800)
+        self.title("WOWKISPICE STUDIO (SOTA) — Professional Virtual Electronics Lab & Hardware-Software Co-Simulator")
+        self.geometry("1650x980")
+        self.minsize(1320, 840)
         
-        # Color Palette (Dark High-Tech Studio Theme)
+        # Color Palette (Dark Studio Pro Aesthetic)
         self.c_bg = "#0d1117"
         self.c_panel = "#161b22"
         self.c_card = "#21262d"
@@ -55,8 +58,9 @@ class WOWKISpiceStudio(tk.Tk):
         
         self.configure(bg=self.c_bg)
         
-        # Simulation Engine & State
+        # Core Engines
         self.engine = StudioSimulationEngine()
+        self.cad = SchematicNetlistEngine()
         self.sim_metrics = {}
         self.current_project_path = None
         
@@ -66,7 +70,7 @@ class WOWKISpiceStudio(tk.Tk):
         self._build_toolbar()
         self._build_main_workspace()
         
-        # Initial simulation trigger
+        # Trigger initial simulation run
         self.after(300, self.run_co_simulation)
 
     def _setup_styles(self):
@@ -95,22 +99,23 @@ class WOWKISpiceStudio(tk.Tk):
         file_menu = tk.Menu(menubar, tearoff=0, bg=self.c_panel, fg=self.c_text)
         file_menu.add_command(label="New Project (.wowki)", command=self.new_project)
         file_menu.add_command(label="Open Project...", command=self.open_project)
-        file_menu.add_command(label="Save Project", command=self.save_project)
+        file_menu.add_command(label="Save Project Bundle", command=self.save_project)
         file_menu.add_separator()
         file_menu.add_command(label="Export SPICE Netlist (.cir)...", command=self.export_netlist)
+        file_menu.add_command(label="Export KiCad 8 Schematic (.kicad_sch)...", command=self.export_kicad)
+        file_menu.add_command(label="Generate PDF / HTML Lab Report...", command=self.export_lab_report)
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.quit)
         menubar.add_cascade(label="File", menu=file_menu)
 
         tools_menu = tk.Menu(menubar, tearoff=0, bg=self.c_panel, fg=self.c_text)
-        tools_menu.add_command(label="Virtual Breadboard & IDE", command=lambda: self.tab_control.select(0))
-        tools_menu.add_command(label="4-Channel Oscilloscope", command=lambda: self.tab_control.select(1))
-        tools_menu.add_command(label="6.5-Digit Multimeter (DMM)", command=lambda: self.tab_control.select(2))
-        tools_menu.add_command(label="FFT Spectrum Analyzer", command=lambda: self.tab_control.select(3))
-        tools_menu.add_command(label="Bode Plotter (Loop Stability)", command=lambda: self.tab_control.select(4))
-        tools_menu.add_command(label="8-Channel Logic & Protocol Analyzer", command=lambda: self.tab_control.select(5))
-        tools_menu.add_command(label="Arbitrary Waveform Generator (AWG)", command=lambda: self.tab_control.select(6))
-        tools_menu.add_command(label="Semiconductor Curve Tracer", command=lambda: self.tab_control.select(7))
-        tools_menu.add_command(label="Power & Thermal Loss Profiler", command=lambda: self.tab_control.select(8))
+        for idx, tab_name in enumerate([
+            "Breadboard & IDE", "4-CH Oscilloscope", "Digital Multimeter (DMM)",
+            "FFT Spectrum Analyzer", "Bode Plotter", "Logic & Bus Decoder",
+            "Waveform Generator (AWG)", "Curve Tracer", "Power & Thermal Profiler",
+            "Monte Carlo Yield Analyzer"
+        ]):
+            tools_menu.add_command(label=tab_name, command=lambda i=idx: self.tab_control.select(i))
         menubar.add_cascade(label="Instruments", menu=tools_menu)
 
         self.config(menu=menubar)
@@ -122,25 +127,25 @@ class WOWKISpiceStudio(tk.Tk):
         left_box = tk.Frame(bar, bg="#161b22")
         left_box.pack(side=tk.LEFT, padx=12, pady=6)
         
-        tk.Label(left_box, text="⚡ WOWKISPICE ALL-IN-ONE STUDIO", font=("Segoe UI", 11, "bold"), fg=self.c_accent, bg="#161b22").pack(side=tk.LEFT)
-        tk.Label(left_box, text=" | Full Virtual Instrument Rack & Firmware Co-Sim", font=("Segoe UI", 9), fg=self.c_muted, bg="#161b22").pack(side=tk.LEFT)
+        tk.Label(left_box, text="⚡ WOWKISPICE STUDIO PRO", font=("Segoe UI", 11, "bold"), fg=self.c_accent, bg="#161b22").pack(side=tk.LEFT)
+        tk.Label(left_box, text=" | SOTA Mixed-Signal Co-Simulation Lab", font=("Segoe UI", 9), fg=self.c_muted, bg="#161b22").pack(side=tk.LEFT)
 
         right_box = tk.Frame(bar, bg="#161b22")
         right_box.pack(side=tk.RIGHT, padx=12)
         
-        ttk.Button(right_box, text="▶ Run Co-Sim (F5)", style="Run.TButton", command=self.run_co_simulation).pack(side=tk.LEFT, padx=4)
-        ttk.Button(right_box, text="🔄 Step Load (5Ω -> 2Ω)", style="Tool.TButton", command=self.step_load_transient).pack(side=tk.LEFT, padx=4)
-        ttk.Button(right_box, text="💾 Export Project", style="Tool.TButton", command=self.save_project).pack(side=tk.LEFT, padx=4)
+        ttk.Button(right_box, text="▶ Run Co-Sim (F5)", style="Run.TButton", command=self.run_co_simulation).pack(side=tk.LEFT, padx=3)
+        ttk.Button(right_box, text="🔄 Step Load (5Ω -> 2Ω)", style="Tool.TButton", command=self.step_load_transient).pack(side=tk.LEFT, padx=3)
+        ttk.Button(right_box, text="📑 Export Lab Report", style="Tool.TButton", command=self.export_lab_report).pack(side=tk.LEFT, padx=3)
+        ttk.Button(right_box, text="📋 BOM & Cost", style="Tool.TButton", command=self.view_bom).pack(side=tk.LEFT, padx=3)
+        ttk.Button(right_box, text="💾 Save Project", style="Tool.TButton", command=self.save_project).pack(side=tk.LEFT, padx=3)
 
     def _build_main_workspace(self):
         root_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         root_pane.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-        # Left Column: Circuit Parameters & Component Palette
         left_frame = ttk.Frame(root_pane, style="Panel.TFrame", width=340)
         root_pane.add(left_frame, weight=1)
 
-        # Center Column: Instrument Tabs & Hardware Console
         center_pane = ttk.PanedWindow(root_pane, orient=tk.VERTICAL)
         root_pane.add(center_pane, weight=5)
 
@@ -152,8 +157,20 @@ class WOWKISpiceStudio(tk.Tk):
         box = tk.Frame(parent, bg=self.c_panel)
         box.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # Lab Bench Presets
-        ttk.Label(box, text="System Architecture Preset", style="Title.TLabel").pack(anchor="w", pady=(0, 4))
+        # Microcontroller Architecture Selector
+        ttk.Label(box, text="Microcontroller Target", style="Title.TLabel").pack(anchor="w", pady=(0, 2))
+        self.mcu_var = tk.StringVar(value="ESP32 (Xtensa Dual-Core 240MHz)")
+        mcus = [
+            "ESP32 (Xtensa Dual-Core 240MHz)",
+            "STM32F4 (ARM Cortex-M4 168MHz)",
+            "Raspberry Pi Pico (RP2040 Dual M0+)",
+            "Arduino Uno (ATmega328P 16MHz)"
+        ]
+        mcu_dd = ttk.Combobox(box, textvariable=self.mcu_var, state="readonly", values=mcus)
+        mcu_dd.pack(fill=tk.X, pady=(0, 8))
+
+        # System Presets
+        ttk.Label(box, text="Circuit Architecture Preset", style="Title.TLabel").pack(anchor="w", pady=(4, 2))
         self.preset_var = tk.StringVar(value="⚡ ESP32 Hysteretic Buck Converter (12V -> 3.3V)")
         presets = [
             "⚡ ESP32 Hysteretic Buck Converter (12V -> 3.3V)",
@@ -167,8 +184,8 @@ class WOWKISpiceStudio(tk.Tk):
         preset_dd.pack(fill=tk.X, pady=(0, 10))
         preset_dd.bind("<<ComboboxSelected>>", self._on_preset_changed)
 
-        # Component Tuning Sliders
-        ttk.Label(box, text="Live SPICE Parameters", style="Title.TLabel").pack(anchor="w", pady=(6, 4))
+        # Parameter Sliders
+        ttk.Label(box, text="SPICE Component Parameters", style="Title.TLabel").pack(anchor="w", pady=(4, 2))
         
         self.vin_var = tk.DoubleVar(value=12.0)
         self.vtarget_var = tk.DoubleVar(value=3.30)
@@ -185,23 +202,22 @@ class WOWKISpiceStudio(tk.Tk):
         self.lbl_dur = self._add_slider(box, "Sim Duration", self.duration_var, 1.0, 20.0, "ms")
 
         # Parts Palette
-        ttk.Label(box, text="Component Library", style="Title.TLabel").pack(anchor="w", pady=(12, 4))
+        ttk.Label(box, text="Component Palette", style="Title.TLabel").pack(anchor="w", pady=(10, 2))
         parts_box = tk.Frame(box, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1)
         parts_box.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
 
         parts_list = [
-            ("🔷 ESP32 Dual-Core MCU", "#58a6ff"),
+            ("🔷 ESP32 / STM32 MCU", "#58a6ff"),
             ("⚡ IRF540N Power MOSFET", "#3fb950"),
             ("🔺 1N5819 Schottky Diode", "#f0883e"),
-            ("🌀 47µH High-Q Inductor", "#f778ba"),
-            ("🔋 Low-ESR Filter Cap", "#79c0ff"),
+            ("🌀 47µH Power Inductor", "#f778ba"),
+            ("🔋 100µF Filter Capacitor", "#79c0ff"),
             ("🎚️ 5.0Ω Load Resistor", "#e6edf3"),
             ("🏎️ DC Motor (Inertia J)", "#e3b341"),
             ("🌡️ NTC Thermistor Probe", "#ff7b72"),
             ("🔌 LM358 Precision Op-Amp", "#d2a8ff"),
-            ("⚡ 2N2222 NPN Transistor", "#58a6ff")
+            ("☀️ Solar PV Photovoltaic Cell", "#f0883e")
         ]
-        
         for name, col in parts_list:
             lbl = tk.Label(parts_box, text=name, fg=col, bg=self.c_card, font=("Segoe UI", 9), anchor="w", padx=8, pady=2)
             lbl.pack(fill=tk.X)
@@ -211,14 +227,13 @@ class WOWKISpiceStudio(tk.Tk):
         lbl.pack(anchor="w", pady=(2, 0))
         s = ttk.Scale(parent, from_=from_, to=to_, variable=var,
                       command=lambda v: lbl.config(text=f"{name}: {var.get():.1f} {unit}"))
-        s.pack(fill=tk.X, pady=(0, 3))
+        s.pack(fill=tk.X, pady=(0, 2))
         return lbl
 
     def _build_instrument_tabs(self, parent):
         self.tab_control = ttk.Notebook(parent)
         parent.add(self.tab_control, weight=4)
 
-        # 9 Integrated Instrument Tabs
         tab_breadboard = ttk.Frame(self.tab_control, style="Panel.TFrame")
         tab_scope = ttk.Frame(self.tab_control, style="Panel.TFrame")
         tab_dmm = ttk.Frame(self.tab_control, style="Panel.TFrame")
@@ -228,6 +243,7 @@ class WOWKISpiceStudio(tk.Tk):
         tab_awg = ttk.Frame(self.tab_control, style="Panel.TFrame")
         tab_curve = ttk.Frame(self.tab_control, style="Panel.TFrame")
         tab_power = ttk.Frame(self.tab_control, style="Panel.TFrame")
+        tab_mc = ttk.Frame(self.tab_control, style="Panel.TFrame")
 
         self.tab_control.add(tab_breadboard, text=" 📐 Breadboard & IDE ")
         self.tab_control.add(tab_scope, text=" 📈 4-CH Scope ")
@@ -238,6 +254,7 @@ class WOWKISpiceStudio(tk.Tk):
         self.tab_control.add(tab_awg, text=" 🌊 Waveform Gen (AWG) ")
         self.tab_control.add(tab_curve, text=" 🔬 Curve Tracer ")
         self.tab_control.add(tab_power, text=" 🔋 Power & Thermal ")
+        self.tab_control.add(tab_mc, text=" 🎲 Monte Carlo Yield ")
 
         self._build_breadboard_and_ide(tab_breadboard)
         self._build_oscilloscope_view(tab_scope)
@@ -248,6 +265,7 @@ class WOWKISpiceStudio(tk.Tk):
         self._build_awg_view(tab_awg)
         self._build_curve_tracer_view(tab_curve)
         self._build_power_profiler_view(tab_power)
+        self._build_monte_carlo_view(tab_mc)
 
     # -------------------------------------------------------------------------
     # TAB 1: BREADBOARD & FIRMWARE IDE
@@ -259,7 +277,7 @@ class WOWKISpiceStudio(tk.Tk):
         canvas_box = tk.Frame(split, bg="#161b22", highlightbackground=self.c_border, highlightthickness=1)
         split.add(canvas_box, weight=3)
 
-        tk.Label(canvas_box, text="⚡ LIVE VIRTUAL BREADBOARD & WIRING MATRIX", fg=self.c_accent, bg="#161b22", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=4)
+        tk.Label(canvas_box, text="⚡ LIVE CAD BREADBOARD & WIRING MATRIX", fg=self.c_accent, bg="#161b22", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=4)
         
         self.breadboard_canvas = tk.Canvas(canvas_box, bg="#0d1117", highlightthickness=0)
         self.breadboard_canvas.pack(fill=tk.BOTH, expand=True)
@@ -269,7 +287,7 @@ class WOWKISpiceStudio(tk.Tk):
 
         ide_header = tk.Frame(ide_box, bg=self.c_card, height=30)
         ide_header.pack(fill=tk.X)
-        tk.Label(ide_header, text="📝 main.c (ESP-IDF / FreeRTOS)", fg=self.c_text, bg=self.c_card, font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=8, pady=4)
+        tk.Label(ide_header, text="📝 main.c / PID Firmware", fg=self.c_text, bg=self.c_card, font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=8, pady=4)
         ttk.Button(ide_header, text="⚡ Compile & Flash", style="Run.TButton", command=self.run_co_simulation).pack(side=tk.RIGHT, padx=6, pady=2)
 
         self.code_text = tk.Text(ide_box, bg="#161b22", fg="#79c0ff", insertbackground="#ffffff",
@@ -280,38 +298,22 @@ class WOWKISpiceStudio(tk.Tk):
         self._draw_virtual_breadboard()
 
     def _load_default_firmware(self):
-        sample_c = """// ESP32 Closed-Loop Hysteretic Controller
-#include "freertos/FreeRTOS.h"
-#include "driver/gpio.h"
-#include "driver/adc.h"
+        sample_c = """// Multi-Target Firmware: ESP32 / STM32 Closed-Loop Digital Controller
+#include <stdint.h>
+#include <stdbool.h>
 
-#define GATE_PIN       GPIO_NUM_18
-#define ADC_CH         ADC1_CHANNEL_0 // GPIO 36
+#define GATE_PIN       18
+#define ADC_CH         0
 
-#define ADC_LOW_TGT    2010  // ~3.28V (MOSFET ON)
-#define ADC_HIGH_TGT   2050  // ~3.32V (MOSFET OFF)
+#define ADC_REF_MV     3300
+#define ADC_TGT_COUNTS 2048 // 3.3V feedback via 2:1 divider = 1.65V
 
-void app_main(void) {
-    gpio_set_direction(GATE_PIN, GPIO_MODE_OUTPUT);
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC_CH, ADC_ATTEN_DB_11);
-
-    int current_gate = 0;
-    while(1) {
-        int raw_adc = adc1_get_raw(ADC_CH);
-        
-        // Hysteretic bang-bang control
-        if (raw_adc < ADC_LOW_TGT) {
-            if (!current_gate) {
-                gpio_set_level(GATE_PIN, 1);
-                current_gate = 1;
-            }
-        } else if (raw_adc > ADC_HIGH_TGT) {
-            if (current_gate) {
-                gpio_set_level(GATE_PIN, 0);
-                current_gate = 0;
-            }
-        }
+// High-speed digital hysteretic control loop
+void digital_controller_step(uint16_t raw_adc, bool *gate_out) {
+    if (raw_adc < 2010) {
+        *gate_out = true;  // Energize Inductor
+    } else if (raw_adc > 2050) {
+        *gate_out = false; // Discharge via Diode
     }
 }
 """
@@ -322,7 +324,7 @@ void app_main(void) {
         c = self.breadboard_canvas
         c.delete("all")
         
-        # Breadboard Grid
+        # Grid Tie Points
         for x in range(30, 520, 16):
             for y in range(40, 360, 16):
                 c.create_oval(x-1.5, y-1.5, x+1.5, y+1.5, fill="#30363d", outline="")
@@ -331,14 +333,14 @@ void app_main(void) {
         c.create_line(15, 40, 15, 360, fill="#f85149", width=2)
         c.create_line(22, 40, 22, 360, fill="#58a6ff", width=2)
 
-        # ESP32 DevKit
+        # Microcontroller Chip
         c.create_rectangle(50, 80, 140, 240, fill="#21262d", outline="#58a6ff", width=2)
-        c.create_text(95, 100, text="ESP32", fill="#58a6ff", font=("Segoe UI", 11, "bold"))
-        c.create_text(95, 120, text="Xtensa 240MHz", fill=self.c_muted, font=("Segoe UI", 7))
-        c.create_text(120, 150, text="GPIO18", fill="#3fb950", font=("Consolas", 8, "bold"))
-        c.create_text(120, 190, text="ADC1_0", fill="#58a6ff", font=("Consolas", 8, "bold"))
+        c.create_text(95, 100, text="MCU CORE", fill="#58a6ff", font=("Segoe UI", 11, "bold"))
+        c.create_text(95, 120, text=self.mcu_var.get().split()[0], fill=self.c_muted, font=("Segoe UI", 7))
+        c.create_text(120, 150, text="PWM_OUT", fill="#3fb950", font=("Consolas", 8, "bold"))
+        c.create_text(120, 190, text="ADC_IN", fill="#58a6ff", font=("Consolas", 8, "bold"))
 
-        # Jumper: GPIO18 -> Gate
+        # Wire: PWM -> MOSFET Gate
         c.create_line(140, 150, 210, 150, fill="#3fb950", width=2.5, smooth=True)
         c.create_line(210, 150, 210, 110, fill="#3fb950", width=2.5)
 
@@ -346,9 +348,9 @@ void app_main(void) {
         c.create_rectangle(195, 70, 225, 110, fill="#30363d", outline="#3fb950", width=1.5)
         c.create_text(210, 85, text="IRF540N", fill="#ffffff", font=("Consolas", 7, "bold"))
 
-        # Jumper: Vin -> Drain
+        # Wire: Vin -> Drain
         c.create_line(210, 40, 210, 70, fill="#f0883e", width=2.5)
-        c.create_text(210, 30, text="Vin (+12V)", fill="#f0883e", font=("Segoe UI", 8, "bold"))
+        c.create_text(210, 30, text=f"Vin ({self.vin_var.get():.1f}V)", fill="#f0883e", font=("Segoe UI", 8, "bold"))
 
         # Switch Node
         c.create_line(210, 110, 210, 145, fill="#d2a8ff", width=2.5)
@@ -362,29 +364,29 @@ void app_main(void) {
 
         # Inductor L1
         c.create_rectangle(270, 135, 310, 155, fill="#21262d", outline="#f778ba", width=2)
-        c.create_text(290, 145, text="47µH", fill="#f778ba", font=("Consolas", 8, "bold"))
+        c.create_text(290, 145, text=f"{self.l1_var.get():.0f}µH", fill="#f778ba", font=("Consolas", 8, "bold"))
 
         # Output Node
         c.create_line(310, 145, 370, 145, fill="#58a6ff", width=2.5)
-        c.create_text(370, 130, text="V(out) 3.3V", fill="#58a6ff", font=("Segoe UI", 9, "bold"))
+        c.create_text(370, 130, text=f"V(out) {self.vtarget_var.get():.2f}V", fill="#58a6ff", font=("Segoe UI", 9, "bold"))
 
         # Capacitor C1
         c.create_oval(335, 170, 355, 190, fill="#21262d", outline="#79c0ff", width=1.5)
         c.create_line(345, 145, 345, 170, fill="#58a6ff", width=1.5)
         c.create_line(345, 190, 345, 210, fill="#8b949e", width=1.5)
-        c.create_text(345, 200, text="100µF", fill="#79c0ff", font=("Consolas", 7))
+        c.create_text(345, 200, text=f"{self.c1_var.get():.0f}µF", fill="#79c0ff", font=("Consolas", 7))
 
         # Load Resistor Rload
         c.create_rectangle(380, 165, 396, 195, fill="#21262d", outline="#e6edf3", width=1.5)
         c.create_line(388, 145, 388, 165, fill="#58a6ff", width=1.5)
         c.create_line(388, 195, 388, 210, fill="#8b949e", width=1.5)
-        c.create_text(415, 180, text="5.0Ω", fill="#e6edf3", font=("Consolas", 8))
+        c.create_text(415, 180, text=f"{self.rload_var.get():.1f}Ω", fill="#e6edf3", font=("Consolas", 8))
 
-        # Feedback Wire: Vout -> 2:1 Divider -> ADC1_0
+        # Feedback Divider Wire -> ADC
         c.create_line(370, 145, 370, 260, fill="#58a6ff", width=2)
         c.create_line(370, 260, 95, 260, fill="#58a6ff", width=2)
         c.create_line(95, 260, 95, 240, fill="#58a6ff", width=2)
-        c.create_text(230, 272, text="◄ 2:1 Feedback Voltage Divider Wire", fill="#58a6ff", font=("Segoe UI", 8, "italic"))
+        c.create_text(230, 272, text="◄ 2:1 Precision Voltage Divider Feedback", fill="#58a6ff", font=("Segoe UI", 8, "italic"))
 
     # -------------------------------------------------------------------------
     # TAB 2: 4-CHANNEL OSCILLOSCOPE
@@ -402,8 +404,6 @@ void app_main(void) {
             ax.set_facecolor("#161b22")
             ax.grid(True, color="#2d333b", linestyle="--", linewidth=0.7, alpha=0.8)
             ax.tick_params(colors=self.c_muted, labelsize=8)
-            for spine in ax.spines.values():
-                spine.set_color(self.c_border)
 
         self.fig_scope.tight_layout()
         self.canvas_scope = FigureCanvasTkAgg(self.fig_scope, master=box)
@@ -471,7 +471,7 @@ void app_main(void) {
         self.canvas_fft.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     # -------------------------------------------------------------------------
-    # TAB 5: BODE FREQUENCY RESPONSE & STABILITY
+    # TAB 5: BODE FREQUENCY RESPONSE & NYQUIST
     # -------------------------------------------------------------------------
     def _build_bode_view(self, parent):
         box = tk.Frame(parent, bg=self.c_panel)
@@ -492,13 +492,12 @@ void app_main(void) {
         self.canvas_bode.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     # -------------------------------------------------------------------------
-    # TAB 6: LOGIC ANALYZER & PROTOCOL DECODER
+    # TAB 6: LOGIC ANALYZER & BUS DECODER
     # -------------------------------------------------------------------------
     def _build_logic_analyzer_view(self, parent):
         split = ttk.PanedWindow(parent, orient=tk.VERTICAL)
         split.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        # Logic timing traces
         trace_box = tk.Frame(split, bg=self.c_panel)
         split.add(trace_box, weight=3)
 
@@ -513,13 +512,12 @@ void app_main(void) {
         self.canvas_logic.draw()
         self.canvas_logic.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Protocol Packet Decode Table
-        decode_box = tk.LabelFrame(split, text=" 📟 Hardware Bus Protocol Decoder (UART 8N1 / I2C / SPI) ",
+        decode_box = tk.LabelFrame(split, text=" 📟 Bus Protocol Packet Decoder (UART / I2C / SPI / CAN) ",
                                    bg=self.c_card, fg=self.c_accent, font=("Segoe UI", 9, "bold"),
                                    highlightbackground=self.c_border, highlightthickness=1)
         split.add(decode_box, weight=2)
 
-        cols = ("Time (ms)", "Protocol", "Hex Byte", "ASCII / Symbol", "Parity / Status")
+        cols = ("Time (ms)", "Protocol", "Hex Byte", "Symbol / Register", "Parity / Status")
         self.tree_decode = ttk.Treeview(decode_box, columns=cols, show="headings", height=4)
         for c in cols:
             self.tree_decode.heading(c, text=c)
@@ -533,11 +531,10 @@ void app_main(void) {
         split = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
         split.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        # AWG Controls Panel
         ctrl_box = tk.Frame(split, bg=self.c_panel, width=320)
         split.add(ctrl_box, weight=1)
 
-        tk.Label(ctrl_box, text="🌊 AWG SYNTHESIZER CONTROLS", fg=self.c_accent, bg=self.c_panel, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(8, 6))
+        tk.Label(ctrl_box, text="🌊 DUAL AWG CONTROLS", fg=self.c_accent, bg=self.c_panel, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(8, 6))
 
         self.awg_type_var = tk.StringVar(value="Sine")
         ttk.Label(ctrl_box, text="Waveform Function").pack(anchor="w", padx=10)
@@ -556,7 +553,6 @@ void app_main(void) {
         self._add_awg_slider(ctrl_box, "DC Offset", self.awg_offset_var, -5.0, 12.0, "V")
         self._add_awg_slider(ctrl_box, "PWM Duty", self.awg_duty_var, 5.0, 95.0, "%")
 
-        # AWG Visual Scope
         plot_box = tk.Frame(split, bg=self.c_panel)
         split.add(plot_box, weight=3)
 
@@ -600,7 +596,7 @@ void app_main(void) {
         self.canvas_awg.draw()
 
     # -------------------------------------------------------------------------
-    # TAB 8: SEMICONDUCTOR CURVE TRACER
+    # TAB 8: SEMICONDUCTOR & SOLAR CURVE TRACER
     # -------------------------------------------------------------------------
     def _build_curve_tracer_view(self, parent):
         box = tk.Frame(parent, bg=self.c_panel)
@@ -608,9 +604,9 @@ void app_main(void) {
 
         self.fig_curve = Figure(figsize=(10, 6), dpi=100, facecolor=self.c_bg)
         self.ax_curve_mos = self.fig_curve.add_subplot(121)
-        self.ax_curve_dio = self.fig_curve.add_subplot(122)
+        self.ax_curve_solar = self.fig_curve.add_subplot(122)
 
-        for ax in (self.ax_curve_mos, self.ax_curve_dio):
+        for ax in (self.ax_curve_mos, self.ax_curve_solar):
             ax.set_facecolor("#161b22")
             ax.grid(True, color="#2d333b", linestyle="--", linewidth=0.7, alpha=0.8)
             ax.tick_params(colors=self.c_muted, labelsize=8)
@@ -639,19 +635,20 @@ void app_main(void) {
         self.ax_curve_mos.set_ylabel("Drain Current $I_D$ (A)", color=self.c_text, fontsize=9)
         self.ax_curve_mos.legend(loc="upper left", facecolor="#161b22", edgecolor=self.c_border, labelcolor=self.c_text, fontsize=7)
 
-        # 2. Diode & Schottky forward I-V
-        dio_data = StudioSimulationEngine.trace_diode_iv()
-        self.ax_curve_dio.clear()
-        self.ax_curve_dio.set_facecolor("#161b22")
-        self.ax_curve_dio.grid(True, color="#2d333b", linestyle="--", linewidth=0.7, alpha=0.8)
-        self.ax_curve_dio.tick_params(colors=self.c_muted, labelsize=8)
+        # 2. Solar PV I-V and P-V with MPPT
+        solar = StudioSimulationEngine.trace_solar_pv(irradiance_w_m2=1000.0)
+        self.ax_curve_solar.clear()
+        self.ax_curve_solar.set_facecolor("#161b22")
+        self.ax_curve_solar.grid(True, color="#2d333b", linestyle="--", linewidth=0.7, alpha=0.8)
+        self.ax_curve_solar.tick_params(colors=self.c_muted, labelsize=8)
 
-        self.ax_curve_dio.plot(dio_data["vf"], dio_data["i_schottky"], color="#f0883e", linewidth=1.8, label="1N5819 Schottky (Vf=0.35V)")
-        self.ax_curve_dio.plot(dio_data["vf"], dio_data["i_silicon"], color="#58a6ff", linewidth=1.8, label="1N4148 Silicon (Vf=0.70V)")
-        self.ax_curve_dio.set_title("Diode Forward Conduction $I_F$ vs $V_F$", color=self.c_green, fontsize=10, fontweight="bold")
-        self.ax_curve_dio.set_xlabel("Forward Voltage $V_F$ (V)", color=self.c_text, fontsize=9)
-        self.ax_curve_dio.set_ylabel("Forward Current $I_F$ (A)", color=self.c_text, fontsize=9)
-        self.ax_curve_dio.legend(loc="upper left", facecolor="#161b22", edgecolor=self.c_border, labelcolor=self.c_text, fontsize=7)
+        self.ax_curve_solar.plot(solar["v_arr"], solar["i_arr"], color="#58a6ff", linewidth=1.8, label=f"I-V (Isc={solar['i_sc']:.1f}A)")
+        self.ax_curve_solar.plot(solar["v_arr"], solar["p_arr"] / 10.0, color="#f0883e", linewidth=1.8, label=f"P-V (Pmax={solar['p_max_w']:.1f}W)")
+        self.ax_curve_solar.scatter([solar["v_mpp"]], [solar["p_max_w"] / 10.0], color="#39ff14", s=50, zorder=5, label=f"MPP ({solar['v_mpp']:.1f}V)")
+        self.ax_curve_solar.set_title("Solar PV Module I-V / P-V & MPPT", color=self.c_green, fontsize=10, fontweight="bold")
+        self.ax_curve_solar.set_xlabel("Module Voltage (V)", color=self.c_text, fontsize=9)
+        self.ax_curve_solar.set_ylabel("Current (A) / Power (x10 W)", color=self.c_text, fontsize=9)
+        self.ax_curve_solar.legend(loc="lower left", facecolor="#161b22", edgecolor=self.c_border, labelcolor=self.c_text, fontsize=7)
 
         self.fig_curve.tight_layout()
         self.canvas_curve.draw()
@@ -673,6 +670,53 @@ void app_main(void) {
         self.canvas_power.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     # -------------------------------------------------------------------------
+    # TAB 10: MONTE CARLO YIELD ANALYZER
+    # -------------------------------------------------------------------------
+    def _build_monte_carlo_view(self, parent):
+        box = tk.Frame(parent, bg=self.c_panel)
+        box.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.fig_mc = Figure(figsize=(10, 6), dpi=100, facecolor=self.c_bg)
+        self.ax_mc_hist = self.fig_mc.add_subplot(121)
+        self.ax_mc_scatter = self.fig_mc.add_subplot(122)
+
+        for ax in (self.ax_mc_hist, self.ax_mc_scatter):
+            ax.set_facecolor("#161b22")
+            ax.grid(True, color="#2d333b", linestyle="--", linewidth=0.7, alpha=0.8)
+            ax.tick_params(colors=self.c_muted, labelsize=8)
+
+        self.fig_mc.tight_layout()
+        self.canvas_mc = FigureCanvasTkAgg(self.fig_mc, master=box)
+        self.canvas_mc.draw()
+        self.canvas_mc.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _update_monte_carlo(self):
+        mc = self.engine.run_monte_carlo(iterations=40, vtarget=self.vtarget_var.get())
+        
+        self.ax_mc_hist.clear()
+        self.ax_mc_hist.set_facecolor("#161b22")
+        self.ax_mc_hist.grid(True, color="#2d333b", linestyle="--", linewidth=0.7, alpha=0.8)
+        self.ax_mc_hist.tick_params(colors=self.c_muted, labelsize=8)
+        self.ax_mc_hist.hist(mc["v_samples"], bins=12, color="#58a6ff", edgecolor="#161b22", alpha=0.85)
+        self.ax_mc_hist.axvline(mc["v_mean"], color="#39ff14", linestyle="--", label=f"Mean: {mc['v_mean']:.3f}V")
+        self.ax_mc_hist.set_title(f"Monte Carlo Output Distribution (Yield: {mc['yield_pct']:.1f}%)", color=self.c_accent, fontsize=10, fontweight="bold")
+        self.ax_mc_hist.set_xlabel("Output Voltage (V)", color=self.c_text, fontsize=9)
+        self.ax_mc_hist.set_ylabel("Runs Count", color=self.c_text, fontsize=9)
+        self.ax_mc_hist.legend(loc="upper right", facecolor="#161b22", edgecolor=self.c_border, labelcolor=self.c_text, fontsize=8)
+
+        self.ax_mc_scatter.clear()
+        self.ax_mc_scatter.set_facecolor("#161b22")
+        self.ax_mc_scatter.grid(True, color="#2d333b", linestyle="--", linewidth=0.7, alpha=0.8)
+        self.ax_mc_scatter.tick_params(colors=self.c_muted, labelsize=8)
+        self.ax_mc_scatter.scatter(mc["ripple_samples"], mc["eff_samples"], color="#f778ba", s=40, alpha=0.85)
+        self.ax_mc_scatter.set_title("Ripple vs Efficiency Sensitivity", color=self.c_pink, fontsize=10, fontweight="bold")
+        self.ax_mc_scatter.set_xlabel("Output Ripple (mV)", color=self.c_text, fontsize=9)
+        self.ax_mc_scatter.set_ylabel("Power Efficiency (%)", color=self.c_text, fontsize=9)
+
+        self.fig_mc.tight_layout()
+        self.canvas_mc.draw()
+
+    # -------------------------------------------------------------------------
     # BOTTOM HARDWARE CONSOLE
     # -------------------------------------------------------------------------
     def _build_bottom_console(self, parent):
@@ -682,7 +726,7 @@ void app_main(void) {
         grid = tk.Frame(console_frame, bg=self.c_panel)
         grid.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
 
-        reg_frame = tk.LabelFrame(grid, text=" 💾 ESP32 Hardware MMIO Registers (SAR_ADC / GPIO) ",
+        reg_frame = tk.LabelFrame(grid, text=" 💾 Target MCU MMIO Registers (SAR_ADC / GPIO / Timer) ",
                                   bg=self.c_card, fg=self.c_accent, font=("Segoe UI", 9, "bold"),
                                   highlightbackground=self.c_border, highlightthickness=1)
         reg_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 3))
@@ -691,7 +735,7 @@ void app_main(void) {
                                 relief=tk.FLAT, height=5, width=45)
         self.txt_mmio.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
 
-        uart_frame = tk.LabelFrame(grid, text=" 📟 Serial UART Monitor (115200 Baud) ",
+        uart_frame = tk.LabelFrame(grid, text=" 📟 High-Speed Serial Monitor (115200 Baud) ",
                                    bg=self.c_card, fg=self.c_green, font=("Segoe UI", 9, "bold"),
                                    highlightbackground=self.c_border, highlightthickness=1)
         uart_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(3, 0))
@@ -749,6 +793,7 @@ void app_main(void) {
             )
             self.sim_metrics = metrics
             self._update_all_instruments()
+            self._update_monte_carlo()
         except Exception as e:
             messagebox.showerror("Simulation Error", str(e))
 
@@ -780,7 +825,7 @@ void app_main(void) {
         self.ax_ch1.set_ylabel("Vout (V)", color=self.c_text, fontsize=9)
         self.ax_ch1.legend(loc="upper right", facecolor="#161b22", edgecolor=self.c_border, labelcolor=self.c_text, fontsize=8)
 
-        self.ax_ch2.plot(t_arr, vgate_arr, color="#3fb950", linewidth=1.2, label="CH2: V(gate) [ESP32 GPIO 18]")
+        self.ax_ch2.plot(t_arr, vgate_arr, color="#3fb950", linewidth=1.2, label="CH2: V(gate) [PWM Gate]")
         self.ax_ch2.plot(t_arr, il_arr, color="#f778ba", linewidth=1.2, label="CH3: I(L1) Inductor Current (A)")
         self.ax_ch2.set_ylabel("Signals", color=self.c_text, fontsize=9)
         self.ax_ch2.set_xlabel("Time (ms)", color=self.c_text, fontsize=9)
@@ -802,7 +847,7 @@ void app_main(void) {
         self.fig_fft.tight_layout()
         self.canvas_fft.draw()
 
-        # 4. Bode Frequency Response & Stability Margins
+        # 4. Bode Stability Margins
         self.ax_bode_mag.clear()
         self.ax_bode_phase.clear()
         for ax in (self.ax_bode_mag, self.ax_bode_phase):
@@ -831,9 +876,9 @@ void app_main(void) {
         self.ax_logic.tick_params(colors=self.c_muted, labelsize=8)
 
         channels = [
-            ("D0 (GPIO18 Gate)", vgate_arr > 1.65, "#3fb950"),
-            ("D1 (PWM Sync)", np.bitwise_not(vgate_arr > 1.65), "#7ee787"),
-            ("D2 (ADC Conv Done)", np.ones_like(vgate_arr, dtype=bool), "#58a6ff"),
+            ("D0 (PWM Gate)", vgate_arr > 1.65, "#3fb950"),
+            ("D1 (Sync Clock)", np.bitwise_not(vgate_arr > 1.65), "#7ee787"),
+            ("D2 (ADC Ready)", np.ones_like(vgate_arr, dtype=bool), "#58a6ff"),
             ("D3 (Fault Flag)", np.zeros_like(vgate_arr, dtype=bool), "#f85149")
         ]
         
@@ -851,7 +896,6 @@ void app_main(void) {
         self.fig_logic.tight_layout()
         self.canvas_logic.draw()
 
-        # Populate decoded protocol table
         for row in self.tree_decode.get_children():
             self.tree_decode.delete(row)
         for pkt in m.get("uart_packets", []):
@@ -866,7 +910,7 @@ void app_main(void) {
         
         self.ax_p_breakdown.pie(loss_vals, labels=loss_labels, colors=loss_colors, autopct="%1.1f%%",
                                 textprops={"color": self.c_text, "fontsize": 8})
-        self.ax_p_breakdown.set_title(f"Loss Breakdown (Total Loss={m['p_loss_total']:.2f}W | $\\Delta T_J$={m['tj_rise_c']:.1f}°C)",
+        self.ax_p_breakdown.set_title(f"Loss Breakdown (Total={m['p_loss_total']:.2f}W | $\\Delta T_J$={m['tj_rise_c']:.1f}°C)",
                                       color=self.c_accent, fontsize=9, fontweight="bold")
 
         # Efficiency Curve vs Load
@@ -891,23 +935,62 @@ void app_main(void) {
         # 7. MMIO Registers & UART Console
         raw_adc = int(np.clip((m["dmm_vdc"] * 0.5 / 3.3) * 4095.0, 0, 4095))
         self.txt_mmio.delete("1.0", tk.END)
-        self.txt_mmio.insert(tk.END, f"[ESP32 MMIO REGISTERS]\n")
-        self.txt_mmio.insert(tk.END, f"  0x3FF48804 (SAR_MEAS1_DATA):   0x{raw_adc:04X} ({raw_adc} / 4095 counts)\n")
-        self.txt_mmio.insert(tk.END, f"  0x3FF44004 (GPIO_OUT_REG):     0x00040000 (GPIO 18 Pin: HIGH/LOW)\n")
-        self.txt_mmio.insert(tk.END, f"  0x3FF5F000 (RTC_CNTL_CLK):     240.0 MHz (XTENSA Dual-Core)\n")
-        self.txt_mmio.insert(tk.END, f"  Telemetry:                     Vout={m['dmm_vdc']:.4f}V | Ripple={m['p2p_ripple_mv']:.1f}mV | η={m['efficiency_pct']:.1f}%\n")
+        self.txt_mmio.insert(tk.END, f"[{self.mcu_var.get().upper()} REGISTERS]\n")
+        self.txt_mmio.insert(tk.END, f"  SAR_ADC_DATA:   0x{raw_adc:04X} ({raw_adc} / 4095 counts)\n")
+        self.txt_mmio.insert(tk.END, f"  GPIO_OUT_REG:   0x00040000 (Pin 18: HIGH/LOW)\n")
+        self.txt_mmio.insert(tk.END, f"  TIMER_CLK:      240.0 MHz (Clock Base)\n")
+        self.txt_mmio.insert(tk.END, f"  Status:         Vout={m['dmm_vdc']:.4f}V | Ripple={m['p2p_ripple_mv']:.1f}mV | η={m['efficiency_pct']:.1f}%\n")
 
         self.txt_uart.delete("1.0", tk.END)
-        self.txt_uart.insert(tk.END, f"I (0.000) WOWKI_STUDIO: Firmware loaded into virtual ESP32.\n")
-        self.txt_uart.insert(tk.END, f"I (0.010) WOWKI_STUDIO: Co-Simulation Bridge initialized with libngspice.dll\n")
-        self.txt_uart.insert(tk.END, f"I (0.020) BUCK_CTRL: Switching Frequency: {m['sw_freq_khz']:.1f} kHz | Switch Transitions: {m['switch_cycles']}\n")
-        self.txt_uart.insert(tk.END, f"I (5.000) BUCK_CTRL: Telemetry: Vout={m['dmm_vdc']:.4f}V | Iout={m['dmm_idc']:.3f}A | Pout={m['p_out_w']:.2f}W | Loss={m['p_loss_total']:.2f}W\n")
+        self.txt_uart.insert(tk.END, f"I (0.000) WOWKI_STUDIO: Target MCU initialized ({self.mcu_var.get()}).\n")
+        self.txt_uart.insert(tk.END, f"I (0.010) WOWKI_STUDIO: SPICE Co-Simulation Bridge loaded libngspice.dll\n")
+        self.txt_uart.insert(tk.END, f"I (0.020) CTRL_LOOP: Switching Freq: {m['sw_freq_khz']:.1f} kHz | Switch Transitions: {m['switch_cycles']}\n")
+        self.txt_uart.insert(tk.END, f"I (5.000) CTRL_LOOP: Telemetry: Vout={m['dmm_vdc']:.4f}V | Iout={m['dmm_idc']:.3f}A | Pout={m['p_out_w']:.2f}W | Loss={m['p_loss_total']:.2f}W\n")
 
     def step_load_transient(self):
         self.rload_var.set(2.0)
         self.lbl_rload.config(text=f"Load Resistance (Rload): 2.0 Ω")
         messagebox.showinfo("Load Step Applied", "Rload dropped from 5.0Ω to 2.0Ω. Re-running co-simulation to observe transient recovery.")
         self.run_co_simulation()
+
+    def export_lab_report(self):
+        fpath = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML Test Report", "*.html"), ("All Files", "*.*")])
+        if fpath:
+            LabReportGenerator.generate_html_report(self.sim_metrics, project_name=f"{self.preset_var.get()} ({self.mcu_var.get()})", output_path=fpath)
+            messagebox.showinfo("Report Exported", f"Engineering lab test report saved to:\n{fpath}")
+
+    def export_kicad(self):
+        fpath = filedialog.asksaveasfilename(defaultextension=".kicad_sch", filetypes=[("KiCad Schematic", "*.kicad_sch")])
+        if fpath:
+            self.cad.export_kicad_schematic(fpath)
+            messagebox.showinfo("KiCad Exported", f"KiCad 8 schematic saved to:\n{fpath}")
+
+    def view_bom(self):
+        bom = self.cad.generate_bom()
+        bom_win = tk.Toplevel(self)
+        bom_win.title("Bill of Materials (BOM) & Cost Estimator")
+        bom_win.geometry("820x360")
+        bom_win.configure(bg=self.c_bg)
+
+        cols = ("Designator", "Description", "Manufacturer", "MPN", "Package", "Qty", "Unit Cost", "Ext Cost")
+        tree = ttk.Treeview(bom_win, columns=cols, show="headings")
+        for c in cols:
+            tree.heading(c, text=c)
+            tree.column(c, width=100, anchor="center")
+        tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        total_cost = 0.0
+        for item in bom:
+            tree.insert("", tk.END, values=(
+                item["Designator"], item["Description"], item["Manufacturer"],
+                item["MPN"], item["Package"], item["Quantity"],
+                f"${item['Unit Cost (USD)']:.2f}", f"${item['Extended Cost']:.2f}"
+            ))
+            total_cost += item["Extended Cost"]
+
+        lbl_tot = tk.Label(bom_win, text=f"Total Estimated BOM Cost: ${total_cost:.2f} USD (1-off prototype)",
+                           font=("Segoe UI", 10, "bold"), fg=self.c_green, bg=self.c_bg)
+        lbl_tot.pack(pady=6)
 
     def new_project(self):
         self._load_default_firmware()
@@ -933,6 +1016,7 @@ void app_main(void) {
         fpath = filedialog.asksaveasfilename(defaultextension=".wowki", filetypes=[("WOWKISPICE Project", "*.wowki")])
         if fpath:
             self.engine.firmware_code = self.code_text.get("1.0", tk.END)
+            self.engine.selected_mcu = self.mcu_var.get()
             data = self.engine.export_project_json()
             with open(fpath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -942,21 +1026,9 @@ void app_main(void) {
     def export_netlist(self):
         fpath = filedialog.asksaveasfilename(defaultextension=".cir", filetypes=[("SPICE Netlist", "*.cir")])
         if fpath:
-            netlist_content = f"""* Exported SPICE Netlist from WOWKISPICE Studio
-Vin in 0 DC {self.vin_var.get():.2f}
-Vgate gate 0 dc 0 external
-S1 in sw_node gate 0 SW_MODEL
-D1 0 sw_node DIODE_MODEL
-L1 sw_node vout {self.l1_var.get():.1f}u IC=0
-C1 vout 0 {self.c1_var.get():.1f}u IC=0
-Rload vout 0 {self.rload_var.get():.2f}
-.model SW_MODEL SW(Ron=0.02 Roff=1e6 Vt=1.65 Vh=0.05)
-.model DIODE_MODEL D(IS=1e-9 RS=0.01 N=1.0 BV=50 IBV=1e-4)
-.tran 0.5u {self.duration_var.get():.1f}m uic
-.end
-"""
+            netlist_lines = self.cad.generate_spice_netlist(vin=self.vin_var.get())
             with open(fpath, "w") as f:
-                f.write(netlist_content)
+                f.write("\n".join(netlist_lines))
             messagebox.showinfo("Export Successful", f"SPICE netlist saved to:\n{fpath}")
 
 

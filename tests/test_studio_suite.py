@@ -155,7 +155,7 @@ class TestStudioEngineSuite(unittest.TestCase):
         self.assertEqual(self.engine.firmware_code, "// Custom firmware")
         
         exported = self.engine.export_project_json()
-        self.assertEqual(exported["version"], "2.0")
+        self.assertEqual(exported["version"], "3.0")
         self.assertEqual(len(exported["components"]), 1)
 
 
