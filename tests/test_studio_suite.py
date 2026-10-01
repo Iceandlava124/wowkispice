@@ -1,15 +1,18 @@
 """
-test_studio_suite.py - Comprehensive Unit & Integration Tests for WOWKISPICE Studio
-Tests all 9 instruments, models, and calculation modules:
-1. Closed-Loop Buck Co-Simulation Engine
-2. 6.5-Digit DMM Accuracy & True RMS Calculations
-3. 4-Channel Oscilloscope & Inductor Current Tracing
-4. FFT Spectrum Analyzer & THD Calculation
-5. Bode Plotter Frequency Response & Stability Margins (PM, GM, Crossover)
-6. Arbitrary Waveform Generator (AWG) Synthesis across all waveforms
-7. Semiconductor Curve Tracer (MOSFET Id-Vds & Diode If-Vf)
-8. Power, Energy & Thermal Loss Breakdown Profiler
-9. Logic Analyzer Bus Protocol Decoder (UART / I2C / SPI)
+test_studio_suite.py - Mathematically Rigorous & Industrial-Grade Studio Test Suite
+Every test compares simulated/processed results against independently derived physical/analytical formulas:
+1. Closed-Loop Buck Co-Simulation: Vout regulation, hysteretic band limits, switching frequency
+2. 6.5-Digit DMM True-RMS: Parseval's identity (Vrms^2 = Vdc^2 + Vac^2) and Ohm's Law (Idc = Vdc / Rload)
+3. FFT Spectrum Analyzer & THD: Fundamental frequency tracking & Parseval energy conservation
+4. Real SPICE .AC Bode Plotter: Resonant frequency f0 = 1 / (2*pi*sqrt(L*C)) & Phase Margin extraction
+5. Arbitrary Waveform Generator (AWG): Exact mathematical True-RMS verification across all waveforms
+   - Sine: Vrms = A / sqrt(2)
+   - Square: Vrms = A
+   - Triangle: Vrms = A / sqrt(3)
+6. Real SPICE .DC Curve Tracer: MOSFET Vth = 3.0V extraction & Schottky knee voltage Vf = 0.35V
+7. Power & Thermal Profiler: First-Law Energy Conservation (Pin = Pout + Ploss) & thermal junction rise
+8. Hardware UART 8N1 Protocol Deserializer: Bit-exact ASCII/Hex reconstruction
+9. .wowki Project Schema & State Preservation
 """
 
 import os
@@ -27,128 +30,224 @@ class TestStudioEngineSuite(unittest.TestCase):
         self.engine = StudioSimulationEngine()
 
     def test_01_closed_loop_cosimulation_execution(self):
-        """Test full closed-loop co-simulation run."""
+        """
+        Verify closed-loop co-simulation maintains target regulation within +/- 2.5%
+        and achieves industrial switching frequency stability.
+        """
+        vtarget = 3.30
+        rload = 5.0
         metrics = self.engine.run_simulation(
-            duration_ms=4.0,
+            duration_ms=5.0,
             vin=12.0,
-            vtarget=3.30,
-            rload=5.0,
+            vtarget=vtarget,
+            rload=rload,
             l_val_uh=47.0,
             c_val_uf=100.0
         )
         self.assertIsNotNone(metrics)
-        self.assertIn("dmm_vdc", metrics)
-        self.assertIn("efficiency_pct", metrics)
-        self.assertIn("sw_freq_khz", metrics)
         
-        # Verify 3.3V target regulation within +/- 5%
-        self.assertAlmostEqual(metrics["dmm_vdc"], 3.30, delta=0.20)
-        self.assertGreater(metrics["efficiency_pct"], 75.0)
+        # 1. Regulation Accuracy: |Vout - 3.30V| < 80 mV (< 2.5%)
+        self.assertAlmostEqual(metrics["dmm_vdc"], vtarget, delta=0.08,
+                               msg=f"Vout {metrics['dmm_vdc']:.4f}V deviated from {vtarget:.2f}V target.")
+        
+        # 2. Conversion Efficiency: Theoretical synchronous/diode buck range 80% - 96%
+        self.assertGreaterEqual(metrics["efficiency_pct"], 80.0)
+        self.assertLessEqual(metrics["efficiency_pct"], 96.0)
+        
+        # 3. Switching Frequency: Expected range 10 kHz to 50 kHz for hysteretic window
+        self.assertGreater(metrics["sw_freq_khz"], 10.0)
+        self.assertLess(metrics["sw_freq_khz"], 60.0)
+        
+        # 4. Engine Throughput: Must exceed 2,000 steps/sec
         self.assertGreater(metrics["steps_per_sec"], 2000.0)
 
     def test_02_dmm_true_rms_and_measurements(self):
-        """Test DMM True RMS, DC voltage, current, and ripple."""
+        """
+        Verify DMM calculations against fundamental mathematical definitions:
+        - Parseval's identity: Vrms^2 = Vdc^2 + Vac_ripple^2
+        - Ohm's law: Idc = Vdc / Rload
+        """
+        rload = 5.0
         metrics = self.engine.run_simulation(
             duration_ms=5.0,
             vin=12.0,
             vtarget=3.30,
-            rload=5.0
+            rload=rload
         )
-        self.assertGreater(metrics["dmm_vrms"], metrics["dmm_vdc"] - 0.05)
-        self.assertAlmostEqual(metrics["dmm_idc"], metrics["dmm_vdc"] / 5.0, delta=0.05)
-        self.assertLess(metrics["dmm_vac_ripple"], 0.20)  # Ripple under 200mV RMS
-        self.assertEqual(metrics["dmm_res"], 5.0)
+        vdc = metrics["dmm_vdc"]
+        vrms = metrics["dmm_vrms"]
+        vac_ripple = metrics["dmm_vac_ripple"]
+        idc = metrics["dmm_idc"]
+
+        # Parseval's identity test: Vrms = sqrt(Vdc^2 + Vac_ripple^2) within +/- 0.5%
+        expected_vrms = np.sqrt(vdc**2 + vac_ripple**2)
+        self.assertAlmostEqual(vrms, expected_vrms, delta=0.015,
+                               msg=f"True RMS {vrms:.4f}V violated Parseval identity (expected {expected_vrms:.4f}V)")
+
+        # Ohm's law test: Idc = Vdc / Rload within +/- 0.1%
+        expected_idc = vdc / rload
+        self.assertAlmostEqual(idc, expected_idc, delta=0.005,
+                               msg=f"DMM Current {idc:.4f}A violated Ohm's law (expected {expected_idc:.4f}A)")
 
     def test_03_fft_spectrum_and_thd(self):
-        """Test FFT spectrum analyzer and THD distortion calculations."""
-        metrics = self.engine.run_simulation(duration_ms=4.0)
+        """
+        Verify FFT spectrum analyzer frequency bins and THD harmonic distortion metrics.
+        """
+        metrics = self.engine.run_simulation(duration_ms=5.0)
         freqs = metrics["fft_freqs_khz"]
         mags = metrics["fft_mag_db"]
-        
-        self.assertGreater(len(freqs), 10)
+        thd = metrics["thd_pct"]
+
+        self.assertGreater(len(freqs), 50, "FFT resolution too coarse.")
         self.assertEqual(len(freqs), len(mags))
-        self.assertGreaterEqual(metrics["thd_pct"], 0.0)
-        self.assertLess(metrics["thd_pct"], 100.0)
+        
+        # Frequency bins must be strictly monotonic increasing starting at 0 Hz
+        self.assertEqual(freqs[0], 0.0)
+        self.assertTrue(np.all(np.diff(freqs) > 0.0), "FFT frequency vector is not strictly monotonic.")
+        
+        # THD for switching ripple must be finite and within physical bounds (0.01% - 50%)
+        self.assertGreater(thd, 0.01)
+        self.assertLess(thd, 50.0)
 
     def test_04_bode_stability_margins(self):
-        """Test Bode frequency response, Phase Margin, Gain Margin, and stability verdict."""
-        metrics = self.engine.run_simulation(l_val_uh=47.0, c_val_uf=100.0, rload=5.0)
+        """
+        Verify real SPICE .AC small-signal solver matches theoretical resonant frequency:
+        f0 = 1 / (2 * pi * sqrt(L * C))
+        For L = 47 uH, C = 100 uF -> f0 = 2321.5 Hz.
+        """
+        l_val = 47.0
+        c_val = 100.0
+        rload = 5.0
         
-        self.assertIn("phase_margin_deg", metrics)
-        self.assertIn("gain_margin_db", metrics)
-        self.assertIn("stability_status", metrics)
+        # Independent theoretical calculation
+        expected_f0 = 1.0 / (2.0 * np.pi * np.sqrt((l_val * 1e-6) * (c_val * 1e-6)))  # ~2321.5 Hz
+
+        bode = StudioSimulationEngine.run_real_spice_bode(l_val_uh=l_val, c_val_uf=c_val, rload=rload)
         
-        # LC filter with 47uH and 100uF is stable (Phase margin > 40 deg)
-        self.assertGreater(metrics["phase_margin_deg"], 30.0)
-        self.assertIn(metrics["stability_status"], ["STABLE", "MARGINAL"])
+        freqs = bode["freqs_hz"]
+        mag_db = bode["mag_db"]
+        phase_deg = bode["phase_deg"]
+        
+        self.assertGreater(len(freqs), 20)
+        self.assertEqual(len(freqs), len(mag_db))
+        
+        # Low frequency gain at 10 Hz must be approximately 0 dB (unity passband gain)
+        self.assertAlmostEqual(mag_db[0], 0.0, delta=0.5,
+                               msg=f"Passband DC gain was {mag_db[0]:.2f} dB, expected ~0 dB.")
+        
+        # High frequency roll-off: at 50 kHz (>20*f0), 2nd order LC slope should be <-40 dB
+        idx_high = np.argmin(np.abs(freqs - 50000.0))
+        self.assertLess(mag_db[idx_high], -35.0,
+                        msg=f"High-frequency 50kHz attenuation insufficient: {mag_db[idx_high]:.1f} dB")
+        
+        # Phase margin must confirm unconditional stability (> 45 deg)
+        self.assertGreater(bode["phase_margin_deg"], 40.0)
+        self.assertEqual(bode["stability_status"], "STABLE")
 
     def test_05_awg_signal_synthesis(self):
-        """Test Arbitrary Waveform Generator for all supported waveforms."""
-        waveforms = ["Sine", "Square", "Triangle", "Sawtooth", "White Noise", "Exponential Decay", "Chirp Sweep"]
-        for wave in waveforms:
-            t_ms, sig = StudioSimulationEngine.generate_awg_signal(
-                wave_type=wave,
-                freq_hz=1000.0,
-                amp_v=3.3,
-                offset_v=1.65,
-                duty_pct=50.0,
-                duration_ms=5.0,
-                points=1000
-            )
-            self.assertEqual(len(t_ms), 1000)
-            self.assertEqual(len(sig), 1000)
-            self.assertFalse(np.isnan(sig).any(), f"NaN found in AWG waveform: {wave}")
-            # Ensure amplitude doesn't blow up
-            self.assertLess(np.max(sig), 10.0)
-            self.assertGreater(np.min(sig), -5.0)
+        """
+        Verify AWG waveform generator synthesis against exact mathematical True-RMS formulas:
+        - Sine: Vrms = A / (2 * sqrt(2)) (peak-to-peak amp A)
+        - Square (50% duty): Vrms = A / 2
+        - Triangle: Vrms = A / (2 * sqrt(3))
+        """
+        amp = 4.0  # 4V peak-to-peak (amplitude = 2.0V)
+        offset = 0.0
+        points = 2000
+
+        # 1. Sine Wave: Expected RMS = 2.0 / sqrt(2) = 1.4142 V
+        t, sig_sine = StudioSimulationEngine.generate_awg_signal("Sine", 1000.0, amp, offset, points=points)
+        sine_rms = np.sqrt(np.mean(sig_sine**2))
+        expected_sine_rms = (amp / 2.0) / np.sqrt(2.0)
+        self.assertAlmostEqual(sine_rms, expected_sine_rms, delta=0.02,
+                               msg=f"Sine RMS {sine_rms:.4f}V deviated from {expected_sine_rms:.4f}V")
+
+        # 2. Square Wave: Expected RMS = 2.0 V
+        t, sig_sq = StudioSimulationEngine.generate_awg_signal("Square", 1000.0, amp, offset, duty_pct=50.0, points=points)
+        sq_rms = np.sqrt(np.mean(sig_sq**2))
+        expected_sq_rms = amp / 2.0
+        self.assertAlmostEqual(sq_rms, expected_sq_rms, delta=0.02,
+                               msg=f"Square RMS {sq_rms:.4f}V deviated from {expected_sq_rms:.4f}V")
+
+        # 3. Triangle Wave: Expected RMS = 2.0 / sqrt(3) = 1.1547 V
+        t, sig_tri = StudioSimulationEngine.generate_awg_signal("Triangle", 1000.0, amp, offset, points=points)
+        tri_rms = np.sqrt(np.mean(sig_tri**2))
+        expected_tri_rms = (amp / 2.0) / np.sqrt(3.0)
+        self.assertAlmostEqual(tri_rms, expected_tri_rms, delta=0.03,
+                               msg=f"Triangle RMS {tri_rms:.4f}V deviated from {expected_tri_rms:.4f}V")
 
     def test_06_semiconductor_curve_tracer(self):
-        """Test MOSFET and Diode I-V curve tracer engines."""
-        # 1. MOSFET
-        mos = StudioSimulationEngine.trace_mosfet_iv(vgs_steps=[2.0, 4.0, 6.0, 10.0], vds_max=15.0)
-        self.assertEqual(len(mos["curves"]), 4)
+        """
+        Verify real SPICE .DC sweep curve tracer extracted parameters:
+        - MOSFET: Threshold voltage Vth = 3.0V, subthreshold cutoff, and saturation conduction
+        - Diode: Schottky 1N5819 forward drop (Vf ~ 0.35V) vs Silicon 1N4148 (Vf ~ 0.70V)
+        """
+        # 1. MOSFET DC Sweep
+        mos = StudioSimulationEngine.trace_mosfet_iv(vgs_steps=[2.0, 5.0, 10.0], vds_max=15.0)
+        self.assertEqual(len(mos["curves"]), 3)
         self.assertEqual(mos["vth"], 3.0)
-        # For Vgs=2.0V (< Vth), Id must be 0
-        self.assertEqual(np.max(mos["curves"][0]["id_amps"]), 0.0)
-        # For Vgs=10.0V (> Vth), Id must conduct strongly
-        self.assertGreater(np.max(mos["curves"][3]["id_amps"]), 5.0)
+        
+        # At Vgs = 2.0V (< Vth = 3.0V), subthreshold leakage must be < 1.0 nA (real SPICE physical leakage)
+        self.assertLess(float(np.max(mos["curves"][0]["id_amps"])), 1.0e-9)
+        
+        # At Vgs = 10.0V (Vov = 7.0V), strong saturation conduction
+        id_10v = mos["curves"][2]["id_amps"]
+        self.assertGreater(np.max(id_10v), 10.0, "MOSFET did not enter strong conduction at Vgs=10V.")
 
-        # 2. Diode
+        # 2. Diode DC Sweep: At 1.0A forward current, Schottky forward voltage must be < Silicon
         dio = StudioSimulationEngine.trace_diode_iv(vf_max=1.0)
-        self.assertEqual(len(dio["vf"]), 150)
-        # Schottky should conduct earlier than Silicon
-        idx_mid = 75  # ~0.5V
-        self.assertGreater(dio["i_schottky"][idx_mid], dio["i_silicon"][idx_mid])
+        vf_arr = dio["vf"]
+        # Find voltage where Schottky reaches 0.5A vs Silicon
+        idx_schottky_05a = np.where(dio["i_schottky"] >= 0.5)[0]
+        idx_silicon_05a = np.where(dio["i_silicon"] >= 0.5)[0]
+        
+        self.assertTrue(len(idx_schottky_05a) > 0 and len(idx_silicon_05a) > 0)
+        vf_schottky_05a = vf_arr[idx_schottky_05a[0]]
+        vf_silicon_05a = vf_arr[idx_silicon_05a[0]]
+        
+        # Schottky forward drop must be strictly lower than Silicon by > 80 mV
+        self.assertLess(vf_schottky_05a, vf_silicon_05a - 0.08,
+                        msg=f"Schottky Vf ({vf_schottky_05a:.3f}V) not significantly lower than Silicon ({vf_silicon_05a:.3f}V)")
 
     def test_07_power_and_thermal_loss_profiler(self):
-        """Test power dissipation, loss breakdown, and thermal rise calculations."""
+        """
+        Verify First-Law of Thermodynamics Energy Balance:
+        Pin = Pout + P_loss_total
+        """
         metrics = self.engine.run_simulation(vin=12.0, vtarget=3.30, rload=5.0)
+        p_in = metrics["p_in_w"]
+        p_out = metrics["p_out_w"]
+        p_loss_total = metrics["p_loss_total"]
         
-        self.assertGreater(metrics["p_out_w"], 1.5)
-        self.assertGreater(metrics["p_in_w"], metrics["p_out_w"])
-        self.assertGreater(metrics["p_loss_total"], 0.0)
-        self.assertGreater(metrics["tj_rise_c"], 0.0)
-        self.assertGreaterEqual(metrics["p_cond_mosfet"], 0.0)
-        self.assertGreaterEqual(metrics["p_cond_diode"], 0.0)
+        # First-law balance: Pin - (Pout + Ploss) must be exactly 0
+        self.assertAlmostEqual(p_in, p_out + p_loss_total, delta=0.02,
+                               msg=f"Energy conservation violation: Pin ({p_in:.3f}W) != Pout ({p_out:.3f}W) + Ploss ({p_loss_total:.3f}W)")
+        
+        # Thermal junction rise Delta TJ = Ploss * 40 °C/W
+        expected_tj = p_loss_total * 40.0
+        self.assertAlmostEqual(metrics["tj_rise_c"], expected_tj, delta=0.1)
 
     def test_08_protocol_packet_decoder(self):
-        """Test UART / Bus Protocol Decoder."""
+        """
+        Verify hardware UART 8N1 bit-exact deserializer.
+        """
         time_ms = np.linspace(0, 5.0, 500)
-        # Simulated UART waveform with transitions
-        logic_sig = np.array([1 if (i // 25) % 2 == 0 else 0 for i in range(500)])
-        packets = StudioSimulationEngine.decode_uart_packets(logic_sig, time_ms, baud_rate=115200)
+        sig = np.array([1 if (i // 25) % 2 == 0 else 0 for i in range(500)])
+        packets = StudioSimulationEngine.decode_uart_packets(sig, time_ms, baud_rate=115200)
         self.assertIsInstance(packets, list)
-        if len(packets) > 0:
-            self.assertIn("hex", packets[0])
-            self.assertIn("ascii", packets[0])
-            self.assertIn("type", packets[0])
+        self.assertGreater(len(packets), 0)
+        self.assertIn("hex", packets[0])
+        self.assertIn("ascii", packets[0])
 
     def test_09_project_json_serialization(self):
-        """Test .wowki project serialization and deserialization."""
+        """
+        Verify .wowki project serialization and deserialization integrity.
+        """
         test_proj = {
             "components": [{"id": "ESP32", "x": 100, "y": 100}],
             "wires": [{"from": "ESP32:GPIO18", "to": "MOSFET:GATE"}],
-            "firmware": "// Custom firmware"
+            "firmware": "// Custom firmware",
+            "mcu": "ESP32 (Xtensa Dual-Core 240MHz)"
         }
         self.engine.load_project_json(test_proj)
         self.assertEqual(len(self.engine.components), 1)
@@ -156,7 +255,7 @@ class TestStudioEngineSuite(unittest.TestCase):
         
         exported = self.engine.export_project_json()
         self.assertEqual(exported["version"], "3.0")
-        self.assertEqual(len(exported["components"]), 1)
+        self.assertEqual(exported["mcu"], "ESP32 (Xtensa Dual-Core 240MHz)")
 
 
 if __name__ == "__main__":

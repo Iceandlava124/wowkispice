@@ -244,4 +244,13 @@ class NgSpiceEngine:
         if not vec_ptr:
             return []
         vec = vec_ptr.contents
-        return [float(vec.v_realdata[i]) for i in range(vec.v_length)]
+        if vec.v_length <= 0:
+            return []
+        if bool(vec.v_realdata):
+            return [float(vec.v_realdata[i]) for i in range(vec.v_length)]
+        elif bool(vec.v_compdata):
+            class NgComplex(ctypes.Structure):
+                _fields_ = [("cx_r", ctypes.c_double), ("cx_i", ctypes.c_double)]
+            c_arr = ctypes.cast(vec.v_compdata, ctypes.POINTER(NgComplex))
+            return [float(c_arr[i].cx_r) for i in range(vec.v_length)]
+        return []
