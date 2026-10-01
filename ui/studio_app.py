@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bridge.studio_engine import StudioSimulationEngine
 from bridge.cad_engine import SchematicNetlistEngine, SchematicComponent
 from bridge.report_generator import LabReportGenerator
+from bridge.industrial_verification import IndustrialVerificationEngine
 
 
 class WOWKISpiceStudio(tk.Tk):
@@ -244,6 +245,7 @@ class WOWKISpiceStudio(tk.Tk):
         tab_curve = ttk.Frame(self.tab_control, style="Panel.TFrame")
         tab_power = ttk.Frame(self.tab_control, style="Panel.TFrame")
         tab_mc = ttk.Frame(self.tab_control, style="Panel.TFrame")
+        tab_fmea = ttk.Frame(self.tab_control, style="Panel.TFrame")
 
         self.tab_control.add(tab_breadboard, text=" 📐 Breadboard & IDE ")
         self.tab_control.add(tab_scope, text=" 📈 4-CH Scope ")
@@ -255,6 +257,7 @@ class WOWKISpiceStudio(tk.Tk):
         self.tab_control.add(tab_curve, text=" 🔬 Curve Tracer ")
         self.tab_control.add(tab_power, text=" 🔋 Power & Thermal ")
         self.tab_control.add(tab_mc, text=" 🎲 Monte Carlo Yield ")
+        self.tab_control.add(tab_fmea, text=" 🛡️ Industrial Qual (DO-254) ")
 
         self._build_breadboard_and_ide(tab_breadboard)
         self._build_oscilloscope_view(tab_scope)
@@ -266,6 +269,7 @@ class WOWKISpiceStudio(tk.Tk):
         self._build_curve_tracer_view(tab_curve)
         self._build_power_profiler_view(tab_power)
         self._build_monte_carlo_view(tab_mc)
+        self._build_industrial_verification_view(tab_fmea)
 
     # -------------------------------------------------------------------------
     # TAB 1: BREADBOARD & FIRMWARE IDE
@@ -715,6 +719,77 @@ void digital_controller_step(uint16_t raw_adc, bool *gate_out) {
 
         self.fig_mc.tight_layout()
         self.canvas_mc.draw()
+
+    # -------------------------------------------------------------------------
+    # TAB 11: INDUSTRIAL VERIFICATION & FMEA SAFETY (DO-254 / ISO 26262)
+    # -------------------------------------------------------------------------
+    def _build_industrial_verification_view(self, parent):
+        split = ttk.PanedWindow(parent, orient=tk.VERTICAL)
+        split.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        top_bar = tk.Frame(split, bg=self.c_card, height=40)
+        split.add(top_bar, weight=1)
+
+        tk.Label(top_bar, text="🛡️ INDUSTRIAL QUALIFICATION & SAFETY MATRIX (DO-254 / ISO 26262)",
+                 fg=self.c_accent, bg=self.c_card, font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=10, pady=6)
+        
+        ttk.Button(top_bar, text="▶ Run Industrial Audit Battery", style="Run.TButton",
+                   command=self._run_industrial_battery).pack(side=tk.RIGHT, padx=8, pady=4)
+        ttk.Button(top_bar, text="📑 Export DO-254 Report", style="Tool.TButton",
+                   command=self._export_industrial_report).pack(side=tk.RIGHT, padx=4, pady=4)
+
+        # FMEA Table
+        fmea_box = tk.LabelFrame(split, text=" Hardware Fault Injection & Mitigation (FMEA) ",
+                                 bg=self.c_panel, fg=self.c_green, font=("Segoe UI", 9, "bold"))
+        split.add(fmea_box, weight=4)
+
+        cols = ("Fault ID", "Failure Mechanism", "Injection Vector", "Observed Mitigation", "Safety Verdict")
+        self.tree_fmea = ttk.Treeview(fmea_box, columns=cols, show="headings", height=5)
+        for c in cols:
+            self.tree_fmea.heading(c, text=c)
+            self.tree_fmea.column(c, width=130, anchor="center")
+        self.tree_fmea.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        # Temperature Corners Table
+        temp_box = tk.LabelFrame(split, text=" Extreme Temperature Corners Sweep (-40°C to +125°C Automotive) ",
+                                 bg=self.c_panel, fg=self.c_yellow, font=("Segoe UI", 9, "bold"))
+        split.add(temp_box, weight=4)
+
+        temp_cols = ("Ambient (°C)", "Vout Regulated (V)", "Efficiency η (%)", "Ripple (mV)", "Junction Temp TJ (°C)", "Compliance Status")
+        self.tree_temp = ttk.Treeview(temp_box, columns=temp_cols, show="headings", height=5)
+        for c in temp_cols:
+            self.tree_temp.heading(c, text=c)
+            self.tree_temp.column(c, width=110, anchor="center")
+        self.tree_temp.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        # Populate with baseline
+        self.verifier = IndustrialVerificationEngine()
+        self._run_industrial_battery()
+
+    def _run_industrial_battery(self):
+        faults = self.verifier.run_fault_injection_battery()
+        for r in self.tree_fmea.get_children():
+            self.tree_fmea.delete(r)
+        for f in faults:
+            self.tree_fmea.insert("", tk.END, values=(
+                f["fault_id"], f["fault_name"], f["injection_type"], f["simulated_outcome"], f["asul_rating"]
+            ))
+
+        sweep = self.verifier.run_temperature_corners_sweep()
+        for r in self.tree_temp.get_children():
+            self.tree_temp.delete(r)
+        for c in sweep["corners"]:
+            self.tree_temp.insert("", tk.END, values=(
+                f"{c['temp_c']:+.1f} °C", f"{c['vout_v']:.4f} V", f"{c['efficiency_pct']:.1f} %",
+                f"{c['ripple_mv']:.1f} mV", f"{c['tj_junction_c']:.1f} °C", c["status"]
+            ))
+
+    def _export_industrial_report(self):
+        fpath = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML Qualification Report", "*.html"), ("All Files", "*.*")])
+        if fpath:
+            self.verifier.generate_qualification_report(output_path=fpath)
+            messagebox.showinfo("Report Exported", f"DO-254 / ISO 26262 Industrial Qualification Report saved to:\n{fpath}")
+
 
     # -------------------------------------------------------------------------
     # BOTTOM HARDWARE CONSOLE
