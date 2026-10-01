@@ -55,3 +55,25 @@ E_GAIN N1 0 INP INN 100000
 R_OUT N1 OUT 50.0
 C_COMP N1 0 30p
 .ends OPAMP_LM358
+
+* 6. NPN Small-Signal BJT Transistor (2N2222 Equivalent)
+* Collector Base Emitter
+.subckt BJT_2N2222 C B E
+Q1 C B E NPN_MODEL
+.model NPN_MODEL NPN(IS=1.4e-14 BF=200 VAF=100 IKF=0.3 ISE=1.4e-14 NE=1.5 BR=3 VAR=20 RB=10 RC=1 RE=0.1 CJE=25p CJC=8p TF=400p)
+.ends BJT_2N2222
+
+* 7. 5.1V Zener Diode (1N751 Equivalent)
+* Anode Cathode
+.subckt ZENER_DIODE_5V1 A K
+D1 A K ZENER_MODEL
+.model ZENER_MODEL D(IS=1e-11 RS=0.5 N=1.0 BV=5.1 IBV=5m)
+.ends ZENER_DIODE_5V1
+
+* 8. High-Efficiency GaN / LED Model (Opto-Emitter)
+* Anode Cathode
+.subckt LED_EMITTER A K
+D1 A K LED_MODEL
+.model LED_MODEL D(IS=1e-20 RS=2.0 N=1.8 BV=5.0)
+.ends LED_EMITTER
+

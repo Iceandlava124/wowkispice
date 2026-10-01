@@ -1,12 +1,11 @@
 """
 test_parameter_sweeps.py - Automated Line & Load Regulation Matrix Tests
-Verifies that the co-simulation closed-loop controller maintains target output
-voltage across varying input voltages (Line Regulation) and load resistances (Load Regulation).
 """
 
 import os
 import sys
 import ctypes
+import unittest
 import numpy as np
 
 # Ensure project root is in path
@@ -80,7 +79,6 @@ def run_single_sweep(vin: float, rload: float, target_v: float = 3.30, sim_ms: f
     t_arr = np.array(history_t)
     v_arr = np.array(history_v)
     
-    # Calculate steady-state average (last 50%)
     steady_mask = t_arr >= (sim_ms * 0.5)
     steady_v = v_arr[steady_mask]
     avg_v = float(np.mean(steady_v)) if len(steady_v) > 0 else 0.0
@@ -89,37 +87,21 @@ def run_single_sweep(vin: float, rload: float, target_v: float = 3.30, sim_ms: f
     return {"avg_vout": avg_v, "ripple_mv": ripple}
 
 
-def test_line_regulation():
-    """Test Buck Converter across input voltages 8V to 24V."""
-    print("\n=======================================================")
-    print(" [TEST] Line Regulation: Vin = 8V, 12V, 16V, 24V       ")
-    print("=======================================================")
-    
-    vin_list = [8.0, 12.0, 16.0, 24.0]
-    for vin in vin_list:
-        res = run_single_sweep(vin=vin, rload=5.0, target_v=3.30)
-        avg = res["avg_vout"]
-        ripple = res["ripple_mv"]
-        print(f"  Vin = {vin:4.1f}V | Regulated Vout: {avg:.4f}V | Ripple: {ripple:5.1f}mV -> [PASS]")
-        assert 3.20 <= avg <= 3.50, f"Line regulation failed at Vin={vin}V (got {avg:.4f}V)"
+class TestParameterSweeps(unittest.TestCase):
+    def test_line_regulation(self):
+        vin_list = [8.0, 12.0, 16.0, 24.0]
+        for vin in vin_list:
+            res = run_single_sweep(vin=vin, rload=5.0, target_v=3.30)
+            avg = res["avg_vout"]
+            self.assertTrue(3.20 <= avg <= 3.50, f"Line regulation failed at Vin={vin}V (got {avg:.4f}V)")
 
-
-def test_load_regulation():
-    """Test Buck Converter across load resistances 2 Ohm to 20 Ohm."""
-    print("\n=======================================================")
-    print(" [TEST] Load Regulation: Rload = 2, 5, 10, 20 Ohm       ")
-    print("=======================================================")
-    
-    rload_list = [2.0, 5.0, 10.0, 20.0]
-    for rload in rload_list:
-        res = run_single_sweep(vin=12.0, rload=rload, target_v=3.30)
-        avg = res["avg_vout"]
-        ripple = res["ripple_mv"]
-        print(f"  Rload = {rload:4.1f} Ohm | Regulated Vout: {avg:.4f}V | Ripple: {ripple:5.1f}mV -> [PASS]")
-        assert 3.20 <= avg <= 3.45, f"Load regulation failed at Rload={rload} Ohm (got {avg:.4f}V)"
+    def test_load_regulation(self):
+        rload_list = [2.0, 5.0, 10.0, 20.0]
+        for rload in rload_list:
+            res = run_single_sweep(vin=12.0, rload=rload, target_v=3.30)
+            avg = res["avg_vout"]
+            self.assertTrue(3.20 <= avg <= 3.45, f"Load regulation failed at Rload={rload} Ohm (got {avg:.4f}V)")
 
 
 if __name__ == "__main__":
-    test_line_regulation()
-    test_load_regulation()
-    print("\n>>> ALL LINE & LOAD REGULATION MATRIX TESTS PASSED! <<<\n")
+    unittest.main()
