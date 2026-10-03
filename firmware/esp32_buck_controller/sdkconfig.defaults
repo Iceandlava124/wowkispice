@@ -1,0 +1,13 @@
+# Match the flash size PlatformIO's esp32dev board declares.
+#
+# platforms/espressif32/boards/esp32dev.json:
+#     "upload": { "flash_size": "4MB", "maximum_size": 4194304 }
+#
+# ESP-IDF's own default for the ESP32 target is 2MB, which produced:
+#     Warning! Flash memory size mismatch detected. Expected 4MB, found 2MB!
+# The board is the authority here, so pin 4MB explicitly.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# 40MHz SPI flash clock, matching the board's f_flash = 40000000L.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y

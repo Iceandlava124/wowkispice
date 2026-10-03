@@ -40,5 +40,10 @@ tools/*.tar.gz
 *.tmp
 output/
 
+# PlatformIO's generated sdkconfig. It *overrides* sdkconfig.defaults, so
+# committing it silently defeats the checked-in defaults on a fresh clone.
+firmware/*/sdkconfig.*
+!firmware/*/sdkconfig.defaults
+
 # Editor / agent workspace metadata (not project content)
 .freebuff/

@@ -14,11 +14,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "driver/adc.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 
 #define GATE_PIN            GPIO_NUM_18
-#define ADC_CHANNEL         ADC1_CHANNEL_0  // GPIO 36
+#define ADC_CHANNEL         ADC_CHANNEL_0  // GPIO 36 (ADC1 channel 0)
 
 // 12-bit ADC (0..4095 counts for 0..3.3V reference)
 // Target V_out = 3.30V -> V_feedback = 1.65V
@@ -44,9 +44,21 @@ void app_main(void)
     gpio_config(&io_conf);
     gpio_set_level(GATE_PIN, 0);
 
-    // 2. Configure ADC1
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC_CHANNEL, ADC_ATTEN_DB_11); // 0..3.3V full scale
+    // 2. Configure ADC1 (oneshot driver)
+    // ESP-IDF >= 5.2 folded unit init, channel config, and bitwidth into the
+    // oneshot driver. ADC_ATTEN_DB_11 was renamed ADC_ATTEN_DB_12; it is the
+    // same ~12 dB input attenuation and still the widest range (~0-3.1V).
+    adc_oneshot_unit_handle_t adc_unit;
+    adc_oneshot_unit_init_cfg_t unit_cfg = {
+        .unit_id = ADC_UNIT_1,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &adc_unit));
+
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .atten    = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_unit, ADC_CHANNEL, &chan_cfg));
 
     ESP_LOGI(TAG, "Entering high-speed hysteretic control loop...");
 
@@ -55,7 +67,11 @@ void app_main(void)
 
     while (1) {
         // Sample feedback voltage from simulated analog circuit
-        int raw_adc = adc1_get_raw(ADC_CHANNEL);
+        int raw_adc = 0;
+        if (adc_oneshot_read(adc_unit, ADC_CHANNEL, &raw_adc) != ESP_OK) {
+            // Hold the last decision rather than acting on a garbage sample.
+            continue;
+        }
 
         // Hysteretic switching logic
         if (raw_adc < ADC_LOW_THRESHOLD) {
