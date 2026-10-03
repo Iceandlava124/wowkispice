@@ -26,8 +26,9 @@ def resolve_ngspice_library(explicit: Optional[str] = None
     Resolution order:
       1. `explicit`, if the caller passed one. An explicit request is honoured
          strictly - we never silently substitute a different library for it.
-      2. The bundled Windows ngspice.dll under tools/ngspice_dll/.
-      3. Whatever ctypes.util.find_library("ngspice") reports, which covers a
+      2. The WOSP_NGSPICE_LIB environment variable, if set.
+      3. The bundled Windows ngspice.dll under tools/ngspice_dll/.
+      4. Whatever ctypes.util.find_library("ngspice") reports, which covers a
          system-installed ngspice on Linux/macOS (libngspice.so / .dylib).
 
     Returns (path_or_None, attempted_paths). Path is None only when every
@@ -38,6 +39,12 @@ def resolve_ngspice_library(explicit: Optional[str] = None
     if explicit is not None:
         tried.append(explicit)
         return (explicit if os.path.exists(explicit) else None), tried
+
+    env = os.environ.get("WOSP_NGSPICE_LIB")
+    if env:
+        tried.append(f"{env} (from $WOSP_NGSPICE_LIB)")
+        if os.path.exists(env):
+            return env, tried
 
     bundled = _bundled_dll_path()
     tried.append(bundled)
@@ -63,8 +70,9 @@ _MISSING_DLL_HELP = (
     "  * Linux/macOS: install ngspice system-wide, e.g.\n"
     "      sudo apt-get install -y ngspice libngspice0\n"
     "      brew install ngspice\n"
-    "  * Any platform: pass an explicit path,\n"
+    "  * Any platform: point at an existing shared library, either\n"
     "      NgSpiceEngine(dll_path='/full/path/to/libngspice.so')\n"
+    "      export WOSP_NGSPICE_LIB=/full/path/to/libngspice.so\n"
 )
 
 # Struct definitions from sharedspice.h

@@ -1,7 +1,13 @@
 # PROJECT_WOWKISPICE ⚡
 
 > **High-Performance Mixed-Signal Hardware-Software Co-Simulator**  
-> Run real compiled microcontroller firmware (ESP32 via Renode/QEMU) in lockstep with true analog circuit physics (`libngspice`) on your desktop or CI/CD pipelines.
+> Closed-loop co-simulation of a real analog circuit (`libngspice`) against a
+> control law imported from real microcontroller firmware source.
+>
+> **Read this first:** the compiled firmware binary is *parsed, not executed*.
+> What runs is the decision logic and its constants, lifted from the firmware's
+> own `#define`s — see [the limitation, stated plainly](#firmware-execution-status).
+> The Renode path exists as a script but has never been run.
 
 ---
 
@@ -32,17 +38,55 @@
 
 ## 🚀 Quickstart Guide
 
-### 1. Environment Setup (Windows / Linux)
-```powershell
-# Create Python virtual environment
-python -m venv .venv
-.\.venv\Scripts\activate
+### 1. Setup — from a fresh clone
 
-# Install dependencies
-pip install -r requirements.txt
+PROJECT_WOWKISPICE needs two things that are not in the repository: a Python
+environment, and the `libngspice` shared library (the analytic solver is the
+whole point — nothing here is faked).
+
+**Windows**
+```powershell
+git clone <this-repo>
+cd PROJECT_WOWKISPICE
+powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
-### 2. Launch the Schematic Editor (flagship PyQt5 app)
+**Linux / macOS**
+```bash
+git clone <this-repo>
+cd PROJECT_WOWKISPICE
+./setup.sh
+```
+
+The scripts are idempotent — re-run them any time.
+
+| Platform | What setup does |
+|---|---|
+| Windows | Creates `.venv`, installs `requirements.txt`, downloads the official `ngspice-47_dll_64.7z` (4.4 MB) from SourceForge, verifies its SHA-256, extracts it to `tools/ngspice_dll/`, and confirms the loader can actually bind it. |
+| Linux / macOS | Creates `.venv`, installs `requirements.txt`, then requires a **system** ngspice, which ngspice does not publish prebuilt binaries for. `setup.sh` prints the exact `apt` / `dnf` / `pacman` / `brew` command. |
+
+#### Why isn't ngspice committed?
+It is 12.9 MB of vendor binary, and `tools/ngspice_dll/` is gitignored. The
+setup scripts fetch it instead, so the repository stays small and the
+dependency is explicit.
+
+#### If you already have libngspice
+```bash
+export WOSP_NGSPICE_LIB=/full/path/to/libngspice.so   # Linux / macOS
+```
+The resolver checks, in order: an explicit `NgSpiceEngine(dll_path=...)`
+argument, then `$WOSP_NGSPICE_LIB`, then the bundled Windows DLL, then
+`ctypes.util.find_library("ngspice")`. It raises only if all four fail, and the
+error lists every path it tried.
+
+### 2. Verify the install
+```powershell
+.\run_tests.bat          # Windows
+python tools/run_tests.py   # Linux / macOS
+```
+All 13 suites (176 tests) run against the real solver.
+
+### 3. Launch the Schematic Editor (flagship PyQt5 app)
 ```powershell
 python ui/schematic_editor.py
 ```
@@ -184,12 +228,29 @@ thresholds moves the operating point (1024 counts → 0.825 V, 3072 counts →
 > emulator (Renode/QEMU) or a transpiler. The netlist says which mode a pin is in,
 > and the editor never shows a behaviour the solver did not produce.
 
-### 3. Launch Interactive LTspice-Style Workbench
+#### Firmware execution status
+
+What each "firmware" capability actually does today:
+
+| Capability | Status |
+|---|---|
+| Parse `.hex` / `.elf` (size, load address, entry point, sections, SHA-256) | **Works.** `bridge/firmware.py` |
+| Import control constants from firmware **source** (`#define` regex) | **Works.** `bridge/control_law.py` |
+| Declared GPIO pin profiles (authored JSON) | **Works.** `bridge/gpio_model.py` |
+| Close the loop against a real ngspice solve | **Works.** `bridge/cosim_runner.py` |
+| Execute compiled machine instructions | **Does not exist.** No decoder, no emulator, no transpiler. |
+| Renode lockstep co-simulation | **Incomplete.** `bridge/renode_orchestrator.py --mode renode` shells out to `tools/renode/renode.exe`, which is gitignored and has never been run. |
+
+There is no code path from a `.bin`/`.elf` to GPIO or ADC behaviour. Loading an
+image gives you metadata; behaviour comes from separately importing the `.c`
+source or hand-writing a law. See the architecture audit for details.
+
+### 4. Launch Interactive LTspice-Style Workbench
 ```powershell
 python ui/ltspice_workbench.py
 ```
 
-### 4. Run Automated Co-Simulation Tests
+### 5. Run Automated Co-Simulation Tests
 ```powershell
 # Run baseline ctypes bridge test
 python tests/test_ngspice_bridge.py
@@ -237,8 +298,13 @@ python tests/test_editor_workflow.py
 * `ui/` — Flagship PyQt5 schematic editor (`schematic_editor.py`, `schematic_scene.py`,
   `schematic_items.py`, `schematic_symbols.py`), plus the older tkinter workbench
   (`ltspice_workbench.py`) and parameter dashboard.
-* `tools/` — `prove_physics_engine.py` (solver proof harness), `screenshot_editor.py`
-  and `overnight_ollama.py` (local LLM batch runner).
+* `tools/` — `prove_physics_engine.py` (solver proof harness), `run_tests.py`,
+  `screenshot_editor.py` and `overnight_ollama.py` (local LLM batch runner).
+  `tools/ngspice_dll/` and `tools/renode/` are gitignored vendor binaries;
+  `setup.ps1` / `setup.sh` fetch ngspice on demand.
 * `tests/` — Automated verification test suites and benchmark runners.
 * `.github/workflows/` — Automated GitHub Actions CI/CD co-simulation workflow.
+* `setup.ps1` / `setup.sh` — one-shot bootstrap (venv + deps + libngspice).
 * `Dockerfile` & `docker-compose.yml` — Containerized headless execution setup.
+  **Known broken:** they install a system `libngspice0` but predate the
+  `find_library` fallback, and they copy neither `ui/` nor `tools/`.
