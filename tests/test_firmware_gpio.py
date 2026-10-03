@@ -16,6 +16,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The real ESP32 image produced by the firmware build. Not committed (it is a
+# 3 MB build artifact); these tests skip when it has not been built.
+REAL_ELF = os.path.join(REPO, "firmware", "esp32_buck_controller", ".pio",
+                        "build", "esp32dev", "firmware.elf")
+
 from bridge import firmware, gpio_model
 from bridge.cad_engine import SchematicComponent, SchematicNetlistEngine
 from bridge.ngspice_wrapper import NgSpiceEngine
@@ -34,6 +40,49 @@ HEX_SAMPLE = "\n".join([
     _hex_record(0x05, 0x0000, bytes([0x08, 0x00])),
     _hex_record(0x01, 0x0000, b""),
 ]) + "\n"
+
+
+def _elf32_with_sections(machine=0x28, entry=0x08000041, load_vaddr=0x10000000):
+    """Build a valid ELF32 carrying a real section table and shstrtab.
+
+    Every section's virtual address is deliberately far from its file offset
+    (0x40080000 vs 84), so a parser that confuses the two cannot pass.
+    Returns (blob, text_vaddr, text_file_offset, text_size).
+    """
+    import struct
+    ehsize, phentsize, shentsize = 52, 32, 40
+    payload = bytes(range(8))
+    phoff = ehsize
+    data_off = phoff + phentsize                 # 84
+    shstrtab = b"\x00.text\0.shstrtab\0"
+    name_text, name_shstrtab = 1, 7
+    shoff = 0x100
+    shstr_off = shoff + 3 * shentsize
+    text_vaddr = 0x40080000                      # != data_off on purpose
+
+    blob = bytearray(shstr_off + len(shstrtab))
+    blob[0:4] = b"\x7fELF"
+    blob[4], blob[5], blob[6] = 1, 1, 1         # 32-bit, little-endian, v1
+    struct.pack_into("<HHIIIIIHHHHHH", blob, 16,
+                     2, machine, 1, entry,
+                     phoff, shoff, 0,
+                     ehsize, phentsize, 1,
+                     shentsize, 3, 2)           # shnum=3, e_shstrndx=2
+    struct.pack_into("<IIIIIIII", blob, phoff,
+                     1, data_off, load_vaddr, load_vaddr,
+                     len(payload), len(payload), 5, 4)
+    blob[data_off:data_off + len(payload)] = payload
+
+    struct.pack_into("<IIIIIIIIII", blob, shoff,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0)                       # NULL
+    struct.pack_into("<IIIIIIIIII", blob, shoff + shentsize,
+                     name_text, 1, 6, text_vaddr, data_off, len(payload),
+                     0, 0, 4, 0)                                          # .text
+    struct.pack_into("<IIIIIIIIII", blob, shoff + 2 * shentsize,
+                     name_shstrtab, 3, 0, 0, shstr_off, len(shstrtab),
+                     0, 0, 1, 0)                                          # .shstrtab
+    blob[shstr_off:shstr_off + len(shstrtab)] = shstrtab
+    return bytes(blob), text_vaddr, data_off, len(payload)
 
 
 def build_mcu_circuit(profile):
@@ -114,6 +163,47 @@ class TestElf(unittest.TestCase):
         self.assertEqual(image.load_address, 0x08000000)
         self.assertEqual(image.data, payload)
         self.assertEqual(len(image.sha256), 64)
+
+    def test_section_names_addresses_and_offsets(self):
+        blob, text_vaddr, text_off, text_size = _elf32_with_sections()
+        _payload, _entry, _load, sections, machine = firmware.parse_elf(blob)
+        self.assertEqual(machine, "ARM")
+        self.assertEqual(len(sections), 3)
+        self.assertEqual(sections[0]["name"], "")            # NULL section
+        self.assertEqual(sections[1]["name"], ".text")
+        self.assertEqual(sections[1]["address"], text_vaddr)  # 0x40080000
+        self.assertEqual(sections[1]["offset"], text_off)     # 84
+        self.assertEqual(sections[1]["size"], text_size)
+        self.assertEqual(sections[2]["name"], ".shstrtab")
+        self.assertEqual(sections[2]["offset"], 0x178)
+
+    def test_section_address_is_not_confused_with_file_offset(self):
+        blob, _v, _o, _s = _elf32_with_sections()
+        _p, _e, _l, sections, _m = firmware.parse_elf(blob)
+        self.assertNotEqual(sections[1]["address"], sections[1]["offset"])
+        self.assertEqual(sections[1]["address"], 0x40080000)
+        self.assertEqual(sections[1]["offset"], 84)
+
+    def test_xtensa_machine_is_recognised(self):
+        blob, _v, _o, _s = _elf32_with_sections(machine=0x5E)
+        _p, _e, _l, _sections, machine = firmware.parse_elf(blob)
+        self.assertEqual(machine, "Xtensa")
+
+    def test_unknown_machine_falls_back_to_hex(self):
+        blob, _v, _o, _s = _elf32_with_sections(machine=0x7777)
+        _p, _e, _l, _sections, machine = firmware.parse_elf(blob)
+        self.assertEqual(machine, "machine 0x7777")
+
+    def test_truncated_section_table_does_not_crash(self):
+        blob, _v, _o, _s = _elf32_with_sections()
+        # Chop 20 bytes off the end: the tail of the third section header and
+        # part of the shstrtab itself are gone. Parsing must degrade, not raise.
+        _p, _e, _l, sections, _m = firmware.parse_elf(blob[:len(blob) - 20])
+        self.assertEqual(len(sections), 2)     # stops before the incomplete entry
+        # The name table is truncated too, so names degrade to empty rather
+        # than raising or emitting "#N" placeholders.
+        self.assertEqual(sections[1]["name"], "")
+        self.assertEqual(sections[1]["address"], 0x40080000)
 
     def test_bad_magic_is_rejected(self):
         path = os.path.join(self.tmp, "bad.elf")
@@ -229,6 +319,57 @@ class TestGpioCosimEndToEnd(unittest.TestCase):
         restored = SchematicNetlistEngine()
         restored.load_dict(g.to_dict())
         self.assertEqual(restored.gpio_profiles["U1"]["GPIO18"]["freq_hz"], 250)
+
+
+@unittest.skipUnless(os.path.exists(REAL_ELF),
+                     "real firmware.elf not built - run: pio run "
+                     "-d firmware/esp32_buck_controller")
+class TestRealEsp32Firmware(unittest.TestCase):
+    """The first real ELF this project has ever parsed.
+
+    Build the image with:
+        pio run -d firmware/esp32_buck_controller
+    """
+
+    def test_real_image_reports_xtensa_and_a_plausible_entry(self):
+        image = firmware.load_firmware(REAL_ELF)
+        self.assertEqual(image.format, "elf")
+        self.assertEqual(image.machine, "Xtensa")
+        self.assertNotEqual(image.entry_point, 0)
+        self.assertEqual(image.entry_point & 0xFFF00000, 0x40000000)
+        self.assertEqual(len(image.sha256), 64)
+        self.assertGreater(image.size_bytes, 0)
+
+    def test_real_image_section_names_all_resolve(self):
+        image = firmware.load_firmware(REAL_ELF)
+        self.assertGreater(len(image.sections), 10)
+        for s in image.sections:
+            # The old parser emitted "#3" style placeholders for every section.
+            self.assertFalse(s["name"].startswith("#"), s)
+        names = {s["name"] for s in image.sections}
+        for expected in (".iram0.text", ".dram0.data", ".flash.text",
+                         ".flash.rodata", ".shstrtab"):
+            self.assertIn(expected, names)
+
+    def test_real_image_addresses_are_memory_not_file_offsets(self):
+        image = firmware.load_firmware(REAL_ELF)
+        by_name = {s["name"]: s for s in image.sections}
+        text = by_name[".iram0.text"]
+        # Address lives in IRAM; offset lives near the start of a 3 MB file.
+        self.assertGreater(text["address"], 0x40000000)
+        self.assertLess(text["offset"], 0x100000)
+        self.assertNotEqual(text["address"], text["offset"])
+        # Code must really be mapped where the ELF says it is.
+        rodata = by_name[".flash.rodata"]
+        self.assertGreater(rodata["address"], 0x3F000000)
+        self.assertGreater(rodata["size"], 0)
+
+    def test_entry_point_lies_inside_a_known_code_section(self):
+        image = firmware.load_firmware(REAL_ELF)
+        by_name = {s["name"]: s for s in image.sections}
+        code = by_name[".iram0.text"]
+        self.assertGreaterEqual(image.entry_point, code["address"])
+        self.assertLess(image.entry_point, code["address"] + code["size"])
 
 
 if __name__ == "__main__":

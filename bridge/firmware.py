@@ -132,8 +132,9 @@ def parse_intel_hex(text: str) -> Tuple[bytes, int, int]:
 # --------------------------------------------------------------------------
 # ELF
 # --------------------------------------------------------------------------
-_ELF_MACHINES = {0x03: "x86", 0x08: "MIPS", 0x28: "ARM", 0x3E: "x86-64",
-                 0xF3: "RISC-V", 0xB7: "AArch64", 0x08 + 0x00: "MIPS"}
+_ELF_MACHINES = {0x03: "x86", 0x08: "MIPS", 0x14: "PowerPC", 0x15: "PowerPC64",
+                 0x28: "ARM", 0x3E: "x86-64", 0xB7: "AArch64", 0xF3: "RISC-V",
+                 0x5E: "Xtensa"}
 
 
 def parse_elf(blob: bytes) -> Tuple[bytes, int, int, List[Dict[str, object]], str]:
@@ -166,24 +167,48 @@ def parse_elf(blob: bytes) -> Tuple[bytes, int, int, List[Dict[str, object]], st
     machine = _ELF_MACHINES.get(e_machine, f"machine 0x{e_machine:X}")
 
     # Section names (best effort; stripped images have none)
+    #
+    # Elf32_Shdr / Elf64_Shdr field order is:
+    #   name(0) type(1) flags(2) addr(3) offset(4) size(5) link(6) info(7)
+    #   addralign(8) entsize(9)
+    # so `addr` is index 3 and `offset` is index 4. Getting these two the wrong
+    # way round silently reports file offsets as load addresses.
     sections: List[Dict[str, object]] = []
-    if e_shoff and e_shnum:
-        shstr_hdr_off = e_shoff + e_shstrndx * e_shentsize
-        shstr_off = shstr_size = 0
+    if e_shoff and e_shnum and _shentsize and e_shstrndx < e_shnum:
+        shstr_hdr_off = e_shoff + e_shstrndx * _shentsize
+        if shstr_hdr_off + _shentsize > len(blob):
+            shstr_hdr_off = 0
         if ei_class == 1:
-            (_n, _t, _f, _a, _o, shstr_off, _sz, *_r) = struct.unpack_from(endian + "IIIIIIIIII", blob, shstr_hdr_off)
-            shstr_size = _sz
+            (_n, _t, _f, _ad, shstr_off, shstr_size, *_r) = struct.unpack_from(
+                endian + "IIIIIIIIII", blob, shstr_hdr_off)
         else:
-            (_n, _t, _f, _a, _o, shstr_off, _sz, *_r) = struct.unpack_from(endian + "IIQQQQIIQQ", blob, shstr_hdr_off)
-        names = blob[shstr_off:shstr_off + shstr_size]
+            (_n, _t, _f, _ad, shstr_off, shstr_size, *_r) = struct.unpack_from(
+                endian + "IIQQQQIIQQ", blob, shstr_hdr_off)
+
+        names = b""
+        if shstr_hdr_off and shstr_size and shstr_off + shstr_size <= len(blob):
+            names = blob[shstr_off:shstr_off + shstr_size]
+
         for i in range(e_shnum):
-            off = e_shoff + i * e_shentsize
+            off = e_shoff + i * _shentsize
+            if off + _shentsize > len(blob):
+                break
             if ei_class == 1:
-                (_nm, _ty, _fl, _ad, _o, size, *_r) = struct.unpack_from(endian + "IIIIIIIIII", blob, off)
+                (_nm, _ty, _fl, _addr, _offset, size, *_r) = struct.unpack_from(
+                    endian + "IIIIIIIIII", blob, off)
             else:
-                (_nm, _ty, _fl, _ad, _o, size, *_r) = struct.unpack_from(endian + "IIQQQQIIQQ", blob, off)
-            name = names[_nm:names.index(b"\x00", _nm)].decode("ascii", "replace") if _nm < len(names) else f"#{i}"
-            sections.append({"name": name, "size": size, "address": _o})
+                (_nm, _ty, _fl, _addr, _offset, size, *_r) = struct.unpack_from(
+                    endian + "IIQQQQIIQQ", blob, off)
+
+            name = ""
+            if names and 0 <= _nm < len(names):
+                end = names.find(b"\x00", _nm)
+                if end == -1:
+                    end = len(names)
+                name = names[_nm:end].decode("ascii", "replace")
+
+            sections.append({"name": name, "size": size,
+                             "address": _addr, "offset": _offset})
 
     # Loadable program segments
     chunks: List[Tuple[int, bytes]] = []
