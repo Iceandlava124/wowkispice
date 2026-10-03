@@ -5,10 +5,67 @@ high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
 """
 
 import ctypes
+import ctypes.util
 import os
 import sys
 import threading
 from typing import Callable, Optional, Dict, Any, List, Tuple
+
+
+def _bundled_dll_path() -> str:
+    """The Windows ngspice.dll that ships alongside the repo, if present."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, "tools", "ngspice_dll",
+                        "Spice64_dll", "dll-vs", "ngspice.dll")
+
+
+def resolve_ngspice_library(explicit: Optional[str] = None
+                            ) -> Tuple[Optional[str], List[str]]:
+    """Locate libngspice.
+
+    Resolution order:
+      1. `explicit`, if the caller passed one. An explicit request is honoured
+         strictly - we never silently substitute a different library for it.
+      2. The bundled Windows ngspice.dll under tools/ngspice_dll/.
+      3. Whatever ctypes.util.find_library("ngspice") reports, which covers a
+         system-installed ngspice on Linux/macOS (libngspice.so / .dylib).
+
+    Returns (path_or_None, attempted_paths). Path is None only when every
+    candidate failed to resolve.
+    """
+    tried: List[str] = []
+
+    if explicit is not None:
+        tried.append(explicit)
+        return (explicit if os.path.exists(explicit) else None), tried
+
+    bundled = _bundled_dll_path()
+    tried.append(bundled)
+    if os.path.exists(bundled):
+        return bundled, tried
+
+    try:
+        system = ctypes.util.find_library("ngspice")
+    except Exception:
+        system = None
+    if system:
+        tried.append(system)
+        return system, tried
+
+    tried.append("<system search: ctypes.util.find_library('ngspice') -> None>")
+    return None, tried
+
+
+_MISSING_DLL_HELP = (
+    "\n\nFix it one of these ways:\n"
+    "  * Windows: run setup.ps1 (or tools/setup_ngspice.bat) to place the\n"
+    "    bundled DLL at tools/ngspice_dll/Spice64_dll/dll-vs/ngspice.dll\n"
+    "  * Linux/macOS: install ngspice system-wide, e.g.\n"
+    "      sudo apt-get install -y ngspice libngspice0\n"
+    "      brew install ngspice\n"
+    "  * Any platform: pass an explicit path,\n"
+    "      NgSpiceEngine(dll_path='/full/path/to/libngspice.so')\n"
+)
 
 # Struct definitions from sharedspice.h
 class VectorInfo(ctypes.Structure):
@@ -66,27 +123,30 @@ class NgSpiceEngine:
         self.timestep_count = 0
         self._stop_requested = False
         
-        if dll_path is None:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            dll_path = os.path.join(base_dir, "tools", "ngspice_dll", "Spice64_dll", "dll-vs", "ngspice.dll")
-        
-        if not os.path.exists(dll_path):
-            raise FileNotFoundError(f"ngspice DLL not found at: {dll_path}")
-        
-        self.dll_path = dll_path
+        resolved, tried = resolve_ngspice_library(dll_path)
+        if resolved is None:
+            raise FileNotFoundError(
+                "ngspice library not found. Tried:\n  "
+                + "\n  ".join(tried) + _MISSING_DLL_HELP)
+
+        self.dll_path = resolved
         self._load_dll()
         self._init_ngspice()
 
     def _load_dll(self):
-        dll_dir = os.path.dirname(os.path.abspath(self.dll_path))
-        if hasattr(os, 'add_dll_directory'):
-            try:
-                os.add_dll_directory(dll_dir)
-            except Exception:
-                pass
-        if dll_dir not in os.environ.get('PATH', ''):
-            os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
-        
+        # find_library() can return a bare soname ("libngspice.so.0") with no
+        # directory part. Only touch PATH/add_dll_directory for real file
+        # paths, otherwise we would prepend the current directory to PATH.
+        if os.path.dirname(self.dll_path):
+            dll_dir = os.path.dirname(os.path.abspath(self.dll_path))
+            if hasattr(os, 'add_dll_directory'):
+                try:
+                    os.add_dll_directory(dll_dir)
+                except Exception:
+                    pass
+            if dll_dir not in os.environ.get('PATH', ''):
+                os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
+
         self.lib = ctypes.CDLL(self.dll_path)
 
         self.lib.ngSpice_Init.argtypes = [
