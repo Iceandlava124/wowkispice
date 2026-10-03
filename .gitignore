@@ -39,3 +39,6 @@ tools/*.tar.gz
 *.log
 *.tmp
 output/
+
+# Editor / agent workspace metadata (not project content)
+.freebuff/

@@ -7,7 +7,8 @@ high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
 import ctypes
 import os
 import sys
-from typing import Callable, Optional, Dict, Any, List
+import threading
+from typing import Callable, Optional, Dict, Any, List, Tuple
 
 # Struct definitions from sharedspice.h
 class VectorInfo(ctypes.Structure):
@@ -61,6 +62,9 @@ class NgSpiceEngine:
         self.output_logs: List[str] = []
         self.user_vsrc_callback = vsrc_callback
         self.user_data_callback = data_callback
+        self.progress_callback: Optional[Callable[[float, int], None]] = None
+        self.timestep_count = 0
+        self._stop_requested = False
         
         if dll_path is None:
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -157,6 +161,26 @@ class NgSpiceEngine:
             v_ret[0] = float(v_val)
         return 0
 
+    def _cb_sync(self, actual_time: float, p_delta_t: Any, old_delta_t: float,
+                 redostep: int, ident: int, location: int, user_data: Any) -> int:
+        """
+        Per-timestep hook (ngspice's GetSyncData): drives the progress bar and
+        the abort check.
+
+        Returning 1 from a sync callback is what makes ngspice abort the run,
+        so the UI never has to wait for the full duration to honour a Stop.
+        """
+        self.timestep_count = getattr(self, "timestep_count", 0) + 1
+        if self.progress_callback is not None:
+            try:
+                self.progress_callback(float(actual_time), self.timestep_count)
+            except Exception:
+                pass
+        # Deliberately does NOT abort here. Returning non-zero from this
+        # callback wedges ngspice in this build; request_stop() interrupts from
+        # a separate thread instead.
+        return 0
+
     def _init_ngspice(self):
         # Keep references to ctypes callback instances to prevent garbage collection
         self._c_send_char = SendChar_t(self._cb_send_char)
@@ -168,7 +192,7 @@ class NgSpiceEngine:
 
         self._c_get_vsrc = GetVSRCData_t(self._cb_get_vsrc)
         self._c_get_isrc = GetISRCData_t(lambda v, t, n, i, u: 0)
-        self._c_get_sync = GetSyncData_t(lambda t, dt, odt, r, i, loc, u: 0)
+        self._c_get_sync = GetSyncData_t(self._cb_sync)
 
         ret = self.lib.ngSpice_Init(
             self._c_send_char,
@@ -190,6 +214,35 @@ class NgSpiceEngine:
             ctypes.byref(ident),
             None
         )
+
+    def request_stop(self):
+        """
+        Interrupt a running simulation.
+
+        Issues ngspice's `stop` command from a short-lived thread. It has to be
+        another thread: the solver is inside ngSpice_Command("run"), so the
+        thread that started it is blocked and cannot send the command itself.
+        Issuing `stop` from inside the sync callback instead re-enters ngspice
+        and deadlocks this build.
+        """
+        self._stop_requested = True
+
+        def _issue():
+            try:
+                self.cmd("stop")
+            except Exception:
+                pass
+
+        try:
+            t = threading.Thread(target=_issue, daemon=True)
+            t.start()
+            return True
+        except Exception:
+            return False
+
+    @property
+    def stop_requested(self) -> bool:
+        return bool(getattr(self, "_stop_requested", False))
 
     def set_vsrc_callback(self, callback: Callable[[float, str], float]):
         """Register dynamic voltage source callback for `external` sources."""
@@ -236,6 +289,35 @@ class NgSpiceEngine:
         if vec.v_length <= 0 or not vec.v_realdata:
             return 0.0
         return float(vec.v_realdata[vec.v_length - 1])
+
+    def get_vector_complex(self, vec_name: str) -> Tuple[List[float], List[float]]:
+        """
+        (real, imaginary) parts of a vector.
+
+        An .ac sweep produces complex phasors; taking only the real part - as
+        get_vector_array() does - would quietly discard the phase information a
+        Bode plot is made of.
+        """
+        vec_ptr = self.lib.ngGet_Vec_Info(vec_name.encode('utf-8'))
+        if not vec_ptr:
+            vec_ptr = self.lib.ngGet_Vec_Info(f"v({vec_name})".encode('utf-8'))
+        if not vec_ptr:
+            return [], []
+        vec = vec_ptr.contents
+        if vec.v_length <= 0:
+            return [], []
+
+        class NgComplex(ctypes.Structure):
+            _fields_ = [("cx_r", ctypes.c_double), ("cx_i", ctypes.c_double)]
+
+        if vec.v_compdata:
+            c_arr = ctypes.cast(vec.v_compdata, ctypes.POINTER(NgComplex))
+            return ([float(c_arr[i].cx_r) for i in range(vec.v_length)],
+                    [float(c_arr[i].cx_i) for i in range(vec.v_length)])
+        if vec.v_realdata:
+            reals = [float(vec.v_realdata[i]) for i in range(vec.v_length)]
+            return reals, [0.0] * len(reals)
+        return [], []
 
     def get_vector_array(self, vec_name: str) -> List[float]:
         vec_ptr = self.lib.ngGet_Vec_Info(vec_name.encode('utf-8'))

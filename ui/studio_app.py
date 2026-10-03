@@ -103,7 +103,6 @@ class WOWKISpiceStudio(tk.Tk):
         file_menu.add_command(label="Save Project Bundle", command=self.save_project)
         file_menu.add_separator()
         file_menu.add_command(label="Export SPICE Netlist (.cir)...", command=self.export_netlist)
-        file_menu.add_command(label="Export KiCad 8 Schematic (.kicad_sch)...", command=self.export_kicad)
         file_menu.add_command(label="Generate PDF / HTML Lab Report...", command=self.export_lab_report)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.quit)
@@ -1033,12 +1032,6 @@ void digital_controller_step(uint16_t raw_adc, bool *gate_out) {
         if fpath:
             LabReportGenerator.generate_html_report(self.sim_metrics, project_name=f"{self.preset_var.get()} ({self.mcu_var.get()})", output_path=fpath)
             messagebox.showinfo("Report Exported", f"Engineering lab test report saved to:\n{fpath}")
-
-    def export_kicad(self):
-        fpath = filedialog.asksaveasfilename(defaultextension=".kicad_sch", filetypes=[("KiCad Schematic", "*.kicad_sch")])
-        if fpath:
-            self.cad.export_kicad_schematic(fpath)
-            messagebox.showinfo("KiCad Exported", f"KiCad 8 schematic saved to:\n{fpath}")
 
     def view_bom(self):
         bom = self.cad.generate_bom()

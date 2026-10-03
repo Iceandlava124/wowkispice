@@ -35,23 +35,74 @@ class TestSOTASuite(unittest.TestCase):
         self.cad.add_component(c2)
         self.cad.add_wire("U1:GPIO18", "Q1:GATE")
 
-        netlist = self.cad.generate_spice_netlist(vin=12.0)
+        # A complete RC low-pass built purely from the component graph
+        v1 = SchematicComponent("V1", "V", "V1", "12", 50, 200)
+        r1 = SchematicComponent("R1", "R", "R1", "10k", 120, 200)
+        c3 = SchematicComponent("C1", "C", "C1", "100n", 190, 200)
+        g1 = SchematicComponent("GND1", "GND", "GND", "", 190, 260)
+        for comp in (v1, r1, c3, g1):
+            self.cad.add_component(comp)
+        self.cad.add_wire("V1:+", "R1:1", "in")
+        self.cad.add_wire("V1:-", "GND1:1", "gnd")
+        self.cad.add_wire("R1:2", "C1:1", "out")
+        self.cad.add_wire("C1:2", "GND1:1", "gnd")
+        # Fully wire the MOSFET so no unconnected-pin warnings fire
+        self.cad.add_wire("Q1:DRAIN", "V1:+")
+        self.cad.add_wire("Q1:SOURCE", "GND1:1")
+        # Declared pin behaviour so the MCU drives a defined level (no warnings)
+        self.cad.gpio_profiles["U1"] = {"GPIO18": {"mode": "static", "level": 1}}
+
+        netlist, nets, warnings = self.cad.compile_netlist(vin=12.0)
         self.assertGreater(len(netlist), 5)
-        self.assertTrue(any("Vin in 0 DC 12.00" in line for line in netlist))
-        self.assertTrue(any("S1 in sw_node gate 0 SW_MODEL" in line for line in netlist))
+        self.assertTrue(any(line.startswith("V1 ") and "DC 12" in line for line in netlist), netlist)
+        self.assertTrue(any(line.startswith("R1 ") and "10k" in line for line in netlist), netlist)
+        self.assertTrue(any(line.startswith("C1 ") and "100n" in line for line in netlist), netlist)
+        # MOSFET emitted as M-device: drain=in, gate=GPIO18 net, source/bulk=0
+        self.assertTrue(any(line.startswith("MQ1 ") and "NMOS_MODEL" in line for line in netlist), netlist)
+        # The MCU drives its wired pin as a real voltage source onto NET_1
+        self.assertTrue(any(line.startswith("VU1_GPIO18 NET_1 0 DC") for line in netlist), netlist)
+        self.assertTrue(any("* MCU U1" in line for line in netlist), netlist)
+        self.assertIn("out", nets)             # probeable nodes returned for waveform plots
+        self.assertTrue(any(line.startswith(".tran") for line in netlist))
+        self.assertEqual(netlist[-1], ".end")
+        self.assertEqual(warnings, [], warnings)  # fully wired circuit -> no warnings
+
+        # An empty schematic falls back to the legacy reference buck converter
+        empty = SchematicNetlistEngine()
+        fallback, _, _ = empty.compile_netlist(vin=12.0)
+        self.assertTrue(any("Vin in 0 DC 12.00" in line for line in fallback))
+        self.assertTrue(any("S1 in sw_node gate 0 SW_MODEL" in line for line in fallback))
 
     def test_02_kicad_schematic_export(self):
         """Test export to standard KiCad schematic format (.kicad_sch)."""
+        # Build a real circuit first: the export compiles the graph, it no
+        # longer emits a canned reference sheet.
+        v1 = SchematicComponent("V1", "V", "V1", "12", 0, 0)
+        r1 = SchematicComponent("R1", "R", "R1", "10k", 80, 0)
+        g1 = SchematicComponent("GND1", "GND", "GND", "", 80, 80)
+        for comp in (v1, r1, g1):
+            self.cad.add_component(comp)
+        self.cad.add_wire("V1:+", "R1:1", "in")
+        self.cad.add_wire("V1:-", "GND1:1", "gnd")
+        self.cad.add_wire("R1:2", "GND1:1", "gnd")
+
         test_out = os.path.join(os.path.dirname(__file__), "temp_test_export.kicad_sch")
         self.cad.export_kicad_schematic(test_out)
         self.assertTrue(os.path.exists(test_out))
-        
-        with open(test_out, "r") as f:
+
+        with open(test_out, "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn("kicad_sch", content)
-        self.assertIn("ESP32-WROOM-32", content)
-        self.assertIn("IRF540N", content)
-        
+        self.assertIn('(lib_id "Device:R")', content)     # real placed parts
+        self.assertIn('(lib_id "Simulation_SPICE:VDC")', content)
+        self.assertEqual(content.count("(symbol (lib_id"), 3)
+        self.assertEqual(content.count("(wire "), 3)
+
+        # An empty schematic must refuse rather than fake a document
+        from bridge.cad_engine import SchematicNetlistEngine
+        with self.assertRaises(ValueError):
+            SchematicNetlistEngine().export_kicad_schematic(test_out)
+
         # Cleanup
         if os.path.exists(test_out):
             os.remove(test_out)
