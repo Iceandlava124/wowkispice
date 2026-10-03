@@ -65,8 +65,8 @@ def resolve_ngspice_library(explicit: Optional[str] = None
 
 _MISSING_DLL_HELP = (
     "\n\nFix it one of these ways:\n"
-    "  * Windows: run setup.ps1 (or tools/setup_ngspice.bat) to place the\n"
-    "    bundled DLL at tools/ngspice_dll/Spice64_dll/dll-vs/ngspice.dll\n"
+    "  * Windows: run setup.ps1 to fetch and place the bundled DLL\n"
+    "    (it downloads the official ngspice build automatically)\n"
     "  * Linux/macOS: install ngspice system-wide, e.g.\n"
     "      sudo apt-get install -y ngspice libngspice0\n"
     "      brew install ngspice\n"
