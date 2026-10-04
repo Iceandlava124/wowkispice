@@ -12,14 +12,19 @@ from PyQt5.QtWidgets import (QGraphicsItem, QGraphicsObject, QGraphicsEllipseIte
                              QGraphicsPathItem)
 
 from bridge.cad_engine import SchematicComponent
-from ui.schematic_symbols import GRID, extent_of, pins_of
+from ui.schematic_symbols import GRID, SYMBOLS, extent_of, label_of, pins_of
 
-INK = QColor("#1b1f23")
-WIRE_BLUE = QColor("#1f4e9c")
-PIN_RED = QColor("#c0392b")
-PIN_HOVER = QColor("#1a9850")
-LABEL_GREY = QColor("#555f6a")
+INK = QColor("#d6dde5")
+WIRE_BLUE = QColor("#5aa9ff")
+PIN_RED = QColor("#ff6b5e")
+PIN_HOVER = QColor("#4ade80")
+LABEL_GREY = QColor("#9aa4b0")
+SYMBOL_FILL = QColor("#1d232b")
+CANVAS_BG = QColor("#12151a")
 PIN_RADIUS = 4.0
+
+# These are rewritten by ui.theme.set_symbol_palette() so a theme switch
+# recolours the canvas without the symbol layer importing the theme itself.
 
 
 # --------------------------------------------------------------------------
@@ -30,8 +35,55 @@ def _seg(painter: QPainter, x1, y1, x2, y2, width=2.0):
     painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
 
+def _draw_board(painter: QPainter, comp_type: str):
+    """A microcontroller board drawn from its own pin geometry.
+
+    The board symbols declare pins at x = +/-70 on a 10-unit pitch, so the body
+    is derived from those pins rather than hard-coded. Without this every board
+    fell through to the unknown-type "?" box.
+    """
+    spec = SYMBOLS.get(comp_type)
+    if spec is None:
+        return False
+    # Only board symbols have a footprint; the plain symbols also have pins,
+    # and drawing a chip body for a resistor would be nonsense.
+    if not spec.get("footprint"):
+        return False
+    pins = spec["pins"]
+    if not pins:
+        return False
+    xs = [p[1] for p in pins]
+    ys = [p[2] for p in pins]
+    half_w = 58
+    top = min(ys) - 14
+    bottom = max(ys) + 14
+    painter.setPen(QPen(INK, 2.0))
+    painter.setBrush(QBrush(SYMBOL_FILL))
+    painter.drawRoundedRect(QRectF(-half_w, top, half_w * 2, bottom - top), 6, 6)
+
+    painter.setPen(QPen(INK, 1.2))
+    for _name, x, y in pins:
+        inner = -half_w if x < 0 else half_w
+        painter.drawLine(QPointF(x, y), QPointF(inner, y))
+
+    # The notch that says "this side goes down", so the orientation is readable.
+    painter.setBrush(QBrush(WIRE_BLUE))
+    painter.setPen(Qt.NoPen)
+    painter.drawEllipse(QPointF(0, top + 9), 3.5, 3.5)
+
+    painter.setPen(QPen(LABEL_GREY))
+    painter.drawText(QRectF(-half_w, top + 16, half_w * 2, 20),
+                     Qt.AlignCenter, spec["label"])
+    if spec.get("value"):
+        painter.drawText(QRectF(-half_w, top + 34, half_w * 2, 18),
+                         Qt.AlignCenter, spec["value"])
+    return True
+
+
 def draw_symbol(painter: QPainter, comp_type: str):
     """Draw the component body (pins are drawn separately as PinItems)."""
+    if _draw_board(painter, comp_type):
+        return
     if comp_type == "R":
         _seg(painter, -30, 0, -18, 0)
         segs = 6
@@ -74,7 +126,7 @@ def draw_symbol(painter: QPainter, comp_type: str):
         _seg(painter, -30, 0, -8, 0)
         _seg(painter, 8, 0, 30, 0)
         painter.setPen(QPen(INK, 2.0))
-        painter.setBrush(QBrush(QColor("#f3d9a4")))
+        painter.setBrush(QBrush(QColor("#8a6d3b")))
         tri = QPainterPath(QPointF(-8, -10))
         tri.lineTo(-8, 10)
         tri.lineTo(8, 0)
@@ -102,7 +154,7 @@ def draw_symbol(painter: QPainter, comp_type: str):
 
     elif comp_type == "MCU":
         painter.setPen(QPen(INK, 2.0))
-        painter.setBrush(QBrush(QColor("#eef3fb")))
+        painter.setBrush(QBrush(SYMBOL_FILL))
         painter.drawRect(QRectF(-40, -40, 80, 80))
         for _name, x, y in pins_of("MCU"):
             _seg(painter, -40 if x < 0 else 40, y, x, y, width=1.5)
@@ -110,7 +162,7 @@ def draw_symbol(painter: QPainter, comp_type: str):
 
     else:  # unknown type (e.g. loaded from a file) - keep it visible and honest
         painter.setPen(QPen(INK, 2.0))
-        painter.setBrush(QBrush(QColor("#eeeeee")))
+        painter.setBrush(QBrush(SYMBOL_FILL))
         painter.drawRect(QRectF(-20, -14, 40, 28))
         painter.drawText(QRectF(-20, -14, 40, 28), Qt.AlignCenter, "?")
 
@@ -154,6 +206,68 @@ class PinItem(QGraphicsEllipseItem):
 # --------------------------------------------------------------------------
 # Components
 # --------------------------------------------------------------------------
+class JunctionItem(QGraphicsEllipseItem):
+    """A filled dot where three or more wires meet on one pin.
+
+    Wiring here is strictly pin to pin, so a T-junction can only happen at a pin
+    that has three or more wires on it. Drawing it anywhere else would be
+    inventing a connection the netlist does not have.
+    """
+
+    RADIUS = 4.5
+
+    def __init__(self, x=0.0, y=0.0):
+        super().__init__(-self.RADIUS, -self.RADIUS,
+                         self.RADIUS * 2, self.RADIUS * 2)
+        self.setPos(x, y)
+        self.setBrush(QBrush(WIRE_BLUE))
+        self.setPen(QPen(CANVAS_BG, 1.0))
+        self.setZValue(0)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setToolTip("junction: three or more wires meet here")
+
+
+class GhostItem(QGraphicsObject):
+    """A translucent preview of the palette tool armed for click-to-place.
+
+    LTspice shows the symbol following the pointer before you commit it. This
+    is the same affordance: it never takes mouse input, so it cannot be
+    selected, dragged or hit-tested by accident.
+    """
+
+    def __init__(self, comp_type):
+        super().__init__()
+        self.comp_type = comp_type
+        self.setZValue(6)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        ex, ey, ew, eh = extent_of(comp_type)
+        self._bounding = QRectF(ex - 20, ey - 20, ew + 40, eh + 40)
+        self.setToolTip(f"click to place a {label_of(comp_type)}")
+
+    def boundingRect(self):
+        return self._bounding
+
+    def paint(self, painter, option, widget=None):
+        # Same signature as ComponentItem.paint: QGraphicsView always passes
+        # (painter, option, widget), and a two-argument version silently fails
+        # to draw anything.
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setOpacity(0.55)
+        draw_symbol(painter, self.comp_type)
+
+    def set_comp_type(self, comp_type):
+        self.comp_type = comp_type
+        ex, ey, ew, eh = extent_of(comp_type)
+        self.prepareGeometryChange()
+        self._bounding = QRectF(ex - 20, ey - 20, ew + 40, eh + 40)
+        self.update()
+
+    def move_snap(self, scene_pos):
+        self.setPos(round(scene_pos.x() / GRID) * GRID,
+                    round(scene_pos.y() / GRID) * GRID)
+
+
 class ComponentItem(QGraphicsObject):
     """Symbol bound 1:1 to a bridge.cad_engine.SchematicComponent.
 

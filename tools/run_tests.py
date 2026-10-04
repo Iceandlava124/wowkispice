@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PYTHON = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
@@ -20,12 +21,30 @@ COUNT_RE = re.compile(r"Ran (\d+) test")
 PER_SUITE_TIMEOUT = 300
 
 
+def suite_env(name):
+    """A private settings profile per suite.
+
+    The editor remembers window state, simulation mode and the rest in
+    QSettings. A suite that closes a window therefore writes settings that the
+    next suite reads back - which is how a co-simulation test ended up running
+    with a saved 'Transient only' mode and reporting a pin that never switched.
+    Each suite gets its own throwaway directory instead.
+    """
+    env = dict(os.environ)
+    env["WOSP_SETTINGS_DIR"] = os.path.join(tempfile.gettempdir(),
+                                            "wosp-test-settings",
+                                            re.sub(r"[^A-Za-z0-9_.-]", "_", name))
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    return env
+
+
 def run_suite(path):
     """(name, passed_count, failure_text) for one suite."""
     name = os.path.basename(path)
     try:
         proc = subprocess.run([PYTHON, path], cwd=ROOT, timeout=PER_SUITE_TIMEOUT,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True,
+                              env=suite_env(name))
     except subprocess.TimeoutExpired:
         return name, 0, "TIMEOUT after %ds" % PER_SUITE_TIMEOUT
     out = proc.stdout + proc.stderr

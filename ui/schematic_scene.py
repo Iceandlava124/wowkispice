@@ -13,13 +13,16 @@ import re
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen, QPainterPath
-from PyQt5.QtWidgets import QApplication, QGraphicsPathItem, QGraphicsScene
+from PyQt5.QtWidgets import (QApplication, QGraphicsPathItem, QGraphicsScene,
+                             QGraphicsItem)
 
 from bridge.cad_engine import SchematicComponent, SchematicNetlistEngine
-from ui.schematic_items import ComponentItem, WireItem
+from ui.schematic_items import ComponentItem, GhostItem, JunctionItem, WireItem
 from ui.schematic_symbols import GRID, SYMBOLS, default_value_of, prefix_of
 
 UNDO_LIMIT = 100
+GRID_MAJOR_EVERY = 5       # every fifth dot is drawn brighter
+MIN_DOT_ZOOM = 0.55        # below this the grid is dropped rather than smeared
 
 
 class SchematicScene(QGraphicsScene):
@@ -43,6 +46,9 @@ class SchematicScene(QGraphicsScene):
         self._redo = []
         self._drag_snapshot = None
         self._drag_committed = False
+        self._junctions = []
+        self._ghost = None
+        self.grid_visible = True
         self.setSceneRect(-2000, -1500, 4000, 3000)
         self.rebuild()
 
@@ -52,10 +58,12 @@ class SchematicScene(QGraphicsScene):
     def rebuild(self):
         """Recreate every graphics item from the engine's current state."""
         self._clear_rubber()
+        self._clear_ghost()
         self.clear()
         self.comp_items.clear()
         self.pin_items.clear()
         self.wire_items.clear()
+        self._junctions.clear()
 
         for comp in self.model.components.values():
             item = ComponentItem(comp)
@@ -79,6 +87,9 @@ class SchematicScene(QGraphicsScene):
                 w_item.refresh(self.pin_items)
                 self.wire_items.append(w_item)
 
+        self._refresh_junctions()
+        if self.armed_type:
+            self._show_ghost(self.armed_type)
         self.documentChanged.emit()
 
     @staticmethod
@@ -289,7 +300,8 @@ class SchematicScene(QGraphicsScene):
         if self._wire_start is None:
             self._wire_start = ref
             self._rubber = QGraphicsPathItem()
-            self._rubber.setPen(QPen(QColor("#1f4e9c"), 1.5, Qt.DashLine))
+            from ui.schematic_items import WIRE_BLUE
+            self._rubber.setPen(QPen(WIRE_BLUE, 1.5, Qt.DashLine))
             self._rubber.setZValue(5)
             self.addItem(self._rubber)
             self.status.emit(f"Wire from {comp_id}.{pin_name} - click target pin (Esc cancels)")
@@ -352,8 +364,64 @@ class SchematicScene(QGraphicsScene):
     def _refresh_all_wires(self):
         for wire in self.wire_items:
             wire.refresh(self.pin_items)
+        self._refresh_junctions()
+
+    def _refresh_junctions(self):
+        """Put a dot on every pin carrying three or more wires."""
+        counts = {}
+        for wire in self.model.wires:
+            for ref in (self._parse_ref(wire.get("from", "")),
+                        self._parse_ref(wire.get("to", ""))):
+                if ref is not None:
+                    counts[ref] = counts.get(ref, 0) + 1
+        wanted = {ref for ref, n in counts.items() if n >= 3}
+        for junction in list(self._junctions):
+            if junction.ref not in wanted:
+                self.removeItem(junction)
+                self._junctions.remove(junction)
+        live = {j.ref for j in self._junctions}
+        for ref in wanted - live:
+            pin = self.pin_items.get(ref)
+            if pin is None:
+                continue
+            junction = JunctionItem(pin.scenePos().x(), pin.scenePos().y())
+            junction.ref = ref
+            self.addItem(junction)
+            self._junctions.append(junction)
+
+    # ------------------------------------------------------------------
+    # Armed palette tool: the symbol follows the pointer before committing
+    # ------------------------------------------------------------------
+    def _show_ghost(self, comp_type):
+        if self._ghost is None:
+            self._ghost = GhostItem(comp_type)
+            self.addItem(self._ghost)
+        else:
+            self._ghost.set_comp_type(comp_type)
+        self._ghost.setVisible(True)
+
+    def _clear_ghost(self):
+        if self._ghost is not None:
+            self.removeItem(self._ghost)
+            self._ghost = None
+
+    def set_armed(self, comp_type):
+        """Arm (or disarm, with None) the click-to-place tool."""
+        self.armed_type = comp_type
+        if comp_type:
+            self._show_ghost(comp_type)
+        else:
+            self._clear_ghost()
+
+    def move_ghost(self, scene_pos):
+        if self._ghost is not None:
+            self._ghost.move_snap(scene_pos)
+            return self._ghost.pos()
+        return None
 
     def mouseMoveEvent(self, event):
+        if self._ghost is not None:
+            self.move_ghost(event.scenePos())
         if self._wire_start is not None and self._rubber is not None:
             start_item = self.pin_items.get(self._wire_start)
             if start_item is not None:
@@ -374,23 +442,47 @@ class SchematicScene(QGraphicsScene):
     # Appearance
     # ------------------------------------------------------------------
     def drawBackground(self, painter: QPainter, rect: QRectF):
-        painter.fillRect(rect, QColor("#fbfbfd"))
+        """A dot grid, not a line grid.
+
+        A line per grid cell turns into grey mush when you zoom out, and the
+        grid is only ever a placement aid - dots read as alignment points the
+        way they do in a modern EDA tool. The palette is looked up per paint,
+        so switching appearance needs nothing but a repaint.
+        """
+        from ui import theme
+        pal = theme.current()
+        painter.fillRect(rect, QColor(pal.canvas))
+        if not self.grid_visible:
+            return
+        if painter.worldTransform().m11() < MIN_DOT_ZOOM:
+            return
         step = GRID
         left = int(rect.left()) - (int(rect.left()) % step)
         top = int(rect.top()) - (int(rect.top()) % step)
-        lines = []
-        x = left
-        while x < rect.right():
-            lines.append(QPointF(x, rect.top()))
-            lines.append(QPointF(x, rect.bottom()))
-            x += step
+        minor, major = [], []
         y = top
+        row = int(top // step)
         while y < rect.bottom():
-            lines.append(QPointF(rect.left(), y))
-            lines.append(QPointF(rect.right(), y))
+            x = left
+            col = int(left // step)
+            while x < rect.right():
+                bucket = major if (row % GRID_MAJOR_EVERY == 0
+                                   and col % GRID_MAJOR_EVERY == 0) else minor
+                bucket.append(QPointF(x, y))
+                x += step
+                col += 1
             y += step
-        painter.setPen(QPen(QColor("#e8ebef"), 1.0))
-        painter.drawLines(lines)
+            row += 1
+        radius = 1.0 / max(painter.worldTransform().m11(), 0.001)
+        radius = min(max(radius, 0.5), 2.0)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(pal.canvas_dot))
+        for dot in minor:
+            painter.drawEllipse(dot, radius, radius)
+        painter.setBrush(QColor(pal.canvas_dot_major))
+        major_radius = radius * 1.6
+        for dot in major:
+            painter.drawEllipse(dot, major_radius, major_radius)
 
     def clear_document(self):
         self.push_undo()
