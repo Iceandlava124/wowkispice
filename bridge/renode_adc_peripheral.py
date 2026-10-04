@@ -1,7 +1,15 @@
 """
 renode_adc_peripheral.py - Custom Renode Python MMIO Peripheral Mock
-Intercepts ESP32 ADC register reads (SENS_SAR_MEAS_START1_REG / SENS_SAR_READ_STATUS1_REG)
-and returns digitized SPICE circuit voltages to the running firmware.
+
+ABANDONED, AND NOT IMPORTABLE. The intent was to intercept ESP32 ADC register
+reads (SENS_SAR_MEAS_START1_REG / SENS_SAR_READ_STATUS1_REG) and feed digitized
+SPICE voltages back to the running firmware. That never happened: Renode cannot
+decode the Xtensa `entry` instruction, so it executed none of our firmware and
+no ESP32 ever read a voltage through this model.
+
+The body below is a paste-in Renode desktop-script fragment, not a module --
+`request` is injected by Renode's peripheral loader -- so importing this file
+raises NameError. Retained only as a record. See docs/legacy-module-audit.md.
 """
 
 # In Renode Python peripheral execution context:

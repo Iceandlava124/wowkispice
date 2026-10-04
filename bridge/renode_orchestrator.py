@@ -1,6 +1,17 @@
 """
 renode_orchestrator.py - High-Level Mixed-Signal Co-Simulation Orchestrator
-Coordinates lockstep execution between Renode ESP32 emulator and ngspice analog circuit engine.
+
+DEPRECATED / NOT AN EMULATOR DRIVER. The `--mode renode` branch below has
+never executed this firmware: Renode cannot decode the Xtensa `entry`
+instruction, which appears 393 times in an ordinary ESP-IDF build, and the
+binary it would launch is gitignored. The emulator target is Espressif QEMU
+now - see bridge/qemu_orchestrator.py.
+
+Note that `--mode mock` and `--mode benchmark` (the only two modes CI and
+docker-compose use) branch straight to bridge/mock_controller, a pure-Python
+closed loop. Despite this file's name, neither mode touches Renode.
+
+See docs/legacy-module-audit.md for the full record.
 """
 
 import os

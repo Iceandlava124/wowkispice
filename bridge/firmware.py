@@ -5,11 +5,15 @@ What this DOES: parse the image and report what is really in it - format,
 byte size, load address, entry point, section names, SHA-256. Those are facts
 read out of the file, not guesses.
 
-What this does NOT do (yet): execute the firmware. Running a real ESP32/AVR
-binary needs an instruction-set emulator (Renode, QEMU) or a compiled-to-Python
-transpiler; neither exists in this repo. GPIO behaviour during co-simulation
-comes from a declared pin profile (see bridge/gpio_model.py) which is honest
-about being a model rather than pretending to be the binary.
+What this does NOT do: execute the firmware. This module only inspects the
+image. Execution lives in bridge/qemu_orchestrator.py (Espressif QEMU), which
+boots a real ESP32 .elf but is not coupled to ngspice and completes 0
+control-loop samples, because that QEMU models no SAR ADC. Renode is not an
+option: it cannot decode the Xtensa `entry` instruction and executed none of
+our firmware, so bridge/renode_orchestrator.py is kept for reference only.
+GPIO behaviour during co-simulation therefore comes from a declared pin
+profile (see bridge/gpio_model.py) which is honest about being a model rather
+than pretending to be the binary.
 
 Parsers are deliberately dependency-free and defensive: a malformed file raises
 FirmwareParseError with a human-readable reason rather than producing junk.

@@ -39,7 +39,21 @@ jobs:
         run: |
           python tests/test_closed_loop_buck.py
 
-      - name: Run Multi-Load Parameter Sweep Benchmark
+      - name: Run the full test suite
+        run: |
+          python tools/run_tests.py
+
+      # Not an emulator run, despite living in a file named renode_orchestrator.
+      # `--mode benchmark` branches straight to bridge/mock_controller, a
+      # pure-Python closed loop. Kept because it is a real check of that
+      # module, relabelled so it stops implying Renode coverage.
+      #
+      # The Renode emulator path itself is ABANDONED, not merely untested:
+      # Renode cannot decode the Xtensa `entry` instruction, which appears 393
+      # times in an ESP-IDF build, so it executed zero instructions of this
+      # firmware. The emulator target is Espressif QEMU now
+      # (bridge/qemu_orchestrator.py). See docs/legacy-module-audit.md.
+      - name: Run legacy Python mock closed-loop harness (no emulator)
         run: |
           python bridge/renode_orchestrator.py --mode benchmark --time 10.0 --plot tests/ci_waveform.png
 

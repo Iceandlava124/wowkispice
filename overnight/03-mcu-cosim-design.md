@@ -141,6 +141,14 @@ class ArduinoPin:
 
 ### When to Use the Mock vs Renode
 
+> **Superseded 2026-10-03.** The Renode plan below was never executed and
+> cannot be. Renode cannot decode the Xtensa `entry` instruction, which appears
+> 393 times in an ordinary ESP-IDF build, so it ran zero instructions of this
+> firmware. The emulator target is Espressif QEMU now — see
+> `bridge/qemu_orchestrator.py` and `tools/qemu-patch/README.md`. Note that
+> `renode_orchestrator.py --mode benchmark` has always been the mock path, not
+> the Renode one. This section is kept for design history.
+
 - **Mock Controller**: Used for simulating the firmware loop and handling real-time updates.
 - **Renode**: Used for simulating the hardware components and handling real-time updates.
 
