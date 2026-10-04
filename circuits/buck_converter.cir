@@ -15,6 +15,13 @@ L1 sw_node vout 47u IC=0
 C1 vout 0 100u IC=0
 Rload vout 0 5.0
 
+* Feedback divider to the MCU ADC input (GPIO36 / ADC1_CH0).
+* The firmware believes in a 2:1 divider, V_fb = V_out / 2, which is what
+* makes 100k/100k the right pair. Modelled here rather than folded into a
+* Python constant, so the loading it puts on vout is part of the solution.
+Rfb_top vout fb 100k
+Rfb_bot fb 0 100k
+
 * Models
 .model SW_MODEL SW(Ron=0.02 Roff=1e6 Vt=1.65 Vh=0.05)
 .model DIODE_MODEL D(IS=1e-9 RS=0.01 N=1.0 BV=50 IBV=1e-4)

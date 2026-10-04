@@ -43,6 +43,7 @@ class MockESP32BuckController:
         
         self.gpio_state = False  # False = 0V (LOW), True = 3.3V (HIGH)
         self.latest_vout = 0.0
+        self.latest_fb = 0.0
         self.switch_count = 0
         
         # Telemetry history
@@ -63,6 +64,15 @@ class MockESP32BuckController:
                         self.history_time.append(actual_time)
                         self.history_vout.append(val)
                         self.history_vgate.append(3.3 if self.gpio_state else 0.0)
+                # Feedback node is the divider output the ADC actually samples.
+                # Read it from the solver so the divider's loading on vout, and
+                # its own dynamics, are part of the solution rather than a
+                # constant multiplied in afterwards.
+                fb_ptr = engine.lib.ngGet_Vec_Info(b'fb')
+                if fb_ptr:
+                    fb = fb_ptr.contents
+                    if bool(fb.v_realdata) and fb.v_length > 0:
+                        self.latest_fb = float(fb.v_realdata[fb.v_length - 1])
         except Exception:
             pass
         return 0
@@ -73,8 +83,10 @@ class MockESP32BuckController:
         Executes the exact hysteretic decision logic that the compiled C firmware runs.
         """
         try:
-            # Scale output through simulated 2:1 resistive divider
-            v_feedback = self.latest_vout * self.divider_ratio
+            # Feedback comes from the simulated divider node. This is what the
+            # ADC pin sees, including the effect of Rfb_top/Rfb_bot loading
+            # vout. divider_ratio is no longer applied here.
+            v_feedback = self.latest_fb
             
             # 12-bit ADC quantization (0..3.3V -> 0..4095)
             raw_adc = int(np.clip((v_feedback / self.adc_vref) * 4095.0, 0, 4095))
