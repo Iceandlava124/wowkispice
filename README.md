@@ -1,13 +1,20 @@
 # PROJECT_WOWKISPICE ⚡
 
-> **High-Performance Mixed-Signal Hardware-Software Co-Simulator**  
-> Closed-loop co-simulation of a real analog circuit (`libngspice`) against a
-> control law imported from real microcontroller firmware source.
+> **Real SPICE. Real MCU source. Co-simulated.**
 >
-> **Read this first:** the compiled firmware binary is *parsed, not executed*.
-> What runs is the decision logic and its constants, lifted from the firmware's
-> own `#define`s — see [the limitation, stated plainly](#firmware-execution-status).
-> The Renode path exists as a script but has never been run.
+> Open-source mixed-signal co-simulator built on `libngspice`. The analog engine
+> runs a genuine per-timestep closed loop via ngspice's C API — no black-box
+> approximations. Firmware control logic is parsed directly from ESP32 C source
+> (*not yet executed as a compiled binary*) and co-simulated against the real
+> circuit, including a real feedback divider in the netlist.
+>
+> **Read this first:** the firmware binary is *parsed, not executed* **inside the
+> simulation loop**. Separately from the co-simulation, the real compiled image
+> does boot under Espressif's QEMU through ROM, the second-stage bootloader and
+> `app_main()` — a captured boot log, no instrumentation. It then panics on its
+> first ADC read, because that QEMU models no SAR ADC. The ADC/GPIO model that
+> would close the last loop is in `tools/qemu-patch/` and **has never been
+> compiled**. See [firmware execution status](#firmware-execution-status).
 
 ---
 
@@ -15,22 +22,23 @@
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│                   DIGITAL FIRMWARE                     │
-│  • Bare-metal ESP32 C code built with PlatformIO       │
-│  • Emulated in Renode with virtual clock ticks         │
-│  • Reads simulated ADC register, outputs GPIO states   │
+│               FIRMWARE CONTROL LOGIC                   │
+│  • Bare-metal ESP32 C code, built with PlatformIO       │
+│  • Decision logic + constants parsed from the .c        │
+│  • Compiled .elf boots in QEMU; its ADC read is unsolved│
 └───────────────────────────┬────────────────────────────┘
                             │
-              LOCKSTEP SYNCHRONIZATION BRIDGE
-       • Advances digital MCU by quantum dt
-       • Extracts GPIO logic state (0 or 1)
-       • Solves analog equations in ngspice for dt
-       • Samples feedback node voltage & writes to Renode ADC
+                 PER-TIMESTEP CLOSED LOOP
+       • ngspice calls back into Python on every dt
+       • Reads the simulated feedback net
+       • Quantises it to 12-bit ADC counts
+       • Evaluates the imported law, returns pin voltage
                             │
 ┌───────────────────────────┴────────────────────────────┐
 │                    ANALOG CIRCUIT                      │
 │  • Buck / Boost / Power Stages & Motor Subcircuits     │
 │  • ngspice solving non-linear DAEs & RLC matrices      │
+│  • A real feedback divider, present in the netlist     │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -84,7 +92,7 @@ error lists every path it tried.
 .\run_tests.bat          # Windows
 python tools/run_tests.py   # Linux / macOS
 ```
-All 13 suites (176 tests) run against the real solver.
+All 14 suites (227 tests) run against the real solver.
 
 ### 3. Launch the Schematic Editor (flagship PyQt5 app)
 ```powershell
@@ -97,11 +105,12 @@ at the bottom.
 
 | Gesture | Action |
 |---|---|
-| Place a part | Click it in the palette, then click the canvas |
-| Wire | Click pin &rarr; click pin (Esc cancels) |
-| Move / rotate | Drag a part (snaps to grid) / press <kbd>R</kbd> |
-| Edit value | Right-click &rarr; *Edit Value* (or press <kbd>E</kbd>) |
-| Label net | Right-click a wire &rarr; *Label Net* (or press <kbd>L</kbd>) |
+| Place a part | Press its letter — <kbd>R</kbd> <kbd>C</kbd> <kbd>L</kbd> <kbd>D</kbd> <kbd>V</kbd> <kbd>I</kbd> <kbd>M</kbd> <kbd>G</kbd> <kbd>U</kbd> <kbd>A</kbd> <kbd>N</kbd> <kbd>S</kbd> <kbd>E</kbd> — or click it in the palette, then click the canvas |
+| Cancel | <kbd>Esc</kbd> — un-arms the tool, drops a pending wire, clears the selection |
+| Wire | Click pin &rarr; click pin (<kbd>Esc</kbd> cancels) |
+| Move / rotate | Drag a part (snaps to grid) / <kbd>Ctrl+R</kbd> |
+| Edit value | Right-click &rarr; *Edit Value* (or <kbd>Ctrl+E</kbd>) |
+| Label net | Right-click a wire &rarr; *Label Net* (or <kbd>Ctrl+L</kbd>) |
 | Simulate | <kbd>F2</kbd> — compiles the schematic to SPICE and solves it in the real `ngspice.dll` |
 | Export | File menu: SPICE netlist (`.cir`), **KiCad schematic** (`.kicad_sch`), KiCad netlist (`.net`), BOM (`.csv`) |
 | Undo / redo | <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd> |
@@ -142,8 +151,9 @@ symbol; a test asserts the editor and KiCad pin counts agree, because a symbol
 whose pins disagree with its exported twin silently produces a wrong schematic.
 
 **Gestures.** Ctrl+click adds/removes from the selection, double-click rotates
-one part in place (single-click still drags), `R` rotates the selection,
-`Ctrl+Y` and `Ctrl+Shift+Z` both redo.
+one part in place (single-click still drags), `Ctrl+R` rotates the selection,
+`Ctrl+Y` and `Ctrl+Shift+Z` both redo. Bare letters are reserved for placing
+parts, LTspice-style.
 
 **Netlist editor.** The bottom dock has an editable SPICE pane next to the
 read-only generated one. *Run this netlist* simulates your edits; *Import as
@@ -224,9 +234,12 @@ thresholds moves the operating point (1024 counts → 0.825 V, 3072 counts →
 
 > **Limitation, stated plainly:** the firmware *binary* is still parsed, not
 > executed. What executes is the decision logic and its constants, lifted from
-> the firmware's own source. Running the compiled .elf needs an instruction-set
-> emulator (Renode/QEMU) or a transpiler. The netlist says which mode a pin is in,
-> and the editor never shows a behaviour the solver did not produce.
+> the firmware's own source. Espressif's QEMU does boot the compiled `.elf`
+> through ROM, the second-stage bootloader and `app_main()`, but nothing couples
+> that guest to the analog solver yet — QEMU models no ESP32 SAR ADC, so the
+> firmware panics at `adc_oneshot_read()` and completes 0 control-loop samples.
+> The netlist says which mode a pin is in, and the editor never shows a
+> behaviour the solver did not produce.
 
 #### Firmware execution status
 
@@ -238,17 +251,68 @@ What each "firmware" capability actually does today:
 | Import control constants from firmware **source** (`#define` regex) | **Works.** `bridge/control_law.py` |
 | Declared GPIO pin profiles (authored JSON) | **Works.** `bridge/gpio_model.py` |
 | Close the loop against a real ngspice solve | **Works.** `bridge/cosim_runner.py` |
-| Execute compiled machine instructions | **Does not exist.** No decoder, no emulator, no transpiler. |
-| Renode lockstep co-simulation | **Incomplete.** `bridge/renode_orchestrator.py --mode renode` shells out to `tools/renode/renode.exe`, which is gitignored and has never been run. |
+| Execute compiled machine instructions | **Partial.** `bridge/qemu_orchestrator.py` boots the real `.elf` through ROM, bootloader and `app_main()` in Espressif's QEMU, and reads its UART. It is not coupled to ngspice. |
+| Run the firmware's control loop | **Does not.** Over 45 s: 5 ROM boots, 5 `app_main()` calls, 4 watchdog panics, **0 control-loop samples**. QEMU's `esp32.sens` is one of ~24 `unimplemented-device` stubs, and `esp32_gpio_write()` drops writes outright. |
+| Fix the above | **In progress, unproven.** `tools/qemu-patch/` adds `esp32_sens.c` and a writable GPIO model (409 insertions). It applies cleanly to the pinned Espressif source but has never been compiled. |
+| Renode lockstep co-simulation | **Abandoned.** `bridge/renode_orchestrator.py` is kept for reference only. Renode cannot decode the Xtensa `entry` instruction (393 occurrences in an ESP-IDF build) and executed none of our firmware. QEMU is the current emulator target. Note that its `--mode benchmark` path is *not* the Renode one — it runs the pure-Python `mock_controller`. |
 
-There is no code path from a `.bin`/`.elf` to GPIO or ADC behaviour. Loading an
-image gives you metadata; behaviour comes from separately importing the `.c`
-source or hand-writing a law. See the architecture audit for details.
+There is no code path from a `.bin`/`.elf` to GPIO or ADC behaviour *inside the
+simulation*. Loading an image gives you metadata; behaviour comes from
+separately importing the `.c` source or hand-writing a law. See
+`tools/qemu-patch/README.md` for the register-level detail.
 
-### 4. Launch Interactive LTspice-Style Workbench
+### 4. Launch the Schematic Editor
 ```powershell
-python ui/ltspice_workbench.py
+run_editor.bat
 ```
+or
+
+```powershell
+python ui/schematic_editor.py
+```
+
+This is the only UI in the repository. The earlier tkinter workbench, studio and
+dashboard were retired rather than kept in parallel: three half-finished shells
+is worse than one finished one. The capability that lived in the studio - the
+fault-injection and temperature-corner qualification battery behind
+`bridge/industrial_verification.py` - is now under **Tools ▸ Qualification**.
+
+| | |
+|---|---|
+| ![dark](docs/editor-dark.png) | ![light](docs/editor-light.png) |
+| dark (default) | light — `Ctrl+T` |
+
+#### Canvas
+
+| Gesture | Action |
+|---|---|
+| Type in the palette filter, click a part | the symbol follows the pointer before you commit it |
+| `R` `C` `L` `D` `V` `I` `M` `G` `U` | arm that part; click the sheet to drop it |
+| `A` / `Shift+A` / `N` / `S` / `E` / `Shift+E` | Arduino Uno / Mega / Nano, STM32, ESP32, ESP32-S3 |
+| `Esc` | cancel: un-arm the tool, drop a pending wire, clear the selection |
+| Click pin → click pin | wire; `Esc` cancels |
+| Left-drag on empty canvas | rubber-band select (middle/right/space-drag pans instead) |
+| Wheel | zoom about the pointer; `Ctrl+0` fits |
+| `Del` / `Ctrl+R` / `Ctrl+E` / `Ctrl+L` | delete, rotate 90°, edit value, label net |
+| `F2` / `Ctrl+.` | run / stop the solver |
+| `Ctrl+T` / `Ctrl+G` / `Ctrl+Shift+R` | appearance, grid, rulers |
+
+The bare letter always means a *part*, following LTspice and KiCad. The
+commands that used to own bare letters moved to `Ctrl` chords so that pressing
+`R` cannot silently rotate whatever you meant to place. Clicking the sheet
+takes keyboard focus, so the letters work whether you started from the palette
+or from the canvas.
+
+#### What is remembered between launches
+
+Window geometry, dock layout, grid and ruler visibility, the recent-file list
+and the appearance. **Simulation inputs are deliberately not remembered** —
+vin, timestep, duration, accuracy and the run mode start at their defaults
+every time, because a result has to be reproducible from what is on screen and
+an inherited mode or timestep is indistinguishable from a bug.
+
+Set `WOSP_SETTINGS_DIR` to keep the profile in a specific directory (used by
+`tools/run_tests.py` to give each suite a clean profile).
 
 ### 5. Run Automated Co-Simulation Tests
 ```powershell
@@ -292,15 +356,20 @@ python tests/test_editor_workflow.py
   (`gpio_model.py`), closed-loop control laws (`control_law.py`), the
   co-simulation runner (`cosim_runner.py`), waveform analysis
   (`measurements.py`) and the FFT/Bode runner (`analysis_runner.py`),
-  KiCad export and Renode MMIO peripherals.
+  KiCad export, and the QEMU firmware-boot orchestrator (`qemu_orchestrator.py`).
 * `circuits/` — SPICE netlists (Buck, Boost, RC Filter) & reverse-engineered component models (`circuits/components/models.lib`).
 * `firmware/` — PlatformIO bare-metal C firmware project for ESP32.
-* `ui/` — Flagship PyQt5 schematic editor (`schematic_editor.py`, `schematic_scene.py`,
-  `schematic_items.py`, `schematic_symbols.py`), plus the older tkinter workbench
-  (`ltspice_workbench.py`) and parameter dashboard.
+* `ui/` — the application, and the only entry point:
+  `schematic_editor.py` (window, menus, results panes), `schematic_scene.py`
+  (placement, wiring, undo), `schematic_items.py` (symbol drawing),
+  `schematic_symbols.py` (component library), `theme.py` (one palette, dark
+  and light) and `icons.py` (runtime-drawn toolbar icons).
 * `tools/` — `prove_physics_engine.py` (solver proof harness), `run_tests.py`,
   `screenshot_editor.py` and `overnight_ollama.py` (local LLM batch runner).
-  `tools/ngspice_dll/` and `tools/renode/` are gitignored vendor binaries;
+  `tools/ngspice_dll/` and `tools/renode/` are gitignored vendor binaries
+  (`tools/renode/` is stale and unused — Renode cannot execute this firmware,
+  see [above](#firmware-execution-status)); `tools/qemu-patch/` is an
+  uncompiled QEMU device model.
   `setup.ps1` / `setup.sh` fetch ngspice on demand.
 * `tests/` — Automated verification test suites and benchmark runners.
 * `.github/workflows/` — Automated GitHub Actions CI/CD co-simulation workflow.
@@ -308,3 +377,9 @@ python tests/test_editor_workflow.py
 * `Dockerfile` & `docker-compose.yml` — Containerized headless execution setup.
   **Known broken:** they install a system `libngspice0` but predate the
   `find_library` fallback, and they copy neither `ui/` nor `tools/`.
+
+---
+
+## 📄 License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
