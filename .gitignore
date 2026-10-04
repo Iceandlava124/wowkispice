@@ -47,3 +47,13 @@ firmware/*/sdkconfig.*
 
 # Editor / agent workspace metadata (not project content)
 .freebuff/
+
+# Third-party reference material (NOT project content).
+# docs/ltspice-reference/ holds screenshots of another vendor's application, kept
+# locally as a private layout reference only. They are ADI/LTspice's copyrighted
+# images, so they must never be committed and redistributed in this repo. The UI
+# is built from interaction patterns (toolbar placement, hotkeys, pane layout),
+# which are not copyrightable expression; the original artwork is ours, drawn as
+# QPainterPath at runtime. See docs/systems-map.md "Third-party material".
+docs/ltspice-reference/
+docs/qucs-reference/

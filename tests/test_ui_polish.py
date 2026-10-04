@@ -10,6 +10,8 @@ Headless (QT_QPA_PLATFORM=offscreen). Covers:
 6. Session persistence restores chrome but never simulation semantics
 7. The waveform pane - trace list, visibility, and honest cursor hit testing
 8. Keyboard: letter keys arm a part, Esc un-arms it, the canvas takes focus
+9. Layout: the canvas keeps a real share of the window, and no single results
+   tab can starve it by demanding a huge minimum width
 """
 
 import os
@@ -25,7 +27,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PyQt5.QtCore import QPoint, QPointF, Qt                    # noqa: E402
 from PyQt5.QtGui import QColor, QImage, QPainter                # noqa: E402
 from PyQt5.QtTest import QTest                                 # noqa: E402
-from PyQt5.QtWidgets import QApplication                        # noqa: E402
+from PyQt5.QtWidgets import (                                   # noqa: E402
+    QApplication, QPushButton, QScrollArea,
+)
 
 from bridge.cad_engine import SchematicNetlistEngine             # noqa: E402
 from ui import icons, theme, schematic_items                     # noqa: E402
@@ -602,6 +606,103 @@ class TestWaveformPane(unittest.TestCase):
                              "trace list grew on the second run")
         finally:
             win.close()
+
+
+class TestCanvasShare(unittest.TestCase):
+    """The canvas must not be starved by a sibling pane's minimum width.
+
+    This was a real, shipped layout fault rather than an offscreen artefact:
+    the Bode tab's controls sat in one unshrinkable row, QTabWidget passed
+    that page's minimum width to the QSplitter, and the splitter honoured the
+    minimum over the intended 3:2 stretch factor.  The schematic view opened at
+    97 px inside a 1329 px pane.  Nothing in the suite measured the split, so a
+    layout regression here would be invisible.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(prefix="wosp-layout-test-")
+        theme.use_settings_dir(self._dir)
+        for key in theme.settings().allKeys():
+            theme.settings().remove(key)
+        self.win = SchematicEditor()
+        self.win.show()
+        _app.processEvents()
+        self.win.grab()          # force the first real layout pass
+        _app.processEvents()
+
+    def tearDown(self):
+        self.win.close()
+        _app.processEvents()
+
+    def results_tabs(self):
+        return self.win.center_split.widget(1)
+
+    def test_canvas_keeps_a_real_share_of_the_pane(self):
+        self.win.resize(1600, 980)
+        _app.processEvents()
+        self.win.grab()
+        _app.processEvents()
+        pane = self.win.center_split.width()
+        self.assertGreater(self.win.view.width(), 0,
+                           "canvas collapsed to zero width")
+        self.assertGreaterEqual(
+            self.win.view.width() * 100 // pane, 40,
+            f"canvas is {self.win.view.width()} px of a {pane} px pane; "
+            "a sibling pane is dictating the split")
+
+    def test_canvas_share_holds_across_window_widths(self):
+        shares = []
+        for width in (1280, 1600):
+            self.win.resize(width, 900)
+            _app.processEvents()
+            self.win.grab()
+            _app.processEvents()
+            shares.append(self.win.view.width() * 100
+                          // self.win.center_split.width())
+        for width, share in zip((1280, 1600), shares):
+            self.assertGreaterEqual(
+                share, 40,
+                f"canvas fell to {share}% of the pane at {width} px wide")
+
+    def test_no_results_tab_demands_an_outrageous_minimum(self):
+        """A tab page's minimum width becomes the whole window's minimum."""
+        tabs = self.results_tabs()
+        for index in range(tabs.count()):
+            page = tabs.widget(index)
+            self.assertLessEqual(
+                page.minimumSizeHint().width(), 640,
+                f"tab {tabs.tabText(index)!r} demands "
+                f"{page.minimumSizeHint().width()} px of minimum width")
+
+    def test_bode_controls_scroll_instead_of_dictating_width(self):
+        """The Bode row is genuinely wide, so it must not be clipped away.
+
+        It is allowed to be wide; it is not allowed to be unreachable.
+        """
+        tabs = self.results_tabs()
+        page = None
+        for index in range(tabs.count()):
+            if tabs.tabText(index) == "Bode":
+                page = tabs.widget(index)
+        self.assertIsNotNone(page, "no Bode tab to check")
+        scrolls = page.findChildren(QScrollArea)
+        self.assertTrue(scrolls,
+                        "Bode controls are neither compact nor scrollable")
+        area = scrolls[0]
+        self.assertTrue(area.widget().findChildren(QPushButton),
+                        "scrollable Bode controls contain no buttons")
+        # The area's height is fixed at build time, so a font change would clip
+        # the controls unless the vertical scrollbar is allowed to appear.
+        self.assertEqual(area.verticalScrollBarPolicy(), Qt.ScrollBarAsNeeded,
+                         "controls can be clipped vertically with no escape")
+        self.assertGreaterEqual(
+            area.height(), area.widget().sizeHint().height(),
+            "Bode controls do not fit the scroll area")
+
+    def test_canvas_has_a_minimum_width_floor(self):
+        self.assertGreaterEqual(
+            self.win.view.minimumWidth(), 300,
+            "the canvas can be squeezed to nothing by its own layout")
 
 
 if __name__ == "__main__":

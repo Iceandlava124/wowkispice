@@ -23,10 +23,11 @@ from PyQt5.QtCore import (QPointF, QRect, QRectF, QSize, Qt, QThread,
                           pyqtSignal)
 from PyQt5.QtGui import QKeySequence, QPainter, QBrush, QColor, QPen
 from PyQt5.QtWidgets import (
-    QAction, QApplication, QComboBox, QDockWidget, QFileDialog, QGraphicsView,
-    QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem, QMainWindow,
-    QDialog, QMenu, QMessageBox, QLineEdit, QPlainTextEdit, QProgressBar,
-    QPushButton, QSplitter,
+    QAction, QApplication, QComboBox, QDockWidget, QFileDialog, QFrame,
+    QGraphicsView, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout,
+    QListWidget, QListWidgetItem,
+    QMainWindow, QDialog, QMenu, QMessageBox, QLineEdit, QPlainTextEdit,
+    QProgressBar, QPushButton, QScrollArea, QSplitter,
     QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
     QDoubleSpinBox, QToolBar,
 )
@@ -472,6 +473,9 @@ class SchematicEditor(QMainWindow):
         self.model = SchematicNetlistEngine()
         self.scene = SchematicScene(self.model, self)
         self.view = SchematicView(self.scene, self)
+        # Floor on the canvas: a sibling pane may demand room, but the editor
+        # must never be squeezed into a sliver by its own layout.
+        self.view.setMinimumWidth(420)
         self.ng = None                      # lazily created NgSpiceEngine
 
         self._build_ui()
@@ -1094,29 +1098,52 @@ class SchematicEditor(QMainWindow):
         results_tabs.addTab(fft_panel, "FFT")
 
         # Bode tab: runs its own .ac sweep on demand.
+        #
+        # Layout note: these controls used to sit in one unshrinkable row whose
+        # minimum width was 1227 px (mostly the two QDoubleSpinBox hints, which
+        # size to their range text).  QTabWidget hands the widest page's minimum
+        # to the QSplitter, and that starved the schematic view down to 97 px of
+        # a 1329 px pane.  The controls now sit in a scroll area on a page with
+        # no size constraint, so the pane can shrink and the controls scroll
+        # instead of dictating the window's minimum width.
         bode_panel = QWidget()
         bode_layout = QVBoxLayout(bode_panel)
-        bode_controls = QHBoxLayout()
-        bode_controls.addWidget(QLabel(" Output net "))
+        bode_layout.setSizeConstraint(QLayout.SetNoConstraint)
+        bode_controls_host = QWidget()
+        bode_controls = QGridLayout(bode_controls_host)
+        bode_controls.setContentsMargins(0, 0, 0, 0)
+        bode_controls.addWidget(QLabel(" Output net "), 0, 0)
         self.bode_net_box = QComboBox()
         self.bode_net_box.setEditable(True)
-        bode_controls.addWidget(self.bode_net_box, 1)
-        bode_controls.addWidget(QLabel(" Start Hz "))
+        bode_controls.addWidget(self.bode_net_box, 0, 1)
+        bode_controls.addWidget(QLabel(" Start Hz "), 1, 0)
         self.bode_start_box = QDoubleSpinBox()
         self.bode_start_box.setRange(0.001, 1e9)
         self.bode_start_box.setDecimals(3)
         self.bode_start_box.setValue(1.0)
-        bode_controls.addWidget(self.bode_start_box)
-        bode_controls.addWidget(QLabel(" Stop Hz "))
+        bode_controls.addWidget(self.bode_start_box, 1, 1)
+        bode_controls.addWidget(QLabel(" Stop Hz "), 1, 2)
         self.bode_stop_box = QDoubleSpinBox()
         self.bode_stop_box.setRange(0.01, 1e12)
         self.bode_stop_box.setDecimals(1)
         self.bode_stop_box.setValue(1e6)
-        bode_controls.addWidget(self.bode_stop_box)
+        bode_controls.addWidget(self.bode_stop_box, 1, 3)
         bode_run = QPushButton("Run AC Sweep")
         bode_run.clicked.connect(self.run_bode)
-        bode_controls.addWidget(bode_run)
-        bode_layout.addLayout(bode_controls)
+        bode_controls.addWidget(bode_run, 1, 4)
+        bode_controls.setColumnStretch(1, 1)
+        bode_controls_scroll = QScrollArea()
+        bode_controls_scroll.setFrameShape(QFrame.NoFrame)
+        bode_controls_scroll.setWidget(bode_controls_host)
+        bode_controls_scroll.setWidgetResizable(True)
+        bode_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # AsNeeded, not AlwaysOff: the height below is fixed at build time, so a
+        # later font change would otherwise clip the controls with no way to
+        # reach them. It does not appear in practice (76 px available, 62 used).
+        bode_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        bode_controls_scroll.setFixedHeight(
+            bode_controls_host.sizeHint().height() + 14)
+        bode_layout.addWidget(bode_controls_scroll)
 
         self.bode_plot = pg.PlotWidget(background="w", title="Bode plot")
         self.bode_plot.addLegend()
@@ -1834,7 +1861,10 @@ class SchematicEditor(QMainWindow):
             return
         sense_net, ok = QInputDialog.getItem(
             self, f"Control Law for {comp.name}",
-            "Which net does this firmware read back?", nets, 0, False)
+            "Which net is the ADC pin wired to?\n"
+            "Pick the divider output the pin actually sees, not the raw output\n"
+            "node - the firmware's thresholds are already pin-referenced counts.",
+            nets, 0, False)
         if not ok:
             return
         try:
@@ -1851,6 +1881,22 @@ class SchematicEditor(QMainWindow):
         if spec["pin"] not in comp.pins:
             self.log(f"  warning: firmware drives {spec['pin']}, which is not "
                      f"wired in this schematic - the law cannot run until it is.")
+        # Divider sanity check. The firmware's counts are pin-referenced, so if
+        # the chosen sense net is the undivided output node the loop regulates
+        # to half the intended voltage. This cannot detect that automatically:
+        # the implied voltages come from the firmware's own constants, not from
+        # the schematic, so nothing here can see the netlist's divider. What it
+        # CAN do is state the number the pin must sit at, which is enough for a
+        # reader to spot a net that is running at roughly twice that.
+        try:
+            pin_lo, pin_hi = control_law.implied_pin_voltages(spec)
+        except control_law.ControlLawError as exc:
+            self.log(f"  could not derive the sense voltages: {exc}")
+            return
+        self.log(f"  {sense_net} must sit at {pin_lo:.4f}..{pin_hi:.4f} V for "
+                 f"{comp.name} to switch. If this net is the undivided output "
+                 f"rather than the divider output, it will run at about twice "
+                 f"that and the loop will regulate to half the intended voltage.")
 
     def _set_control_law(self, comp):
         from bridge import control_law, firmware

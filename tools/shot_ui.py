@@ -1,6 +1,18 @@
 """Render the editor offscreen to PNG, in either appearance, with a sample
 circuit on the canvas. Development/documentation aid:
     python tools/shot_ui.py dark
+
+A --canvas mode that grabs only the canvas view was tried and removed. It
+emitted a 97x543 image: win.view measured 97 px wide inside a 1329 px parent.
+That narrow view was NOT an offscreen artefact - it was a real layout fault,
+where the Bode tab's unshrinkable control row set the whole right pane's
+minimum width. It is fixed (see TestCanvasShare in tests/test_ui_polish.py)
+and win.view now measures 681 px at 1600x980. A canvas-only grab is therefore
+viable again; check win.view.width() before trusting one.
+
+Both docs/editor-dark.png and docs/editor-light.png must be regenerated from the
+same code. tools/ui_parity.py calibrates against that pair, and a half-updated
+pair reads as a theme regression that does not exist.
 """
 import os
 import sys
