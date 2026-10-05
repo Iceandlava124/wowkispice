@@ -10,7 +10,29 @@ import numpy as np
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bridge.mock_controller import run_closed_loop_simulation
+from bridge.mock_controller import run_closed_loop_simulation, MockESP32BuckController
+
+
+class TestThresholdsMatchFirmware(unittest.TestCase):
+    """mock_controller and control_law must agree on the decision boundary.
+
+    Both model the same firmware, so both must cross at the same counts. The
+    firmware declares ADC_LOW_THRESHOLD 1995 / ADC_HIGH_THRESHOLD 2030; these
+    are derived from the controller's defaults rather than restated, so they
+    cannot drift apart silently again.
+    """
+
+    def test_counts_match_the_firmware_constants(self):
+        c = MockESP32BuckController()
+        self.assertEqual(c.adc_low, 1995)
+        self.assertEqual(c.adc_high, 2030)
+
+    def test_divider_is_not_applied_twice(self):
+        """It reads the real `fb` node, so the divider belongs in thresholds only."""
+        c = MockESP32BuckController()
+        self.assertEqual(c.divider_ratio, 0.5)
+        # 1997 would mean the divider had also been applied to the reading.
+        self.assertNotEqual(c.adc_low, 997)
 
 
 class TestClosedLoopBuck(unittest.TestCase):

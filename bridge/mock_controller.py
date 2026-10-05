@@ -23,10 +23,26 @@ class MockESP32BuckController:
     Simulates ESP32 firmware:
     - Input: Feedback voltage from a 2:1 resistive divider (V_feedback = V_out / 2)
     - ADC: 12-bit (0..4095 counts for 0..3.3V)
-    - Target: Calibrated for 3.30V average steady-state output accounting for inductor discharge
     - Output: GPIO 0V / 3.3V
+
+    The defaults are DERIVED FROM firmware/esp32_buck_controller/src/main.c, not
+    picked by hand, so this path and bridge/control_law.py agree on the decision
+    boundary rather than merely looking similar:
+
+        count = (target +/- hyst) * divider_ratio / adc_vref * 4095
+
+    The firmware declares ADC_LOW_THRESHOLD 1995 and ADC_HIGH_THRESHOLD 2030.
+    Inverting that with divider_ratio 0.5 and vref 3.3 gives target 3.2436 V and
+    hysteresis 0.0282 V, which reproduce 1995 and 2030 exactly. test_
+    closed_loop_buck asserts both counts.
+
+    Note this controller reads the `fb` node the divider really produces in
+    circuits/buck_converter.cir, so divider_ratio appears ONLY here, in the
+    threshold derivation. Applying it again to the reading would halve the loop
+    twice; see bridge/control_law.py's module docstring for the same trap on
+    the other path.
     """
-    def __init__(self, target_vout: float = 3.24, hyst_vout: float = 0.02, divider_ratio: float = 0.5, adc_vref: float = 3.30):
+    def __init__(self, target_vout: float = 3.2436, hyst_vout: float = 0.0282, divider_ratio: float = 0.5, adc_vref: float = 3.30):
         self.target_vout = target_vout
         self.hyst_vout = hyst_vout
         self.divider_ratio = divider_ratio
@@ -122,7 +138,8 @@ def run_closed_loop_simulation(
     print(f"Circuit: {cir_path}")
     print(f"Total time: {total_time_ms} ms, Resolution: {tstep_us} us")
     
-    controller = MockESP32BuckController(target_vout=3.24, hyst_vout=0.02, divider_ratio=0.5)
+    controller = MockESP32BuckController(target_vout=3.2436, hyst_vout=0.0282,
+                                        divider_ratio=0.5)
     
     c_vsrc = GetVSRCData_t(controller.on_vsrc)
     c_isrc = GetISRCData_t(lambda v, t, n, i, u: 0)

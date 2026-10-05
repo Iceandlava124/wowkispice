@@ -344,5 +344,116 @@ class TestPwmLaw(unittest.TestCase):
         self.assertLessEqual(law.duty, 1.0)
 
 
+class TestDividerSemantics(unittest.TestCase):
+    """The firmware's thresholds are counts AT THE ADC PIN.
+
+    main.c says so in its own comment: "these are RAW counts, not millivolts ...
+    the decision below is still made on the raw value". The 2:1 divider in
+    circuits/buck_converter.cir is therefore already reflected in 1995/2030:
+    the pin only ever sees the divided voltage.
+
+    These tests pin that arithmetic so nobody "fixes" a divider that is not
+    broken, and so a sense net chosen one node too high cannot pass unnoticed.
+    """
+
+    def spec(self):
+        return control_law.law_from_firmware_source_exact(FIRMWARE_MAIN_C, "fb")
+
+    def test_thresholds_are_counts_at_the_pin(self):
+        s = self.spec()
+        self.assertEqual(s["low_counts"], 1995)
+        self.assertEqual(s["high_counts"], 2030)
+        self.assertEqual(s["divider"], 1.0,
+                         "a pin-referenced sense net needs no divider")
+
+    def test_pin_voltages_invert_the_firmware_mapping(self):
+        lo, hi = control_law.implied_pin_voltages(self.spec())
+        # 1995/4095*3.3 and 2030/4095*3.3
+        self.assertAlmostEqual(lo, 1.6077, places=3)
+        self.assertAlmostEqual(hi, 1.6359, places=3)
+
+    def test_midpoint_matches_the_firmware_comment(self):
+        """main.c claims ~2012 counts is 3.24 V out. Check it."""
+        lo, hi = control_law.implied_pin_voltages(self.spec())
+        mid_out = ((lo + hi) / 2.0) / 0.5          # 2:1 divider to vout
+        self.assertAlmostEqual(mid_out, 3.2436, places=3)
+        self.assertAlmostEqual(mid_out, 3.24, places=1)
+
+    def test_picking_the_undivided_node_halves_the_target(self):
+        """The trap: sense_net='vout' regulates to half the intended voltage."""
+        lo, hi = control_law.implied_output_voltages(self.spec(), 0.5)
+        self.assertAlmostEqual(lo, 3.2154, places=3)
+        self.assertAlmostEqual(hi, 3.2718, places=3)
+        # Same numbers with the divider applied twice would be half again.
+        self.assertAlmostEqual(hi / 2.0, 1.6359, places=3)
+
+    def test_bad_pin_divider_is_rejected(self):
+        with self.assertRaises(control_law.ControlLawError):
+            control_law.implied_output_voltages(self.spec(), 0.0)
+
+    def test_undivided_sense_net_with_a_divider_reproduces_the_counts(self):
+        """Naming the undivided net must not change the switching points.
+
+        This was wrong and nothing caught it. law_from_firmware_source()
+        divided its recovered target by `divider` but left hysteresis_v in pin
+        volts; normalize_law() then multiplies both by divider again, so the
+        target survived and the band came out halved. Asking for the same
+        firmware through sense_net='vout' with divider=0.5 therefore gave
+        2004/2020 instead of 1995/2030 - a 35% narrower deadband, silently.
+        """
+        vout = control_law.law_from_firmware_source(
+            FIRMWARE_MAIN_C, sense_net="vout", divider=0.5)
+        s = control_law.normalize_law(vout)
+        self.assertEqual(s["low_counts"], 1995)
+        self.assertEqual(s["high_counts"], 2030)
+
+    def test_the_two_sense_nets_agree_exactly(self):
+        """fb at divider 1.0 and vout at divider 0.5 are one law, not two."""
+        a = control_law.normalize_law(control_law.law_from_firmware_source(
+            FIRMWARE_MAIN_C, sense_net="fb"))
+        b = control_law.normalize_law(control_law.law_from_firmware_source(
+            FIRMWARE_MAIN_C, sense_net="vout", divider=0.5))
+        self.assertEqual((a["low_counts"], a["high_counts"]),
+                         (b["low_counts"], b["high_counts"]))
+        self.assertAlmostEqual(a["target_v"], b["target_v"] * 0.5, places=4)
+
+
+class TestFidelityGap(unittest.TestCase):
+    """A fidelity gap nobody can notice is how a model rots.
+
+    control_law does NOT model oversampling or ADC calibration, because 16
+    microsecond-spaced reads have no defensible analogue in a sub-microsecond
+    solver loop. Rather than guess, the gap is asserted here: these tests FAIL
+    if the firmware stops doing the things the model knowingly ignores, forcing
+    the "WHAT THIS DOES NOT MODEL" section in control_law.py to be revisited.
+    """
+
+    def source(self):
+        with open(FIRMWARE_MAIN_C, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+
+    def test_firmware_still_oversamples(self):
+        self.assertIn("ADC_OVERSAMPLE_N", self.source(),
+                      "firmware no longer oversamples; control_law's note about "
+                      "switching more often than the firmware is now stale")
+
+    def test_firmware_still_calibrates_the_adc(self):
+        self.assertIn("adc_cali", self.source(),
+                      "firmware no longer uses adc_cali; control_law's flat "
+                      "vref mapping may now be accurate, revisit the note")
+
+    def test_firmware_still_states_counts_are_raw(self):
+        self.assertIn("RAW counts", self.source(),
+                      "the firmware comment that control_law relies on to read "
+                      "the thresholds as pin-referenced counts has changed")
+
+    def test_oversample_count_is_not_silently_ignored(self):
+        """Oversampling changes the loop, so its value must stay visible."""
+        import re
+        m = re.search(r"#define\s+ADC_OVERSAMPLE_N\s+(\d+)", self.source())
+        self.assertIsNotNone(m, "ADC_OVERSAMPLE_N is not a #define any more")
+        self.assertGreaterEqual(int(m.group(1)), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

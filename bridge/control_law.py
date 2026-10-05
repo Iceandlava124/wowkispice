@@ -25,14 +25,60 @@ Law kinds:
                 matches firmware/esp32_buck_controller/src/main.c.
     pwm         duty cycle proportional to regulation error, on a fixed carrier.
 
+WHAT THIS DOES NOT MODEL, AND WHY IT IS NOT A BUG
+
+firmware/esp32_buck_controller/src/main.c does four things this law does not.
+They are listed here, loudly, because the alternative is a simulation that
+stays plausible and green while being quietly wrong.
+
+  1. ADC_OVERSAMPLE_N = 16. It averages 16 reads per decision to suppress
+     noise comparable to the hysteresis band. Deliberately NOT modelled: those
+     16 reads are microseconds apart in real time, while solver timesteps here
+     are sub-microsecond, so "average the last 16 samples" has no defensible
+     analogue in this loop. Modelling it as a filter would be a guess dressed
+     as physics. What it means in practice: the modelled loop switches more
+     often than the firmware would.
+  2. adc_cali line-fitting calibration. The firmware converts raw counts to
+     millivolts through eFuse calibration, and configures ADC_ATTEN_DB_12
+     (about 0-3.1 V usable, not 3.3 V). This law assumes a flat
+     counts = volts/vref*full_scale mapping with vref = 3.3 V. On real silicon
+     the calibration curve is neither flat nor exactly 3.3 V, so the modelled
+     thresholds are a good first approximation and nothing more.
+  3. The attenuation setting itself is not read from the source.
+  4. ESP_ERROR_CHECK guards on init failure have no counterpart.
+
+tests/test_cosim_control.py pins this gap deliberately: TestFidelityGap asserts
+that main.c still declares ADC_OVERSAMPLE_N and still calls adc_cali. If someone
+removers oversampling or calibration from the firmware, that test fails and
+forces this section to be revisited - which is the point. A fidelity gap nobody
+can notice is how a model rots.
+
 Spec (JSON, per MCU):
     {"kind": "hysteretic", "pin": "GPIO18", "sense_net": "vout",
      "target_v": 3.3, "hysteresis_v": 0.04, "divider": 0.5,
      "vhigh": 3.3, "vref": 3.3, "adc_bits": 12}
 
-`divider` is the sense-net attenuation the firmware believes in, so
-`v_feedback = sense_net * divider`. `adc_bits`/`vref` quantise the read exactly
-as a real ADC would, so the modelled thresholds are counts, not float volts.
+`divider` is the attenuation from the **sense net to the ADC pin**, so
+`v_pin = sense_net * divider`. `adc_bits`/`vref` quantise the read exactly as a
+real ADC would, so the modelled thresholds are counts, not float volts.
+
+WHICH NET IS `sense_net`? THIS IS THE WHOLE BALLGAME.
+
+The firmware's `#define ADC_LOW_THRESHOLD 1995` / `ADC_HIGH_THRESHOLD 2030`
+are **raw counts measured at the ADC pin**, and its own comment says so:
+"these are RAW counts, not millivolts ... the decision below is still made on
+the raw value". The divider is already reflected in them, because the pin only
+ever sees the divided voltage. Arithmetic, for the 2:1 divider in
+circuits/buck_converter.cir:
+
+    mid count 2012.5 / 4095 * 3.3 V = 1.6218 V at the pin
+    1.6218 V * 2                    = 3.2436 V at vout   (firmware says 3.24 V)
+
+So the correct `divider` is 1.0 **when `sense_net` is the divider output**
+(the node the ADC pin is wired to). Passing the undivided output node as
+`sense_net` and leaving `divider=1.0` is not a rounding error, it regulates to
+1.62 V instead of 3.24 V: exactly the divider ratio, silently. `implied_
+output_voltages()` exists so a caller can check before trusting a run.
 """
 
 import math
@@ -362,6 +408,11 @@ def law_from_firmware_source(
     The thresholds in that firmware are already *scaled* counts (its comments
     state the divider is folded in), so the returned spec uses divider=1.0 by
     default: the counts are compared directly, exactly as the firmware does.
+
+    Pass `divider` only when `sense_net` is NOT the net the ADC pin samples —
+    i.e. when it is the undivided output and the pin sees it attenuated. The
+    derived target and hysteresis are then reported in that net's units, and
+    dividing `sense_net="fb"` by 1.0 must reproduce the firmware's own counts.
     """
     consts = read_firmware_constants(path)
     full = (1 << adc_bits) - 1
@@ -370,14 +421,20 @@ def law_from_firmware_source(
     # Recover the output-target scale factor from the source's own numbers so
     # the reported target is the real one, not a round-number guess.
     midpoint = (low + high) / 2.0 / full * vref
+    half_band = abs(high - low) / 2.0 / full * vref
+    # A non-unit divider means the caller pointed us at an undivided net, so
+    # BOTH the target and the band move to that net's scale. Scaling only the
+    # target left hysteresis_v in pin volts; normalize_law then multiplies both
+    # by divider again, so the target survived and the band was halved.
     target_v = midpoint / divider if divider else midpoint
+    hysteresis_v = half_band / divider if divider else half_band
 
     return {
         "kind": "hysteretic",
         "pin": str(consts["pin"]),
         "sense_net": sense_net,
         "target_v": round(target_v, 4),
-        "hysteresis_v": round(abs(high - low) / 2.0 / full * vref, 4),
+        "hysteresis_v": round(hysteresis_v, 4),
         "vhigh": vhigh,
         "vref": vref,
         "adc_bits": adc_bits,
@@ -402,11 +459,47 @@ def law_from_firmware_source_exact(
     As law_from_firmware_source(), but pins the counts to the file's own
     integers instead of a round-trip through volts, so what the solver sees is
     bit-for-bit the firmware's decision boundary.
+
+    `divider` stays 1.0 for a pin-referenced sense net. Pass the attenuation
+    from sense_net to the ADC pin (0.5 for a 100k/100k divider) ONLY when
+    sense_net is the undivided output node.
     """
     spec = law_from_firmware_source(path, sense_net, divider, vhigh, vref, adc_bits)
     spec["low_counts"] = int(spec["source_counts"]["low"])
     spec["high_counts"] = int(spec["source_counts"]["high"])
     return spec
+
+
+# ----------------------------------------------------------------------
+# Divider sanity check
+# ----------------------------------------------------------------------
+def implied_pin_voltages(spec: Dict[str, object]) -> Tuple[float, float]:
+    """Voltages the ADC pin must see to cross the low and high thresholds.
+
+    Inverts the same pin-referenced mapping the firmware uses, so this is the
+    direct statement of what the constants in the C file mean physically.
+    """
+    normalized = normalize_law(spec)
+    vref = float(normalized["vref"])
+    full = float((1 << int(normalized["adc_bits"])) - 1)
+    return (float(normalized["low_counts"]) / full * vref,
+            float(normalized["high_counts"]) / full * vref)
+
+
+def implied_output_voltages(spec: Dict[str, object],
+                            pin_divider: float = 1.0) -> Tuple[float, float]:
+    """What the schematic's output node will be regulated to.
+
+    `pin_divider` is the schematic's pin-to-output attenuation (0.5 for the
+    100k/100k divider in circuits/buck_converter.cir). Call this before
+    trusting a run: if `spec["sense_net"]` is the undivided output node rather
+    than the divider output, the returned numbers are half what you expect, and
+    that is the signature of a mis-wired sense net rather than a bad circuit.
+    """
+    lo, hi = implied_pin_voltages(spec)
+    if pin_divider <= 0:
+        raise ControlLawError(f"pin_divider must be > 0, got {pin_divider}")
+    return (lo / pin_divider, hi / pin_divider)
 
 
 def describe_law(spec: Optional[Dict[str, object]]) -> str:
