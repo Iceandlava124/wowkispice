@@ -20,6 +20,22 @@
 
 ## 🏛️ Architecture Overview
 
+
+## 🎯 Project Goals / Status
+
+Each goal is stated as one testable sentence and flagged with the same grammar used in [docs/systems-map.md](docs/systems-map.md): **ACHIEVED** = a test or proof in this repo demonstrates it, with evidence cited; **PARTIAL** = part works and part does not, and the gap is named; **NOT YET** = something concrete is blocking it.
+
+- [x] **ACHIEVED —** The analog solver is a real `libngspice` C DLL, not an approximation. Evidence: [tools/prove_physics_engine.py](tools/prove_physics_engine.py) and [tests/test_ngspice_dll_proof.py](tests/test_ngspice_dll_proof.py) inspect the loaded DLL and C function pointers in RAM, then verify a dynamically generated RC step response and an underdamped RLC ringing frequency/envelope against closed-form ODEs, with assertions that raise on failure.
+- [x] **ACHIEVED —** The repo can run a genuine per-timestep closed-loop co-simulation between an analog solve and a firmware-derived controller. Evidence: `tests/test_cosim_control.py` (23 tests) and `tests/test_closed_loop_buck.py` (3 tests) exercise `bridge/cosim_runner.py` and `bridge/control_law.py`, including real runs where `GetVSRCData` reads the sense net from ngspice's C buffer each timestep. Note: the controller is a Python model whose three constants were scraped from the C source — see the fidelity gap below.
+- [x] **ACHIEVED —** The closed loop includes a real feedback divider that lives in the SPICE netlist, not a Python fudge factor. Evidence: `tests/test_cosim_control.py::TestDividerSemantics` and `TestThresholdsMatchFirmware` assert the divider semantics and that both closed-loop paths reproduce the firmware's 1995/2030 counts; `test_schematic_editor.py` asserts the palette symbol pin order matches the netlister.
+- [x] **ACHIEVED —** There is an LTspice-familiar schematic editor UX. Evidence: `tests/test_ui_polish.py` (47), `tests/test_editor_workflow.py` (36), `tests/test_schematic_editor.py` (28), and `tests/test_ui_parity.py` (12) cover placement, wiring, hotkeys, zoom/pan, undo, value editing, net labeling, simulation, and KiCad export. The palette shortcut letters are the same functional grammar used by LTspice/KiCad; the icon artwork is drawn at runtime from own geometry, not imported.
+- [x] **ACHIEVED —** The compiled firmware boots in an emulator through ROM, the second-stage bootloader, and `app_main()`. Evidence: `bridge/qemu_orchestrator.py` boots `firmware/.../qemu_flash.bin` under Espressif QEMU and reaches both `BOOT_MARKERS` on UART (5 ROM boots, 5 `app_main()` entries). This is boot, not the control loop.
+- [ ] **PARTIAL —** The compiled firmware executes, but it does **not** drive the simulation loop. What works: boots to `app_main()` as above. What does not: the first real ADC read never completes under stock QEMU because `esp32.sens` is an `unimplemented-device` stub; measured 4 watchdog panics / 45 s and **0 control-loop samples**. Evidence: [docs/systems-map.md](docs/systems-map.md) Layer 4 and the "Firmware execution status" table. The intended fix (`tools/qemu-patch/`) applies cleanly to the pinned source but has never been compiled, so the patch's register semantics are UNVERIFIED, and there is currently no host-side code path that reads the emulated ADC and feeds it back into ngspice.
+- [x] **ACHIEVED —** An open-source license is in place. Evidence: `LICENSE` is Apache-2.0; [README.md](README.md#📄-license) states it. Third-party material is handled explicitly: Qucs-S is studied, not copied (GPL-2.0-or-later cannot mix into Apache-2.0); LTspice screenshots are local-only and gitignored.
+- [ ] **NOT YET —** CI is not verified as passing on a fresh clone. Evidence: `.github/workflows/cosim-ci.yml` exists and is YAML-parsed/step-order-checked, but it has never executed in CI history in this environment (no Docker, no remote). The workflow does include a `python tools/run_tests.py` step, which is the same runner that locally produces **257 tests across 16 suites, exit 0** — so the test suite itself is ready, but the CI path is **UNVERIFIED**, not CONFIRMED WORKING. Also **NOT YET** in the literal sense: a fresh clone needs two things the repo does not contain — a Python environment and `libngspice` — and the setup scripts (`setup.ps1` / `setup.sh`) fetch the DLL rather than including it.
+
+One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the green suite means the Python controller matches three scraped constants in a C file. It does **not** mean the firmware works on silicon, the thresholds are calibrated, the QEMU patch compiles, or that there is a working analog↔emulated-chip data path today.
+
 ```
 ┌────────────────────────────────────────────────────────┐
 │               FIRMWARE CONTROL LOGIC                   │
@@ -92,7 +108,7 @@ error lists every path it tried.
 .\run_tests.bat          # Windows
 python tools/run_tests.py   # Linux / macOS
 ```
-All 14 suites (227 tests) run against the real solver.
+All 16 suites (257 tests) run against the real solver.
 
 ### 3. Launch the Schematic Editor (flagship PyQt5 app)
 ```powershell
@@ -316,6 +332,9 @@ Set `WOSP_SETTINGS_DIR` to keep the profile in a specific directory (used by
 
 ### 5. Run Automated Co-Simulation Tests
 ```powershell
+# Run physical proof that ngspice.dll is genuinely executing the C solver
+python tests/test_ngspice_dll_proof.py
+
 # Run baseline ctypes bridge test
 python tests/test_ngspice_bridge.py
 
@@ -345,6 +364,21 @@ python tests/test_measurements.py
 
 # Run editor workflow tests (MCU boards, gestures, netlist editor, sim control)
 python tests/test_editor_workflow.py
+
+# Run state-of-the-art studio capability tests
+python tests/test_sota_suite.py
+
+# Run industrial-grade verification battery (DO-254 / ISO 26262)
+python tests/test_industrial_verification.py
+
+# Run studio suite tests
+python tests/test_studio_suite.py
+
+# Run UI parity tests
+python tests/test_ui_parity.py
+
+# Run UI polish tests
+python tests/test_ui_polish.py
 ```
 
 ---

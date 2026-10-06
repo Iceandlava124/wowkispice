@@ -20,6 +20,9 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 .venv\Scripts\python.exe tools\run_tests.py
+echo.
+echo Suites run:
+for /f "delims=" %%F in ('dir /b tests\test_*.py ^| sort') do @echo   tests\%%F
 exit /b %errorlevel%
 
 :nospice
