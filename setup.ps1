@@ -239,5 +239,5 @@ if ($rc -ne 0) { throw "libngspice was placed but could not be loaded." }
 Write-Step "Setup complete."
 Write-Host ""
 Write-Host "Next:" -ForegroundColor Cyan
-Write-Host "  .\run_tests.bat      # run all 13 suites"
+Write-Host "  .\run_tests.bat      # run all 16 suites"
 Write-Host "  .\run_editor.bat     # launch the PyQt5 schematic editor"
