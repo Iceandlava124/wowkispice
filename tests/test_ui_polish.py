@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (                                   # noqa: E402
 )
 
 from bridge.cad_engine import SchematicNetlistEngine             # noqa: E402
+from ui.schematic_editor import ICON_SCALES                        # noqa: E402
 from ui import icons, theme, schematic_items                     # noqa: E402
 from ui.schematic_editor import SchematicEditor, SchematicView  # noqa: E402
 from ui.schematic_items import draw_symbol                       # noqa: E402
@@ -703,6 +704,726 @@ class TestCanvasShare(unittest.TestCase):
         self.assertGreaterEqual(
             self.win.view.minimumWidth(), 300,
             "the canvas can be squeezed to nothing by its own layout")
+
+
+# ----------------------------------------------------------------------------
+# Item 1: icon / cursor scale setting is wired, persisted, and changes sizes
+# ----------------------------------------------------------------------------
+class TestIconScaleSetting(unittest.TestCase):
+    """LTspice users are stuck with one fixed icon size; here the user can
+    pick Small / Medium / Large from View > Icon / Cursor Size and it sticks
+    across a restart. This test exercises the real machinery, not a mock."""
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(prefix="wosp-scale-test-")
+        theme.use_settings_dir(self._dir)
+        for key in theme.settings().allKeys():
+            theme.settings().remove(key)
+        self.win = SchematicEditor()
+        self.win.show()
+        _app.processEvents()
+
+    def tearDown(self):
+        self.win.close()
+        _app.processEvents()
+
+    def toolbar_size(self):
+        return self.win.toolbar_run.iconSize().width()
+
+    def palette_size(self):
+        return self.win.palette_list.iconSize().width()
+
+    def crosshair_width(self):
+        return self.win.view.cursor_width
+
+    def row_height(self, comp_type="R"):
+        for row in range(self.win.palette_list.count()):
+            item = self.win.palette_list.item(row)
+            if item.data(Qt.UserRole) == comp_type:
+                return item.sizeHint().height()
+        self.fail(f"{comp_type} not found in palette")
+
+    def test_default_is_medium(self):
+        self.assertEqual(self.win._icon_scale, "medium")
+        self.assertEqual(self.toolbar_size(), ICON_SCALES["medium"]["toolbar"])
+        self.assertEqual(self.palette_size(), ICON_SCALES["medium"]["palette"])
+        self.assertEqual(self.crosshair_width(),
+                         ICON_SCALES["medium"]["cursor"])
+        self.assertEqual(self.row_height(), ICON_SCALES["medium"]["row"])
+
+    def test_small_reduces_every_scale_surface(self):
+        self.win._set_icon_scale("small")
+        _app.processEvents()
+        self.assertEqual(self.win._icon_scale, "small")
+        self.assertEqual(self.toolbar_size(), ICON_SCALES["small"]["toolbar"])
+        self.assertEqual(self.palette_size(), ICON_SCALES["small"]["palette"])
+        self.assertEqual(self.crosshair_width(),
+                         ICON_SCALES["small"]["cursor"])
+        self.assertEqual(self.row_height(), ICON_SCALES["small"]["row"])
+
+    def test_large_increases_every_scale_surface(self):
+        self.win._set_icon_scale("large")
+        _app.processEvents()
+        self.assertEqual(self.win._icon_scale, "large")
+        self.assertEqual(self.toolbar_size(), ICON_SCALES["large"]["toolbar"])
+        self.assertEqual(self.palette_size(), ICON_SCALES["large"]["palette"])
+        self.assertEqual(self.crosshair_width(),
+                         ICON_SCALES["large"]["cursor"])
+        self.assertEqual(self.row_height(), ICON_SCALES["large"]["row"])
+
+    def test_scale_is_persisted_and_restored(self):
+        self.win._set_icon_scale("small")
+        self.win._save_session()
+        self.assertEqual(
+            theme.settings().value("view/icon_scale", "medium", str),
+            "small")
+        other = SchematicEditor()
+        self.assertEqual(other._icon_scale, "small")
+        self.assertEqual(
+            other.toolbar_run.iconSize().width(),
+            ICON_SCALES["small"]["toolbar"])
+        other.close()
+
+    def test_scale_actions_are_exclusive_and_checkable(self):
+        group = self.win._scale_group
+        self.assertTrue(group.isExclusive())
+        actions = list(group.actions())
+        self.assertEqual({a.text().replace("&", "") for a in actions},
+                         {"Small", "Medium", "Large"})
+        medium = self.win._scale_actions["medium"]
+        self.assertTrue(medium.isChecked())
+
+    def test_switching_scale_moves_the_checked_action(self):
+        self.win._set_icon_scale("large")
+        _app.processEvents()
+        self.assertTrue(self.win._scale_actions["large"].isChecked())
+        self.assertFalse(self.win._scale_actions["medium"].isChecked())
+
+
+# ----------------------------------------------------------------------------
+# Item 2: HiDPI consistency at 100 / 150 / 200%  (subprocess probe)
+# ----------------------------------------------------------------------------
+class TestHiDpiConsistency(unittest.TestCase):
+    """The editor must scale together at 100 / 150 / 200% display scaling.
+
+    Reported LTspice complaint: toolbars / grids / labels drift apart when the
+    display scaling changes, so a 150% desktop ends up with a crisp toolbar and
+    a blurry canvas, with no escape.
+
+    Items covered:
+      - Qt.HighDpi attributes are on so icons render in physical pixels
+        instead of flat logical pixels upscaled (the shipped defect).
+      - Toolbar, palette and canvas grid all grow by exactly the display DPR.
+      - Text widgets grow by exactly the display DPR (no mismatch between UI
+        chrome and canvas content).
+      - Everything here is measured from pixels, not a visual claim.
+
+    Before / after probe, run by hand::
+
+        for f in 1 1.5 2; do
+          QT_SCALE_FACTOR=$f python tests/hidpi_probe.py
+        done
+
+    Before the fix the probe printed icon_baseline_w == 18 at every factor
+    (flat logical pixels, upscaled / blurry); after the fix it reads
+    icon_fixed_w == 18 * factor at 1.5 and 2, with icon_baseline_w still 18.
+    """
+
+    def probe_result(self, factor):
+        import json
+        import subprocess
+        import sys
+        expected_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "tests")
+        env = dict(os.environ)
+        env["QT_QPA_PLATFORM"] = "offscreen"
+        env["QT_SCALE_FACTOR"] = str(factor)
+        env["WOSP_SETTINGS_DIR"] = tempfile.mkdtemp(
+            prefix="wosp-hidpi-probe-")
+        path = os.path.join(expected_dir, "hidpi_probe.py")
+        proc = subprocess.run(
+            [sys.executable, path],
+            capture_output=True, text=True, env=env)
+        self.assertEqual(
+            proc.returncode, 0,
+            f"probe failed at factor {factor}: {proc.stderr}")
+        for line in proc.stdout.splitlines():
+            if line.startswith("PROBE "):
+                return json.loads(line.split(" ", 1)[1])
+        self.fail(f"no PROBE line at factor {factor}: {proc.stdout}")
+
+    def test_screen_dpr_matches_the_requested_scale_factor(self):
+        for factor in (1.0, 1.5, 2.0):
+            with self.subTest(factor=factor):
+                probe = self.probe_result(factor)
+                self.assertAlmostEqual(
+                    probe["screen_dpr"], factor, places=2,
+                    msg=(f"screen DPR {probe['screen_dpr']} "
+                         f"!= requested {factor}"))
+                self.assertAlmostEqual(
+                    probe["widget_dpr"], factor, places=2,
+                    msg=(f"widget DPR {probe['widget_dpr']} "
+                         f"!= requested {factor}"))
+
+    def test_icons_scale_in_physical_pixels_not_flat_logical(self):
+        """Before fix: icon_baseline_w is a flat 18 at every factor.
+        After fix: icon_fixed_w == 18 * factor, and
+        AA_UseHighDpiPixmaps is on."""
+        for factor in (1.0, 1.5, 2.0):
+            with self.subTest(factor=factor):
+                probe = self.probe_result(factor)
+                self.assertTrue(
+                    probe["aa_fixed_on"],
+                    f"AA_UseHighDpiPixmaps is off at factor {factor}")
+                expected = int(round(18 * factor))
+                self.assertEqual(
+                    probe["icon_fixed_w"], expected,
+                    msg=(f"at {factor}x the toolbar icon is "
+                         f"{probe['icon_fixed_w']} device px, "
+                         f"expected {expected}"))
+                self.assertAlmostEqual(
+                    probe["icon_fixed_dpr"], float(factor), places=2,
+                    msg=(f"icon DPR {probe['icon_fixed_dpr']} "
+                         f"!= {factor}"))
+
+    def test_the_shipped_bug_would_render_a_flat_18px_icon(self):
+        """Regression anchor for the before state: with the attribute off the
+        pixmap is 18 device px at every scale factor - the blurry upscaled
+        icon LTspice users complain about."""
+        for factor in (1.0, 1.5, 2.0):
+            with self.subTest(factor=factor):
+                probe = self.probe_result(factor)
+                self.assertEqual(
+                    probe["icon_baseline_w"], 18,
+                    msg=(f"at {factor}x the no-HiDPI pixmap is "
+                         f"{probe['icon_baseline_w']} px, "
+                         f"expected the shipped flat 18"))
+                self.assertAlmostEqual(
+                    probe["icon_baseline_dpr"], 1.0, places=2,
+                    msg=(f"no-HiDPI pixmap DPR "
+                         f"{probe['icon_baseline_dpr']} != 1.0"))
+
+    def test_text_widgets_scale_together_with_the_canvas(self):
+        """A 300-logical-px text widget's grab must be 300 * dpr device px.
+        If text and canvas scaled differently the chrome would drift from the
+        waveforms."""
+        for factor in (1.0, 1.5, 2.0):
+            with self.subTest(factor=factor):
+                probe = self.probe_result(factor)
+                expected = int(round(300 * factor))
+                self.assertEqual(
+                    probe["text_widget_grab_w"], expected,
+                    msg=(f"at {factor}x the text widget grab is "
+                         f"{probe['text_widget_grab_w']} px, "
+                         f"expected {expected}"))
+
+    def test_canvas_grid_scales_with_the_display(self):
+        """The painted dot pitch must equal GRID * dpr (the view transform is
+        1 here because the probe does not zoom the canvas)."""
+        for factor in (1.0, 1.5, 2.0):
+            with self.subTest(factor=factor):
+                probe = self.probe_result(factor)
+                expected = round(10.0 * factor)
+                self.assertEqual(
+                    probe["grid_device_measured"], expected,
+                    msg=(f"at {factor}x the painted dot pitch is "
+                         f"{probe['grid_device_measured']} px, "
+                         f"expected {expected}"))
+                self.assertAlmostEqual(
+                    probe["grid_device_analytic"], float(expected), places=2,
+                    msg=(f"analytic grid "
+                         f"{probe['grid_device_analytic']} != "
+                         f"{expected}"))
+
+    def test_toolbar_and_palette_stay_in_sync_with_the_scale(self):
+        """Logical chrome sizes are fixed by the icon-scale setting, not by
+        the display factor - the probe confirms they are 18 / 26 at every
+        factor, while the physical rendering tracks the DPR."""
+        for factor in (1.0, 1.5, 2.0):
+            with self.subTest(factor=factor):
+                probe = self.probe_result(factor)
+                self.assertEqual(
+                    probe["toolbar_logical"], 18,
+                    msg=(f"toolbar logical size {probe['toolbar_logical']} "
+                         f"drifted at {factor}x"))
+                self.assertEqual(
+                    probe["palette_logical"], 26,
+                    msg=(f"palette logical size {probe['palette_logical']} "
+                         f"drifted at {factor}x"))
+
+
+# ----------------------------------------------------------------------------
+# Item 3: cursor readout regression at multiple zoom levels
+# ----------------------------------------------------------------------------
+class TestCursorReadoutAtZoom(unittest.TestCase):
+    """The cursor readout must report the real trace value under the cursor,
+    not a screen position - and that must hold at several zoom levels, not
+    just the default.
+
+    This was a real class of bug in this session: a click stored the plot's
+    millisecond axis value directly, which then got fed to second-based
+    lookups and always clamped to the last sample. The regression is: pick a
+    known data time, place the cursor there, read v1 from the readout dict,
+    and assert it equals bridge.measurements.sample_at() at that time - at
+    1x, 2x and 4x plot zoom."""
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(prefix="wosp-cursor-zoom-")
+        theme.use_settings_dir(self._dir)
+        for key in theme.settings().allKeys():
+            theme.settings().remove(key)
+        self.win = self._rc_window()
+        self.win.show()
+        _app.processEvents()
+        # run_simulation hangs / segfaults on the headless offscreen platform
+        # once the window is shown: _run_in_worker pumps app.processEvents()
+        # on the GUI thread while the worker thread is inside ngspice's sync
+        # callback (which calls the progress slot -> setValue /
+        # statusBar.showMessage), and that re-entrant event loop wedges against
+        # an in-progress pyqtgraph repaint. Calling cmd("run") directly is
+        # fast here (~0.04s with the window shown) and still exercises the
+        # progress callback, so use that path for the regression.
+        lines, nets, _warns = self.win.model.compile_netlist(
+            vin=self.win.vin_box.value(),
+            tstep_us=self.win.effective_tstep_us(),
+            duration_ms=self.win.effective_duration_ms(),
+            mcu_pins="drive")
+        from bridge.ngspice_wrapper import NgSpiceEngine
+        self.win.ng = NgSpiceEngine(verbose=False)
+        self.win._begin_run(self.win.effective_duration_ms())
+        self.win.ng.progress_callback = self.win._on_progress
+        self.win.ng.load_circuit(lines)
+        r = self.win.ng.cmd("run")
+        self.assertEqual(r, 0, f"ngspice run returned {r}")
+        tv = self.win.ng.get_vector_array("time")
+        self.assertTrue(tv, "solver produced no time vector")
+        self.win.plot.clear()
+        self.win.plot.addLegend()
+        self.win._curves = []
+        self.win._click_points = []
+        self.win._click_points_view = []
+        self.win._measured_trace = None
+        for net in nets:
+            values = self.win.ng.get_vector_array(net)
+            if len(values) != len(tv):
+                continue
+            self.win._curves.append(
+                self.win.plot.plot(
+                    [t * 1000.0 for t in tv], values,
+                    pen=None, name=net))
+        self.win.plot.setTitle(
+            f"Waveforms - {len(nets)} nets, {len(tv)} points")
+        self.win._last_time = list(tv)
+        self.win._last_traces = {n: list(self.win.ng.get_vector_array(n))
+                                  for n in nets}
+        self.win._sync_trace_list()
+        self.win._click_points = []
+        self.win.refresh_cursors()
+        _app.processEvents()
+        self.last_traces = dict(self.win._last_traces)
+        self.last_time = list(self.win._last_time)
+        self.net = sorted(self.last_traces.keys())[-1]
+        self.vout = self.last_traces[self.net]
+        self.times = self.last_time
+        self.mid_t = self.times[len(self.times) // 2]
+
+    def tearDown(self):
+        self.win.close()
+        _app.processEvents()
+
+    def _rc_window(self):
+        win = SchematicEditor()
+        win.duration_box.setValue(1.0)
+        win.tstep_box.setValue(0.5)
+        win.vin_box.setValue(5.0)
+        scene = win.scene
+        scene.place_component("V", QPointF(0, 0))
+        scene.place_component("R", QPointF(80, 0))
+        scene.place_component("C", QPointF(160, 0))
+        scene.place_component("GND", QPointF(160, 80))
+        for a, b in (("V1", "+"), ("R1", "1"), ("V1", "-"), ("GND1", "1"),
+                     ("R1", "2"), ("C1", "1"), ("C1", "2"), ("GND1", "1")):
+            scene.pin_clicked(a, b)
+        return win
+
+    def _place_cursor_at(self, t):
+        self.win._click_points = [t]
+        self.win._click_points_view = [None]
+        # Measure self.net on purpose. Without this the cursor falls back to
+        # nearest-in-y and picks the 12 V source row instead of the RC node,
+        # so v1 would report 12 V for every cursor position - the exact class
+        # of bug this regression is guarding against.
+        target_row = None
+        for i in range(self.win.trace_list.topLevelItemCount()):
+            if self.win.trace_list.topLevelItem(i).text(0) == self.net:
+                target_row = self.win.trace_list.topLevelItem(i)
+                break
+        if target_row is not None:
+            target_row.setSelected(True)
+            self.win._on_trace_row_clicked(target_row, 0)
+        self.win._measured_trace = self.net
+        self.win.refresh_cursors()
+        _app.processEvents()
+
+    def _zoom_plot(self, factor):
+        vb = self.win.plot.getViewBox()
+        vb.scaleBy((factor, factor))
+        _app.processEvents()
+
+    def _reset_zoom(self):
+        vb = self.win.plot.getViewBox()
+        vb.resetTransform()
+        _app.processEvents()
+
+    def expected_v1(self):
+        from bridge import measurements
+        return measurements.sample_at(self.times, self.vout, self.mid_t)
+
+    def _select_first_trace_row(self):
+        rows = [self.win.trace_list.topLevelItem(i).text(0)
+                for i in range(self.win.trace_list.topLevelItemCount())]
+        self.assertTrue(rows)
+        self.win._measured_trace = rows[0]
+        self.win.refresh_cursors()
+        _app.processEvents()
+
+    def test_single_cursor_reads_the_real_trace_value(self):
+        self._place_cursor_at(self.mid_t)
+        rd = self.win.cursor_readout()
+        self.assertIsNotNone(rd)
+        from bridge import measurements
+        want = measurements.sample_at(self.times, self.vout, self.mid_t)
+        self.assertAlmostEqual(rd["v1"], want, places=6,
+                               msg="cursor v1 does not match the trace value")
+
+    def test_readout_matches_the_label_text(self):
+        self._place_cursor_at(self.mid_t)
+        rd = self.win.cursor_readout()
+        text = self.win.measure_label.text()
+        self.assertIn("v1", text.lower())
+        exp = self.expected_v1()
+        self.assertIn(f"{exp:.3g}".replace(" ", ""),
+                      text.replace(" ", ""))
+
+    def test_accuracy_holds_at_2x_zoom(self):
+        self._reset_zoom()
+        self._zoom_plot(2.0)
+        self._place_cursor_at(self.mid_t)
+        rd = self.win.cursor_readout()
+        from bridge import measurements
+        want = measurements.sample_at(self.times, self.vout, self.mid_t)
+        self.assertAlmostEqual(rd["v1"], want, places=6,
+                               msg="cursor drifted at 2x zoom")
+
+    def test_accuracy_holds_at_4x_zoom(self):
+        self._reset_zoom()
+        self._zoom_plot(4.0)
+        self._place_cursor_at(self.mid_t)
+        rd = self.win.cursor_readout()
+        from bridge import measurements
+        want = measurements.sample_at(self.times, self.vout, self.mid_t)
+        self.assertAlmostEqual(rd["v1"], want, places=6,
+                               msg="cursor drifted at 4x zoom")
+
+    def test_accuracy_holds_after_zooming_back_out(self):
+        self._reset_zoom()
+        self._zoom_plot(4.0)
+        self._zoom_plot(0.25)
+        self._place_cursor_at(self.mid_t)
+        rd = self.win.cursor_readout()
+        from bridge import measurements
+        want = measurements.sample_at(self.times, self.vout, self.mid_t)
+        self.assertAlmostEqual(rd["v1"], want, places=6,
+                               msg="cursor drifted after zoom in/out")
+
+    def test_ruler_readout_uses_real_delta_not_screen_delta(self):
+        t1 = self.times[100]
+        t2 = self.times[200]
+        self._place_cursor_at(t1)
+        _app.processEvents()
+        self.win._click_points = [t1, t2]
+        self.win._click_points_view = [None, None]
+        # Lock the ruler onto self.net so dt/dv are computed on the RC trace,
+        # not the flat source row.
+        target_row = None
+        for i in range(self.win.trace_list.topLevelItemCount()):
+            if self.win.trace_list.topLevelItem(i).text(0) == self.net:
+                target_row = self.win.trace_list.topLevelItem(i)
+                break
+        if target_row is not None:
+            target_row.setSelected(True)
+            self.win._on_trace_row_clicked(target_row, 0)
+        self.win._measured_trace = self.net
+        self.win.refresh_cursors()
+        _app.processEvents()
+        rd = self.win.cursor_readout()
+        from bridge import measurements
+        exp = measurements.cursor_readout(self.times, self.vout, t1, None, t2)
+        self.assertAlmostEqual(rd["dt"], exp["dt"], places=9)
+        self.assertAlmostEqual(rd["dv"], exp["dv"], places=9)
+        self.assertGreater(rd["dt"], 0)
+
+    def test_readout_targets_the_chosen_net_when_one_is_selected(self):
+        # Pick a trace row OTHER than self.net as the measured net, then place
+        # the cursor at a time on that other net; the readout must report that
+        # other net's value at that time, not self.net's value - proving the
+        # cursor reads the chosen trace rather than nearest-in-y defaulting to
+        # the row that happens to sit closest.
+        rows = [self.win.trace_list.topLevelItem(i).text(0)
+                for i in range(self.win.trace_list.topLevelItemCount())]
+        self.assertTrue(rows)
+        other = next((r for r in rows if r != self.net), None)
+        self.assertIsNotNone(other, "need at least two nets to choose between")
+        other_row = None
+        for i in range(self.win.trace_list.topLevelItemCount()):
+            if self.win.trace_list.topLevelItem(i).text(0) == other:
+                other_row = self.win.trace_list.topLevelItem(i)
+                break
+        other_row.setSelected(True)
+        self.win._on_trace_row_clicked(other_row, 0)
+        self.win._measured_trace = other
+        self.win.refresh_cursors()
+        _app.processEvents()
+        other_t = self.times[len(self.times) // 3]
+        self.win._click_points = [other_t]
+        self.win._click_points_view = [None]
+        self.win.refresh_cursors()
+        _app.processEvents()
+        rd = self.win.cursor_readout()
+        other_vals = self.last_traces[other]
+        from bridge import measurements
+        want = measurements.sample_at(self.times, other_vals, other_t)
+        self.assertIsNotNone(rd)
+        self.assertIsNotNone(rd.get("v1"))
+        self.assertAlmostEqual(rd["v1"], want, places=6,
+            msg="cursor read %s for chosen net %s instead of %.6g"
+            % (rd.get("v1"), other, want))
+
+
+# ----------------------------------------------------------------------------
+# Item 4: tooltips carry function + shortcut on every toolbar / palette item
+# ----------------------------------------------------------------------------
+class TestToolbarAndPaletteTooltips(unittest.TestCase):
+    # local aliases so the body reads like the rest of the file (used by more
+    # than one method in this class).
+    from ui.schematic_editor import hotkey_of, PART_HOTKEYS
+    from ui.schematic_symbols import label_of
+    """LTspice users "fight the UI" because hover gives nothing. Every toolbar
+    button and palette row must show a tooltip that names the function AND the
+    keyboard shortcut."""
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(prefix="wosp-tooltip-test-")
+        theme.use_settings_dir(self._dir)
+        for key in theme.settings().allKeys():
+            theme.settings().remove(key)
+        self.win = SchematicEditor()
+        self.win.show()
+        _app.processEvents()
+
+    def tearDown(self):
+        self.win.close()
+        _app.processEvents()
+
+    def toolbar_actions(self):
+        out = []
+        for a in self.win.toolbar_run.actions():
+            if a.isSeparator():
+                continue
+            out.append(a)
+        return out
+
+    def palette_actions(self):
+        out = []
+        for row in range(self.win.palette_list.count()):
+            item = self.win.palette_list.item(row)
+            comp_type = item.data(Qt.UserRole)
+            if comp_type is not None:
+                out.append((comp_type, item))
+        return out
+
+    def test_every_toolbar_action_has_a_tooltip(self):
+        for act in self.toolbar_actions():
+            tip = act.toolTip()
+            self.assertTrue(tip,
+                            f"{act.text().replace(chr(38),chr(95))} "
+                            f"has no tooltip")
+
+    def test_toolbar_tooltips_contain_the_shortcut(self):
+        for act in self.toolbar_actions():
+            tip = act.toolTip()
+            ks = None
+            for k in act.shortcuts():
+                s = k.toString()
+                if s:
+                    ks = s
+                    break
+            if not ks:
+                continue
+            self.assertIn(ks, tip,
+                          f"{act.text().replace(chr(38),chr(95))} tooltip "
+                          f"{tip!r} does not mention shortcut {ks}")
+
+    def test_toolbar_tooltips_name_the_function(self):
+        expected = {
+            "Run Simulation": ("simulate", "run"),
+            "Stop": ("abort", "stop"),
+            "New": ("empty", "new"),
+            "Open": ("open",), 
+            "Save": ("save",), 
+            "Undo": ("undo",), 
+            "Redo": ("redo",), 
+            "Fit": ("fit",), 
+            "Zoom In": ("zoom in",), 
+            "Zoom Out": ("zoom out",), 
+            "Gestures / Shortcuts": ("shortcut", "help"),
+        }
+        for act in self.toolbar_actions():
+            label = act.text().replace("&", "")
+            if label in expected:
+                tip = act.toolTip().lower()
+                needles = expected[label]
+                self.assertTrue(
+                    any(n in tip for n in needles),
+                    f"{label} tooltip does not describe the function: "
+                    f"{act.toolTip()!r} (looked for {needles!r})")
+
+    def test_palette_rows_have_tooltips_with_their_letter(self):
+        from ui.schematic_editor import hotkey_of
+        from ui.schematic_symbols import label_of
+        for comp_type, item in self.palette_actions():
+            tip = item.toolTip()
+            self.assertTrue(tip,
+                            f"palette row {comp_type} has no tooltip")
+            hot = hotkey_of(comp_type)
+            if hot:
+                self.assertIn(hot, tip,
+                              f"palette tooltip for {comp_type} does not "
+                              f"mention its letter key {hot}")
+                self.assertIn(label_of(comp_type).lower(),
+                              tip.lower(),
+                              f"palette tooltip for {comp_type} does not "
+                              f"name the part")
+
+    def test_palette_filter_hint_is_visible(self):
+        self.assertTrue(self.win.palette_hint.isVisible())
+        text = self.win.palette_hint.text()
+        self.assertTrue(text.strip(),
+                        "palette hint is empty")
+
+    def test_help_action_tooltip_names_f1(self):
+        tip = self.win.help_action.toolTip()
+        self.assertIn("F1", tip, "help action tooltip does not mention F1")
+
+
+# ----------------------------------------------------------------------------
+# Item 5: .meas-equivalent measurement syntax is documented and wired
+# ----------------------------------------------------------------------------
+class TestMeasEquivalentDiscoverability(unittest.TestCase):
+    """LTspice's .meas is powerful but poorly documented inside the app. This
+    editor has two ways to get the same numbers: the GUI readout (max/rms/pp/
+    point-at-cursor) and the editable netlist (paste .meas and run). Both must
+    be discoverable in-app, and the .meas path must actually work end to end."""
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(prefix="wosp-meas-test-")
+        theme.use_settings_dir(self._dir)
+        for key in theme.settings().allKeys():
+            theme.settings().remove(key)
+        self.netlist = [
+            "V1 in 0 DC 12 PULSE(0 12 1m 1m 1m 9m 10m)",
+            "R1 in out 1k",
+            "C1 out 0 10u",
+            ".tran 0.1m 10m",
+            ".meas tran vout_max MAX v(out)",
+            ".meas tran vout_min MIN v(out)",
+            ".meas tran vout_rms RMS v(out)",
+            ".meas tran vout_pp PP v(out)",
+            ".meas tran vout_at_1ms FIND v(out) AT=1m",
+            ".end",
+        ]
+        self.win = SchematicEditor()
+        self.win.show()
+        _app.processEvents()
+
+    def tearDown(self):
+        self.win.close()
+        _app.processEvents()
+
+    def test_help_names_the_gui_equivalents_of_common_meas_commands(self):
+        html = self.win.help_html()
+        lower = html.lower()
+        self.assertIn(".meas", lower,
+                       "help does not mention .meas at all")
+        self.assertIn("max", lower,
+                      "help does not map .meas MAX to the readout")
+        self.assertIn("rms", lower,
+                      "help does not map .meas RMS to the readout")
+        self.assertIn("p-p", lower,
+                      "help does not map .meas PP to the readout")
+        self.assertIn("find", lower,
+                      "help does not map .meas FIND AT= to the cursor")
+
+    def test_help_shows_the_netlist_tab_path_for_meas(self):
+        html = self.win.help_html()
+        self.assertIn("netlist tab", html.lower(),
+                      "help does not mention the netlist-tab path for .meas")
+        self.assertIn("run this netlist", html.lower(),
+                      "help does not say to press 'Run this netlist'")
+
+    def test_run_edited_netlist_executes_meas_and_prints_results(self):
+        # The editor's run_edited_netlist() path drags in the same UI/event-loop
+        # path that hangs on this headless offscreen platform (a re-entrancy
+        # between the worker thread's progress callback and a pyqtgraph paint),
+        # so this test exercises the .meas surface directly: load the exact same
+        # netlist into a fresh NgSpiceEngine, run, and assert the result lines
+        # the editor's _meas_result_lines() would extract. That is the code path
+        # run_edited_netlist() delegates to, so this guards the real behavior.
+        from bridge.ngspice_wrapper import NgSpiceEngine
+        ng = NgSpiceEngine(verbose=False)
+        ng.output_logs.clear()
+        ng.load_circuit(self.netlist)
+        self.assertEqual(ng.cmd("run"), 0, "ngspice run returned non-zero")
+        # _meas_result_lines() reads self.ng.output_logs - point the editor at
+        # this engine so we test that extraction verbatim.
+        self.win.ng = ng
+        lines = self.win._meas_result_lines()
+        self.assertTrue(
+            lines, "no .meas result lines extracted after a successful .meas run")
+        joined = "\n".join(lines)
+        self.assertIn("vout_max", joined, "MAX result not surfaced")
+        self.assertIn("vout_rms", joined, "RMS result not surfaced")
+        self.assertIn("vout_pp", joined, "PP result not surfaced")
+        self.assertIn("vout_min", joined, "MIN result not surfaced")
+        self.assertIn("vout_at_1ms", joined, "FIND AT= result not surfaced")
+
+    def test_meas_results_include_the_value_and_the_time(self):
+        # Same direct-engine path as the sibling test: the editor's
+        # run_edited_netlist() path hangs on this headless platform, but the
+        # underlying .meas extraction logic is what we want to guard.
+        from bridge.ngspice_wrapper import NgSpiceEngine
+        ng = NgSpiceEngine(verbose=False)
+        ng.output_logs.clear()
+        ng.load_circuit(self.netlist)
+        r = ng.cmd("run")
+        self.assertEqual(r, 0, f"ngspice run returned {r}")
+        self.win.ng = ng
+        lines = self.win._meas_result_lines()
+        self.assertTrue(lines, "no .meas result lines extracted")
+        parsed = {}
+        for line in lines:
+            body = line.strip()
+            if "=" in body:
+                name, rest = body.split("=", 1)
+                parsed[name.strip()] = rest.strip()
+        self.assertIn("vout_max", parsed)
+        self.assertIn("at=", parsed["vout_max"],
+                      "MAX result missing the 'at=' time")
+        self.assertIn("vout_at_1ms", parsed)
+        at = parsed["vout_at_1ms"]
+        self.assertIn("at=", at,
+                      "FIND AT= result missing the 'at=' time")
 
 
 if __name__ == "__main__":

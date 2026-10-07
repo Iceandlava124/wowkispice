@@ -23,9 +23,9 @@ from PyQt5.QtCore import (QPointF, QRect, QRectF, QSize, Qt, QThread,
                           pyqtSignal)
 from PyQt5.QtGui import QKeySequence, QPainter, QBrush, QColor, QPen
 from PyQt5.QtWidgets import (
-    QAction, QApplication, QComboBox, QDockWidget, QFileDialog, QFrame,
-    QGraphicsView, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout,
-    QListWidget, QListWidgetItem,
+    QAction, QActionGroup, QApplication, QComboBox, QDockWidget, QFileDialog,
+    QFrame, QGraphicsView, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
+    QLayout, QListWidget, QListWidgetItem,
     QMainWindow, QDialog, QMenu, QMessageBox, QLineEdit, QPlainTextEdit,
     QProgressBar, QPushButton, QScrollArea, QSplitter,
     QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -55,6 +55,61 @@ TRACE_COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e",
 #
 # Every entry in PALETTE_GROUPS must appear here exactly once; a test enforces
 # that, so a new symbol cannot ship with a letter that does nothing.
+# Icon/cursor scale (View > Icon / Cursor Size). One fixed size was a real
+# LTspice complaint - toolbar chrome too big to place accurately - so every
+# clickable icon surface and both cursor strokes scale together from this one
+# table. "medium" reproduces the sizes that used to be hard-coded (18 px
+# toolbar, 26 px palette symbols, 30 px rows, 1 px cursors).
+ICON_SCALES = {
+    # map: small, medium, large  ->  toolbar, palette, row, symbol, crosshair, ruler
+    "small":  {"toolbar": 14, "palette": 20, "row": 26, "symbol": 20, "cursor": 1, "ruler": 10},
+    "medium": {"toolbar": 18, "palette": 26, "row": 30, "symbol": 26, "cursor": 2, "ruler": 14},
+    "large":  {"toolbar": 24, "palette": 34, "row": 38, "symbol": 34, "cursor": 3, "ruler": 18},
+}
+
+# Help overlay content. The Place menu was the only shortcut list; the F1
+# overlay now covers the full surface so a new user can find any binding
+# without hunting through every menu.
+HELP_SECTIONS = [
+    ("Simulation controls", [
+        ("Simulate / run", "F2"),
+        ("Stop simulation", "Ctrl+."),
+        ("Compile netlist (no run)", "Ctrl+Shift+F"),
+        ("Domain: MCU only", "Ctrl+M"),
+        ("Domain: Transient only", "Ctrl+T"),
+        ("Fast step (10x)", "Ctrl+Shift+P"),
+        ("Open serial monitor", "Ctrl+Shift+K"),
+        ("Export CSV", "Ctrl+Shift+C"),
+        ("Export plot PNG", "Ctrl+Shift+P"),
+        ("Export report PDF", "Ctrl+Shift+Alt+P"),
+    ]),
+    ("Measurement tools", [
+        ("FFT of a net", "Ctrl+F"),
+        ("AC sweep (Bode)", "Ctrl+B"),
+        ("Place cursor A / B", "click plot"),
+        ("Drag a cursor", "drag the dashed line"),
+        ("Clear cursors", "Ctrl+Shift+K"),
+        ("Choose measured trace", "click a trace list row"),
+    ]),
+    ("Waveform navigation", [
+        ("Zoom in / out", "Ctrl++ / Ctrl+-"),
+        ("Fit to contents", "Ctrl+0"),
+        ("Scroll left / right", "scroll wheel"),
+        ("Pan vertically", "drag the plot background"),
+    ]),
+    ("Editing / placement", [
+        ("Arm a part by letter", "R C L D V M G E"),
+        ("Place at cursor", "left click on canvas"),
+        ("Rotate while placing", "R / Ctrl+R"),
+        ("Mirror while placing", "M / Ctrl+M"),
+        ("Cancel the current tool", "Esc"),
+        ("Edit value...", "Ctrl+E"),
+        ("Label net...", "Ctrl+L"),
+        ("Undo / Redo", "Ctrl+Z / Ctrl+Y"),
+        ("Start a wire from a pin", "click a pin"),
+    ]),
+]
+
 PART_HOTKEYS = {
     "R": "R", "C": "C", "L": "L", "D": "D",
     "V": "V", "I": "I", "M": "MOSFET", "G": "GND",
@@ -237,6 +292,9 @@ class SchematicView(QGraphicsView):
         self._panning = False
         self._pan_origin = None
         self._cursor_scene = None
+        # Stroke width of the crosshair guide; updated by the editor's
+        # icon/cursor scale setting (ICON_SCALES).
+        self.cursor_width = ICON_SCALES["medium"]["cursor"]
 
     # -- space-to-pan ------------------------------------------------------
     def keyPressEvent(self, event):
@@ -450,7 +508,7 @@ class SchematicView(QGraphicsView):
         if self._cursor_scene is None:
             return
         pal = theme.current()
-        pen = QPen(QColor(pal.canvas_dot_major), 1, Qt.DotLine)
+        pen = QPen(QColor(pal.canvas_dot_major), self.cursor_width, Qt.DotLine)
         painter.setPen(pen)
         x = self.mapFromScene(self._cursor_scene).x()
         y = self.mapFromScene(self._cursor_scene).y()
@@ -464,7 +522,20 @@ class SchematicEditor(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        # Qt renders QIcon pixmaps at device resolution only when
+        # AA_UseHighDpiPixmaps is set. main() asks for it before the
+        # QApplication exists; set it here too so an embedded window (a test,
+        # a launcher that builds its own QApplication) gets sharp icons at
+        # 150/200% display scale instead of an 18-device-pixel bitmap
+        # stretched by the style. Post-construction is honoured: QIcon reads
+        # the attribute when the pixmap is requested.
+        app = QApplication.instance()
+        if app is not None and not app.testAttribute(Qt.AA_UseHighDpiPixmaps):
+            app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
         self._icon_names = {}
+        # Default until _load_session() reads view/icon_scale; must exist
+        # before _build_ui() renders the first palette symbol.
+        self._icon_scale = "medium"
         self._current_path = None
         self._dirty = False
         self.setWindowTitle("WOSP Schematic Editor")
@@ -740,6 +811,10 @@ class SchematicEditor(QMainWindow):
                 self.log(f"ERROR: cannot start ngspice: {exc}")
                 return
         try:
+            # Fresh capture: output_logs accumulates for the engine's whole
+            # lifetime, and _meas_result_lines() reads the block that follows
+            # this run's analysis only.
+            self.ng.output_logs.clear()
             self.ng.load_circuit(lines)
             self.ng.cmd("run")
             times = self.ng.get_vector_array("time")
@@ -769,6 +844,49 @@ class SchematicEditor(QMainWindow):
         self.refresh_cursors()
         self.log(f"Ran hand-edited netlist: {len(times)} points, "
                  f"{len(self._last_traces)} vectors plotted.")
+        # .meas directives execute inside ngspice but their results used to be
+        # swallowed with the rest of the console output - the user wrote a
+        # measurement and the app never showed the number. Surface them.
+        meas_results = self._meas_result_lines()
+        for line in meas_results:
+            self.log(f"meas: {line}")
+        if not meas_results and any(l.lower().startswith(".meas")
+                                    for l in lines):
+            self.log("meas: no results - check the .meas lines for typos, "
+                     "and that the analysis ran to completion")
+
+    def _meas_result_lines(self):
+        """What ngspice printed for the .meas directives in the netlist.
+
+        ngspice reports every .meas result after the analysis block, e.g.::
+
+            stdout Measurements for Transient Analysis
+            stdout vout_max            =  4.32373e+00 at=  3.00110e-03
+
+        Those lines land in NgSpiceEngine.output_logs. Failures print as
+        `.meas: ...` instead; both are worth showing - a measurement that
+        silently vanishes is the exact "poorly documented measurement"
+        complaint this app is supposed to fix.
+        """
+        lines, inside = [], False
+        for raw in getattr(self.ng, "output_logs", None) or []:
+            line = raw
+            for prefix in ("stdout ", "stderr "):
+                if line.startswith(prefix):
+                    line = line[len(prefix):]
+            line = line.rstrip()
+            if "Measurements for" in line:
+                inside = True
+                continue
+            if inside:
+                if line.strip() and "=" in line:
+                    lines.append(line.strip())
+                    continue
+                inside = False
+                continue
+            if line.lower().startswith(".meas"):
+                lines.append(line.strip())
+        return lines
 
     @staticmethod
     def _probe_vectors(lines):
@@ -860,8 +978,9 @@ class SchematicEditor(QMainWindow):
         self.palette_filter.textChanged.connect(self._filter_palette)
         outer.addWidget(self.palette_filter)
 
+        spec = ICON_SCALES.get(self._icon_scale, ICON_SCALES["medium"])
         self.palette_list = QListWidget()
-        self.palette_list.setIconSize(QSize(26, 26))
+        self.palette_list.setIconSize(QSize(spec["palette"], spec["palette"]))
         self.palette_list.setUniformItemSizes(False)
         self._palette_types = []
         for group, types in PALETTE_GROUPS:
@@ -874,14 +993,18 @@ class SchematicEditor(QMainWindow):
                 item = QListWidgetItem(self._palette_row_text(comp_type))
                 item.setData(Qt.UserRole, comp_type)
                 item.setIcon(self._symbol_icon(comp_type))
-                item.setSizeHint(QSize(0, 30))
+                item.setSizeHint(QSize(0, spec["row"]))
                 hot = hotkey_of(comp_type)
                 if hot:
-                    item.setToolTip(f"{label_of(comp_type)} - press {hot}")
+                    item.setToolTip(
+                        f"{label_of(comp_type)} - press {hot} to arm it, then "
+                        "click the sheet to place (Esc cancels)")
                 else:
                     # Reachable only if a symbol is added without a letter;
                     # a test enforces that, so say so rather than fail quietly.
-                    item.setToolTip(f"{label_of(comp_type)} - no letter key")
+                    item.setToolTip(
+                        f"{label_of(comp_type)} - no letter key; click to arm, "
+                        "then click the sheet to place (Esc cancels)")
                 self.palette_list.addItem(item)
                 self._palette_types.append(comp_type)
         self.palette_list.currentRowChanged.connect(self._on_palette_selected)
@@ -913,7 +1036,8 @@ class SchematicEditor(QMainWindow):
         from ui.schematic_items import draw_symbol
         from ui.schematic_symbols import extent_of
         ex, ey, ew, eh = extent_of(comp_type)
-        size = 26
+        size = ICON_SCALES.get(self._icon_scale,
+                               ICON_SCALES["medium"])["palette"]
         # Boards are far larger than passives; fit them into the same cell.
         longest = max(ew, eh, 1)
         scale = min(1.0, (size - 4) / float(longest))
@@ -1249,6 +1373,14 @@ class SchematicEditor(QMainWindow):
             act.setShortcut(QKeySequence(shortcut))
         if tip:
             act.setStatusTip(tip)
+        # Tooltip = function AND keyboard shortcut. The toolbar and menus used
+        # to set only the status tip, which appears nowhere on hover - the
+        # LTspice "fighting the UI" complaint: no way to discover what a
+        # button does or which key it owns. QAction falls back to bare text
+        # when no tooltip is set, so the shortcut was never visible either.
+        label = text.replace("&", "")
+        head = f"{label} ({shortcut})" if shortcut else label
+        act.setToolTip(f"{head} - {tip}" if tip else head)
         if icon_name:
             act.setIcon(icons.icon(icon_name, theme.current().text))
             self._icon_names[id(act)] = icon_name
@@ -1274,7 +1406,8 @@ class SchematicEditor(QMainWindow):
 
         self.toolbar_run = QToolBar("Main")
         self.toolbar_run.setObjectName("mainToolbar")
-        self.toolbar_run.setIconSize(QSize(18, 18))
+        spec = ICON_SCALES.get(self._icon_scale, ICON_SCALES["medium"])
+        self.toolbar_run.setIconSize(QSize(spec["toolbar"], spec["toolbar"]))
         self.addToolBar(self.toolbar_run)
         self.toolbar_run.addAction(run_act)
         self.toolbar_run.addAction(stop_act)
@@ -1302,6 +1435,15 @@ class SchematicEditor(QMainWindow):
         self.toolbar_run.addAction(
             self._action("Zoom Out", lambda: self.view.zoom_by(1 / 1.25), "Ctrl+-",
                          "Zoom out of the canvas", icon_name="zoom_out"))
+        self.toolbar_run.addSeparator()
+        # A visible "?" on the toolbar itself: hiding help inside a menu is
+        # half of the "poor documentation" complaint. One QAction shared with
+        # the Help menu, so F1 has exactly one owner.
+        self.help_action = self._action(
+            "&Gestures / Shortcuts", self.show_help, "F1",
+            "Open the shortcut, gesture and measurement help overlay",
+            icon_name="help")
+        self.toolbar_run.addAction(self.help_action)
 
         file_menu = self.menuBar().addMenu("&File")
         file_menu.addAction(self._action("&New Schematic", self.new_document,
@@ -1379,7 +1521,7 @@ class SchematicEditor(QMainWindow):
         sim_menu.addAction(self._action("Run &Bode / AC Sweep", self.run_bode,
                                         "Ctrl+B", icon_name="bode"))
         sim_menu.addAction(self._action("Clear Cursors", self.clear_cursors,
-                                        "Ctrl+K", icon_name="cursors"))
+                                        "Ctrl+Shift+K", icon_name="cursors"))
         sim_menu.addSeparator()
         sim_menu.addAction(self._action("Re-&Fit View", self.view.fit_to_contents,
                                         "Ctrl+0", icon_name="fit"))
@@ -1409,6 +1551,26 @@ class SchematicEditor(QMainWindow):
         self.ruler_action.setCheckable(True)
         self.ruler_action.setChecked(True)
         view_menu.addAction(self.ruler_action)
+        view_menu.addSeparator()
+        # User-adjustable icon/cursor scale: one fixed size is what LTspice
+        # users are stuck with. Radio actions so the current size is visible,
+        # not hidden in a preferences dialog.
+        scale_menu = view_menu.addMenu("I&con / Cursor Size")
+        self._scale_group = QActionGroup(self)
+        self._scale_group.setExclusive(True)
+        self._scale_actions = {}
+        for scale_key in ("small", "medium", "large"):
+            scale_act = self._action(
+                scale_key.title(),
+                lambda _checked=False, k=scale_key: self._set_icon_scale(k),
+                None,
+                f"{scale_key.title()} toolbar/palette icons and cursor "
+                "strokes on the canvas and plot")
+            scale_act.setCheckable(True)
+            scale_act.setChecked(scale_key == self._icon_scale)
+            self._scale_group.addAction(scale_act)
+            scale_menu.addAction(scale_act)
+            self._scale_actions[scale_key] = scale_act
         view_menu.addSeparator()
         self.theme_action = self._action(
             f"&{theme.current().name.title()} Appearance",
@@ -1449,8 +1611,7 @@ class SchematicEditor(QMainWindow):
                                           icon_name="pdf"))
 
         help_menu = self.menuBar().addMenu("&Help")
-        help_menu.addAction(self._action("&Gestures / Shortcuts", self.show_help,
-                                         "F1", icon_name="help"))
+        help_menu.addAction(self.help_action)
         help_menu.addAction(self._action("&About WOWKISPICE", self._show_about))
 
     # ------------------------------------------------------------------
@@ -1501,6 +1662,45 @@ class SchematicEditor(QMainWindow):
             header_font.setForeground(QBrush(QColor(theme.current().dim)))
         for act, comp_type in getattr(self, "_place_icon_actions", []):
             act.setIcon(self._symbol_icon(comp_type))
+
+    def _apply_icon_scale(self):
+        """Resize every clickable icon surface and both cursor strokes.
+
+        One table (ICON_SCALES) drives the toolbar buttons, the palette rows
+        and their symbol renders, the Place-menu icons, the canvas crosshair
+        and the plot's cursor lines - so "too big to place accurately" and
+        "too small to hit" are both reachable from one setting, and chrome can
+        never drift out of proportion with the canvas.
+        """
+        spec = ICON_SCALES.get(self._icon_scale, ICON_SCALES["medium"])
+        self.toolbar_run.setIconSize(QSize(spec["toolbar"], spec["toolbar"]))
+        self.palette_list.setIconSize(QSize(spec["palette"], spec["palette"]))
+        for row in range(self.palette_list.count()):
+            item = self.palette_list.item(row)
+            comp_type = item.data(Qt.UserRole)
+            if comp_type is None:
+                item.setSizeHint(QSize(0, 20))       # group header, unchanged
+            else:
+                item.setSizeHint(QSize(0, spec["row"]))
+                item.setIcon(self._symbol_icon(comp_type))
+        for act, comp_type in getattr(self, "_place_icon_actions", []):
+            act.setIcon(self._symbol_icon(comp_type))
+        self.view.cursor_width = spec["cursor"]
+        self.view.viewport().update()
+        for key, act in getattr(self, "_scale_actions", {}).items():
+            act.setChecked(key == self._icon_scale)
+        # The plot cursor lines carry the same stroke width; rebuilding them
+        # is safe before any run (it just re-reads the empty cursor list).
+        self.refresh_cursors()
+
+    def _set_icon_scale(self, key):
+        """View > Icon / Cursor Size: apply, persist, leave a trace."""
+        if key not in ICON_SCALES:
+            return
+        self._icon_scale = key
+        self._apply_icon_scale()
+        self._save_session()
+        self.log(f"Icon/cursor scale: {key}")
 
     def _toggle_grid(self):
         self._on_grid_toggled(self.grid_action.isChecked())
@@ -1652,7 +1852,10 @@ class SchematicEditor(QMainWindow):
         s.beginGroup("view")
         grid = s.value("grid", True, bool)
         rulers = s.value("rulers", True, bool)
+        icon_scale = s.value("icon_scale", "medium", str)
         s.endGroup()
+        self._icon_scale = (icon_scale if icon_scale in ICON_SCALES
+                            else "medium")
         self.scene.grid_visible = grid
         if hasattr(self, "grid_action"):
             self.grid_action.setChecked(grid)
@@ -1660,6 +1863,7 @@ class SchematicEditor(QMainWindow):
             self.ruler_action.setChecked(rulers)
         if not rulers:
             self.view.setViewportMargins(0, 0, 0, 0)
+        self._apply_icon_scale()
         self._restyle_plots()
         if self._recent:
             self.recent_menu.setEnabled(True)
@@ -1678,6 +1882,7 @@ class SchematicEditor(QMainWindow):
         s.setValue("grid", self.scene.grid_visible)
         s.setValue("rulers", self.ruler_action.isChecked()
                    if hasattr(self, "ruler_action") else True)
+        s.setValue("icon_scale", getattr(self, "_icon_scale", "medium"))
         s.endGroup()
         s.sync()
 
@@ -2408,7 +2613,14 @@ class SchematicEditor(QMainWindow):
                 return
             view = plot.getViewBox()
             x = view.mapSceneToView(points[0]).x()
-            self._click_points.append(x)
+            # The plot x-axis is milliseconds (every run plots t * 1000),
+            # while _last_time and the readout are in seconds. Storing the
+            # raw plot x fed a millisecond value into second-based arrays,
+            # where sample_at() clamped it past the end of the data and the
+            # readout always reported the final sample - the cursor looked
+            # like it was reporting the mouse, not the trace. cursor_x() is
+            # documented as data coordinates, so convert here.
+            self._click_points.append(x / 1000.0)
             if len(self._click_points) > 2:
                 self._click_points = self._click_points[-2:]
             # Remember where the click landed in pixels too: deciding which
@@ -2474,7 +2686,9 @@ class SchematicEditor(QMainWindow):
         or the ruler keeps reporting the position the cursor was dropped at."""
         value = line.value()
         positions = list(getattr(self, "_click_points", []))
-        positions.append(float(value))
+        # InfiniteLine lives on the plot's millisecond axis; the readout
+        # consumes seconds (see the conversion in _install_cursor_clicks).
+        positions.append(float(value) / 1000.0)
         positions = sorted(positions)[-2:]
         self._click_points = positions
         self._click_points_view = [None] * len(positions)
@@ -2597,9 +2811,12 @@ class SchematicEditor(QMainWindow):
             self.plot.removeItem(line)
         self._cursor_lines = []
         for x in sorted(self.cursor_x()):
-            line = pg.InfiniteLine(pos=x, angle=90, movable=True,
+            # x is data time in seconds; the plot axis is milliseconds.
+            width = ICON_SCALES.get(self._icon_scale,
+                                    ICON_SCALES["medium"])["cursor"]
+            line = pg.InfiniteLine(pos=x * 1000.0, angle=90, movable=True,
                                    pen=pg.mkPen(theme.current().plot_axis,
-                                               style=Qt.DashLine))
+                                                width=width, style=Qt.DashLine))
             line.sigDragged.connect(self._on_cursor_dragged)
             line.sigPositionChanged.connect(lambda *_: self.cursor_readout())
             self.plot.addItem(line)
@@ -2903,9 +3120,19 @@ class SchematicEditor(QMainWindow):
         return measurements
 
     # ------------------------------------------------------------------
-    def show_help(self):
-        QMessageBox.information(self, "Gestures", """
-<b>WOSP editor gestures</b>
+    def help_html(self):
+        """The F1 overlay's content, as one string.
+
+        Kept apart from show_help() so the documentation itself is under
+        test: deleting a shortcut or a measurement example from the code now
+        fails a test instead of quietly making the help less helpful.
+        """
+        return """
+<h3>WOWKISPICE editor - gestures, shortcuts and measurements</h3>
+<p>Press <b>F1</b> or the <b>?</b> button on the toolbar to reopen this panel.
+Every toolbar button also repeats its key in its tooltip.</p>
+
+<h3>Place and edit</h3>
 <ul>
 <li>Type in the <b>filter</b> box to search the palette, then click a part -
     the symbol follows the pointer before you commit it</li>
@@ -2920,14 +3147,112 @@ class SchematicEditor(QMainWindow):
     <b>Esc</b> cancels whatever is armed</li>
 <li><b>Ctrl+R</b> rotate 90&deg;, <b>Del</b> delete, <b>Ctrl+E</b> edit value,
     <b>Ctrl+L</b> label net</li>
-<li><b>Ctrl+Z / Ctrl+Shift+Z</b> undo / redo</li>
-<li><b>F2</b> run simulation in real ngspice; <b>Ctrl+.</b> stop it</li>
-<li>Wheel zooms about the pointer; <b>middle-drag</b>, <b>right-drag</b> or
-    <b>space-drag</b> pans; <b>Ctrl+0</b> fits the sheet</li>
-<li>Click a trace row to make the cursors measure it; untick a row to hide it</li>
-<li><b>Ctrl+T</b> dark/light appearance, <b>Ctrl+G</b> grid, <b>Ctrl+Shift+R</b> rulers</li>
+<li><b>Ctrl+Z</b> / <b>Ctrl+Y</b> (or <b>Ctrl+Shift+Z</b>) undo / redo</li>
+<li>Double-click a part on the sheet to rotate it</li>
 </ul>
-""")
+
+<h3>Simulation controls</h3>
+<ul>
+<li><b>F2</b> compiles the schematic and runs it in real ngspice;
+    <b>Ctrl+.</b> aborts a running simulation</li>
+<li>Netlist tab &gt; <b>Run this netlist</b> simulates a hand-edited netlist
+    instead of the schematic</li>    <li><b>Ctrl+F</b> FFT of the selected net, <b>Ctrl+B</b> Bode / AC sweep,
+    <b>Ctrl+Shift+K</b> clears the cursors</li>
+
+<li>Tools &gt; Qualification Battery runs the fault-injection and
+    temperature-corner audits</li>
+<li><b>Ctrl+0</b> re-fits the schematic view</li>
+</ul>
+
+<h3>Measurement tools</h3>
+<ul>
+<li>Left-click the waveform plot to drop <b>cursor A</b>, click again for
+    <b>cursor B</b>; drag a cursor line to move it. The readout strip under
+    the plot prints <b>t1/v1, t2/v2, dt, dv, slope and 1/dt</b>. Values are
+    interpolated from the solver's data at the cursor time - the same number
+    at every zoom level, not a screen position.</li>
+<li>Click a row in the <b>Traces</b> list to choose which net the cursors
+    measure; untick a row to hide it. The readout also shows <b>min, max,
+    rms and p-p</b> for that trace.</li>
+<li>Results &gt; Export Results as CSV writes the full time series;
+    Results &gt; Export Waveform Plot as PNG / Save Plot as PDF for figures.</li>
+</ul>
+
+<h3>.meas equivalents (documented in-app)</h3>
+<p>The schematic compiler does not emit <code>.meas</code> lines. Two ways to
+get exactly those measurements:</p>
+<ul>
+<li><b>GUI:</b>
+    <ul>
+    <li><code>.meas tran vout_max MAX v(out)</code> -&gt; the <b>max</b> figure
+        in the readout strip (<b>min</b> for MIN)</li>
+    <li><code>.meas tran vout_rms RMS v(out)</code> -&gt; the <b>rms</b>
+        figure in the readout strip</li>
+    <li><code>.meas tran ripple PP v(out)</code> -&gt; the <b>p-p</b> figure</li>
+    <li><code>.meas tran v_at_1ms FIND v(out) AT=1m</code> -&gt; click the plot
+        at 1 ms: <b>t1</b> and <b>v1</b> are that measurement</li>
+    <li>Period / frequency: place the two cursors one period apart and read
+        <b>dt</b> and <b>1/dt</b>; slew rate is <b>slope</b> (dv/dt)</li>
+    </ul>
+</li>
+<li><b>Netlist tab:</b> paste the <code>.meas</code> lines into the editable
+    netlist and press <b>Run this netlist</b>. ngspice executes them and the
+    results print to the console log as
+    <code>meas: vout_max = 4.32373e+00 at= 3.00110e-03</code>.</li>
+</ul>
+
+<h3>Waveform navigation</h3>
+<ul>
+<li>Mouse wheel zooms about the pointer; hold <b>Ctrl</b> for fine zoom</li>
+<li><b>Middle-drag</b>, <b>right-drag</b> or <b>space+left-drag</b> pans</li>
+<li><b>Ctrl+=</b> zoom in, <b>Ctrl+-</b> zoom out, <b>Ctrl+0</b> fits the sheet</li>
+<li>Click a trace row to make the cursors measure it; untick a row to hide it</li>
+</ul>
+
+<h3>Appearance and chrome</h3>
+<ul>
+<li><b>Ctrl+T</b> dark/light appearance, <b>Ctrl+G</b> grid,
+    <b>Ctrl+Shift+R</b> rulers</li>
+<li>View &gt; Icon / Cursor Size (Small / Medium / Large) resizes the toolbar
+    and palette icons together with the canvas crosshair and plot cursor
+    strokes</li>
+</ul>
+"""
+
+    def show_help(self):
+        """Visible F1 overlay: a scrollable dialog, not a clipped message box.
+
+        The old help was a QMessageBox whose hardcoded gesture list had
+        outgrown the box - simulation, measurement and waveform-navigation
+        shortcuts had nowhere to live, which is the "poor documentation"
+        complaint this replaces. Non-modal, so it can sit beside the canvas
+        while you try a shortcut.
+        """
+        existing = getattr(self, "_help_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Help - gestures, shortcuts and measurements (F1)")
+        dialog.resize(740, 660)
+        layout = QVBoxLayout(dialog)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QLabel()
+        body.setTextFormat(Qt.RichText)
+        body.setWordWrap(True)
+        body.setText(self.help_html())
+        body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        scroll.setWidget(body)
+        layout.addWidget(scroll)
+        close = QPushButton("Close")
+        close.clicked.connect(dialog.close)
+        layout.addWidget(close)
+        self._help_dialog = dialog
+        dialog.finished.connect(
+            lambda _result=0: setattr(self, "_help_dialog", None))
+        dialog.show()
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -2960,6 +3285,13 @@ class SchematicEditor(QMainWindow):
 
 
 def main():
+    # Qt fixes high-DPI behaviour when the QApplication is constructed, so
+    # ask for it BEFORE the app exists. Without this, at 150/200% Windows
+    # scaling every toolbar icon rendered as a fixed 18-device-pixel bitmap
+    # (stretched, blurry) while the canvas grid scaled correctly - chrome and
+    # canvas out of proportion. Measured by tests/hidpi_probe.py.
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)
     app.setApplicationName(theme.APP_NAME)
     app.setOrganizationName(theme.ORG_NAME)

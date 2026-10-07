@@ -57,3 +57,4 @@ firmware/*/sdkconfig.*
 # QPainterPath at runtime. See docs/systems-map.md "Third-party material".
 docs/ltspice-reference/
 docs/qucs-reference/
+.worktrees/
