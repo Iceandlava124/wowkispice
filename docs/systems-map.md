@@ -175,15 +175,29 @@ It configures `adc_oneshot`, sets up **ADC calibration**
   `BOOT_MARKERS` (`BUCK_CTRL: Starting ESP32 Buck Converter Closed-Loop
   Controller`, `...Entering high-speed hysteretic control loop`) reach the UART;
   5 ROM boots, 5 `app_main()` entries.
-- Past `app_main()`: **CONFIRMED BROKEN.** Espressif QEMU models no SAR ADC.
-  `SENS` is one of ~24 `unimplemented-device` stubs that decode MMIO and
-  discard writes, so the firmware spins at
-  `while (!adc_oneshot_ll_get_event(...))` in `adc_oneshot_hal.c:155` and the
-  interrupt watchdog trips. Measured: 4 watchdog panics / 45 s.
-- The firmware completes **0 control-loop samples**. **CONFIRMED BROKEN.**
+- Past `app_main()` under **stock** QEMU: was **CONFIRMED BROKEN.** `SENS` is
+  one of ~24 `unimplemented-device` stubs that decode MMIO and discard writes,
+  so the firmware spun at `while (!adc_oneshot_ll_get_event(...))` in
+  `adc_oneshot_hal.c:155` and the interrupt watchdog tripped. Measured then:
+  4 watchdog panics / 45 s, **0 control-loop samples**.
+- Past `app_main()` under the **patched** QEMU (built 2026-10-07, §8):
+  **CONFIRMED WORKING.** A 90 s run prints **900 000 control-loop samples**
+  (`BUCK_CTRL: Loop: … | Raw ADC: … | Gate: …`) with **zero panics** — the
+  fatal `Interrupt wdt timeout` never occurs. Residual `task_wdt` warnings
+  are non-fatal (IDLE0 starved by the busy loop; the guest keeps running).
+- Responds to host-injected analog values: **CONFIRMED WORKING, by
+  measurement.** With `-monitor tcp:127.0.0.1:4444`,
+  `qom-set /machine/peripheral/sens adc1-value 2012` changes the printed
+  `Raw ADC` from 0 to 2012 on the following loop lines (25 observed), and
+  raising it to **3456 flips the gate `ON → OFF`** (16 lines) — the
+  firmware's own 1995/2030 hysteresis reacting to injected input.
 
 **Failure points.**
-- **CONFIRMED BROKEN** — the ADC read never returns under stock QEMU.
+- **CONFIRMED BROKEN under stock QEMU** — the ADC read never returns there.
+  The patched build is now the one to run; the stock binary still exhibits it.
+- **LATENT RISK** — feeding `adc1-value` is a manual monitor command;
+  nothing in this repository drives it (orchestrator wiring is a deliberately
+  separate, not-yet-started task).
 - **UNVERIFIED** — the 1995/2030 thresholds are uncalibrated against real
   hardware. No ESP32 board has been involved. `ADC_OVERSAMPLE_N 16` and the
   line-fitting calibration scheme have never run on silicon.
@@ -363,7 +377,8 @@ and nothing in the module uses it to drive the guest.
   UART, 5 boots).
 - `probe_memory()` showing which registers are observable: **CONFIRMED
   WORKING** as a probe; its own output is the evidence that `SENS` and GPIO
-  writes do not round-trip.
+  writes do not round-trip — measured against **stock** QEMU; not re-run
+  against the patched binary (**UNVERIFIED** for it).
 - **Test coverage: zero.** `qemu_orchestrator.py`, `qtest_client.py` and
   `esp32_regs.py` are imported by no test file. Verification is manual and
   requires an external `qemu-system-xtensa` binary via `--qemu` / `$WOSP_QEMU`.
@@ -377,30 +392,45 @@ and nothing in the module uses it to drive the guest.
   workaround, not an abstraction, and will silently apply anywhere drvfs is
   mounted.
 
-## 8. The QEMU ADC/GPIO patch — `tools/qemu-patch/` (506-line patch + 118-line README)
+## 8. The QEMU ADC/GPIO patch — `tools/qemu-patch/` (528-line patch, 431 insertions / 4 deletions, 6 files)
 
 **What it is.** A patch against `espressif/qemu` branch `esp-develop`, tag
-`esp-develop-9.2.2-20260417` (the version PlatformIO pins). 409 insertions,
-4 deletions across six files: a new `esp32_sens.h` / `esp32_sens.c` SAR ADC
-model, a `meson.build` entry, instantiation in `hw/xtensa/esp32.c`, and
-W1TS/W1TS-latching output/enable registers in the ESP32 GPIO model.
+`esp-develop-9.2.2-20260417` (the version PlatformIO pins). Six files: a new
+`esp32_sens.h` / `esp32_sens.c` SAR ADC model, a `meson.build` entry,
+instantiation in `hw/xtensa/esp32.c`, and W1TS/W1TC-latching output/enable
+registers in the ESP32 GPIO model. Regenerated 2026-10-07 from the working
+tree, so it also carries four fixes the original proposal lacked: the QEMU 9.2
+`QEMUTimer` API (`timer_init` / `timer_mod(&…)`), `realized_set_allowed` on
+the three injection properties (without it `qom-set` refuses writes after
+realize), and a fixed QOM path
+(`object_property_add_child(…, "/peripheral", "sens")`) so the device is
+always addressable at `/machine/peripheral/sens` instead of a per-run
+`/machine/unattached/device[N]` index.
 
 **How verified.**
-- Applies cleanly to the pinned source and reproduces the intended tree byte
-  for byte: **CONFIRMED WORKING** (that narrow claim only).
-- Compiles: **UNVERIFIED.** It has never been through a compiler. This is not a
-  failure — there is no evidence it builds and no evidence it does not. It is
-  simply unproven, which is a weaker and more dangerous state than broken,
-  because nothing will complain.
-- Produces a completing control loop: **UNVERIFIED.**
+- Applies cleanly to a pristine export of the pinned commit: **CONFIRMED
+  WORKING** (`patch -p1 --batch`, all six files, exit 0, no fuzz, no rejects).
+- Compiles: **CONFIRMED WORKING** — native `./configure
+  --target-list=xtensa-softmmu --disable-docs --disable-gtk --disable-sdl
+  --disable-vnc --disable-spice --enable-slirp && ninja -C build` → exit 0,
+  `build/qemu-system-xtensa` (QEMU 9.2.2, TCG).
+- Boots and completes the control loop: **CONFIRMED WORKING** — 900 000
+  samples / 90 s, zero panics (§4).
+- Accepts host-injected ADC values at a stable path: **CONFIRMED WORKING** —
+  `/machine/peripheral/sens` identical across two independent boots;
+  end-to-end `qom-set` verified (Gate ON→OFF at 3456, §4).
+- Reproducible from scratch: **CONFIRMED WORKING** — 2026-10-07, a fresh
+  `git archive` export of the pinned commit + this patch + the documented
+  configure line produced a clean configure and a clean full build (2493
+  targets, exit 0), and that binary then booted the firmware, accepted
+  `qom-set` at `/machine/peripheral/sens` (2012 → 3456), printed
+  `Raw ADC: 2012` (30 lines) then `Raw ADC: 3456 | Gate: OFF` (16 lines),
+  reached `app_main`, and logged **0 panics**.
 
-**What would verify it.** Install `ninja`, `meson >= 1.5`, `pkg-config`,
-`flex`, `bison`, `libglib2.0-dev`, `libpixman-1-dev` in WSL (none present; WSL
-also has no `pip`), build the fork, produce `qemu_flash.bin`, then run
-`python -m bridge.qemu_orchestrator --qemu <new qemu>` and require all boot
-markers **plus** at least one completed control-loop iteration and a UART trace
-showing `loop_count` advancing. Only then is the patch's register semantics
-confirmed rather than proposed.
+**Not covered by anything automated.** No test in `tools/run_tests.py`
+touches the QEMU build; verification is manual and needs the external binary.
+`bridge/qemu_orchestrator.py` does not yet feed `adc1-value` — the automatic
+ngspice ↔ QEMU bridge remains the unwritten step (Layer 2, §4).
 
 ## 9. Renode path — **abandoned**, 4 files
 
@@ -486,33 +516,40 @@ real executions and the diagnostic paths.
 `-drive file=...,if=mtd,format=raw`. QEMU runs ROM -> second-stage bootloader
 -> `app_main()`; the host reads the console UART and waits for two markers.
 
-**State: boot CONFIRMED WORKING; everything after `app_main()` CONFIRMED
-BROKEN.** The ADC read never completes because `esp32_sens` is an
-`unimplemented-device`. 4 watchdog panics / 45 s, 0 control-loop samples.
+**State: CONFIRMED WORKING end to end against the patched binary (built
+2026-10-07).** With `tools/qemu-patch/0001-*.patch` applied, the ADC read
+completes: 900 000 control-loop samples / 90 s, zero panics, and
+`qom-set /machine/peripheral/sens adc1-value N` changes what the firmware
+prints (Gate ON→OFF at 3456). Against *stock* QEMU the old measurement still
+stands: 4 watchdog panics / 45 s, 0 control-loop samples.
 
 **Failure points.**
-- **CONFIRMED BROKEN** — the actual co-simulation handoff (analog value into
-  the chip) does not exist in stock QEMU.
+- **CONFIRMED BROKEN in stock QEMU** — no analog handoff at all there; the
+  patch replaces it. Against the patched binary a **manual** handoff exists
+  (monitor `qom-set`); the automatic one does not — see §4 below.
 - **LATENT RISK** — `qemu_flash.bin` is a build artifact under `.pio/`. It is
   4 MB of stale binary unless rebuilt; the orchestrator will happily boot an
   out-of-date image.
 
 ## 4. QEMU <-> ngspice
 
-**Connection: it does not exist today.**
+**Connection: half exists — host → chip manually; chip → solver not at all.**
 
-`qemu_orchestrator.py` has no import of, and no reference to, ngspice. It boots
-a chip and reads a UART. There is no data path in either direction between the
-emulated chip and the analog solver. The only place this connection is *intended*
-to appear is the QEMU patch's register model — and even that patch only makes
-the registers *observable* from outside QEMU; nothing in this repository reads
-`esp32_sens` and feeds a value into an ngspice source.
+What exists as of 2026-10-07: the patched SENS device accepts values *from the
+host* through QOM at the fixed path `/machine/peripheral/sens`
+(`qom-set … adc1-value N`), verified to change firmware behaviour (Gate
+ON→OFF at 3456). What does not exist: `qemu_orchestrator.py` still has no
+import of, and no reference to, ngspice — nothing in this repository calls
+`qom-set` programmatically, and nothing maps a gate transition back into an
+ngspice source. The chip's decisions never reach the analog solver.
 
-**State: UNVERIFIED / not implemented.** To verify a working version you would
-need, in order: the patch compiled and booting; a host-side reader for the SAR
-result; a bridge that converts that reading into an ngspice `external` source or
-an `alter_source_voltage` call; and a run where the chip's gate decision changes
-the simulated `vout`.
+**State: host → chip MANUAL and CONFIRMED WORKING; automatic orchestrator
+bridge NOT IMPLEMENTED (deliberately deferred to a separate session);
+chip → ngspice NOT IMPLEMENTED.** To finish it, in order: orchestrator code
+that discovers the QOM path and calls `qom-set` each iteration; a host-side
+reader for the SAR result or the GPIO output state; a bridge converting that
+into an ngspice `external` source or an `alter_source_voltage` call; and a run
+where the chip's gate decision changes the simulated `vout`.
 
 ## 5. control_law firmware-scraping <-> actual firmware behaviour
 
@@ -675,23 +712,24 @@ visible to the analog solver.**
 
 Concretely, four things stand between here and there, in dependency order:
 
-1. **The QEMU patch must compile.** Unproven. Every other QEMU<->ngspice claim
-   is downstream of it.
-2. **`esp32_sens` must model the conversion the firmware waits on.** The patch
-   is written to make `adc_oneshot_read()` return; this is UNVERIFIED until it
-   builds and boots.
+1. ~~**The QEMU patch must compile.**~~ **DONE 2026-10-07** — builds clean
+   from a fresh source export + the regenerated patch; **CONFIRMED WORKING**.
+2. ~~**`esp32_sens` must model the conversion the firmware waits on.**~~
+   **DONE 2026-10-07** — the firmware completes its ADC read and runs the
+   control loop (900 000 samples / 90 s, zero panics); **CONFIRMED WORKING**.
 3. **A host-side channel must exist to carry the reading out and the pin in.**
-   *This is missing entirely* — no module reads `esp32_sens`, and nothing maps
-   an ESP32 register into an ngspice source. The patch alone does not close the
-   loop; it only makes the registers observable.
+   **Half done.** Host → chip exists as a *manual* monitor command at the
+   stable path `/machine/peripheral/sens` (**CONFIRMED WORKING** by
+   measurement). Programmatic use by the orchestrator, and chip → ngspice,
+   remain unwritten — the only genuinely new *design* work left in the gap.
 4. **The control law must stop being a Python stand-in.** Once real firmware
    executes, `control_law`'s three scraped `#define`s stop being the model, and
    its divergences (no oversampling, no calibration, `divider=1.0`) become
    misleading rather than merely approximate.
 
-Steps 1-2 are a build problem. Step 3 is unwritten code — it is the only
-genuinely new *design* work in the gap, and the honest statement is that the
-repository has no prototype of it.
+Step 3 is the remaining new code: an orchestrator loop that feeds
+`adc1-value` from the solver and reads the gate decision back. The repository
+still has no prototype of that loop.
 
 ## What a reader should not conclude
 

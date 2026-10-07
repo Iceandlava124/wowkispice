@@ -115,12 +115,12 @@ index 4fea1f5..aa49573 100644
 -type_init(esp32_gpio_register_types)
 +type_init(esp32_gpio_register_types)
 \ No newline at end of file
-diff --git a/.qp_after/hw/misc/esp32_sens.c b/hw/misc/esp32_sens.c
+diff --git a/hw/misc/esp32_sens.c b/hw/misc/esp32_sens.c
 new file mode 100644
-index 0000000..dc3179d
+index 0000000..179ec91
 --- /dev/null
 +++ b/hw/misc/esp32_sens.c
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,213 @@
 +/*
 + * ESP32 SAR ADC (SENS) emulation
 + *
@@ -186,7 +186,7 @@ index 0000000..dc3179d
 +        s->done1 = false;
 +        s->conv1_pending = true;
 +    }
-+    timer_mod(s->conv_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
++    timer_mod(&s->conv_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
 +                                s->conversion_ns);
 +}
 +
@@ -277,14 +277,22 @@ index 0000000..dc3179d
 +    Esp32SensState *s = ESP32_SENS(obj);
 +    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 +
-+    timer_init_full(&s->conv_timer, QEMU_CLOCK_VIRTUAL, SCALE_NS,
-+                    TIMER_VIRTUAL, esp32_sens_convert, s);
++    timer_init(&s->conv_timer, QEMU_CLOCK_VIRTUAL, SCALE_NS,
++                    esp32_sens_convert, s);
 +
 +    memory_region_init_io(&s->iomem, obj, &esp32_sens_ops, s,
 +                          TYPE_ESP32_SENS, 0x400);
 +    sysbus_init_mmio(sbd, &s->iomem);
 +    sysbus_init_irq(sbd, &s->irq);
 +}
++
++/*
++ * qom-set must work while the guest runs: the host feeds the ADC sample
++ * through adc1-value. The default qdev uint32 info refuses writes after
++ * realize, so clone it with realized_set_allowed (same approach as
++ * hw/misc/xlnx-versal-trng.c).
++ */
++static PropertyInfo esp32_sens_prop_uint32;
 +
 +static Property esp32_sens_properties[] = {
 +    DEFINE_PROP_UINT32("adc1-value", Esp32SensState, adc1_value, 0),
@@ -301,6 +309,13 @@ index 0000000..dc3179d
 +
 +    rc->phases.hold = esp32_sens_reset_hold;
 +    dc->realize = esp32_sens_realize;
++
++    esp32_sens_prop_uint32 = qdev_prop_uint32;
++    esp32_sens_prop_uint32.realized_set_allowed = true;
++    esp32_sens_properties[0].info = &esp32_sens_prop_uint32;
++    esp32_sens_properties[1].info = &esp32_sens_prop_uint32;
++    esp32_sens_properties[2].info = &esp32_sens_prop_uint32;
++
 +    device_class_set_props(dc, esp32_sens_properties);
 +}
 +
@@ -321,7 +336,7 @@ index 0000000..dc3179d
 +type_init(esp32_sens_register_types)
 \ No newline at end of file
 diff --git a/hw/misc/meson.build b/hw/misc/meson.build
-index 0ac4b77..099e1dc 100644
+index 4c2b5b3..51d450c 100644
 --- a/hw/misc/meson.build
 +++ b/hw/misc/meson.build
 @@ -145,6 +145,7 @@ system_ss.add(when: 'CONFIG_XTENSA_ESP32', if_true: files(
@@ -333,7 +348,7 @@ index 0ac4b77..099e1dc 100644
  ))
  
 diff --git a/hw/xtensa/esp32.c b/hw/xtensa/esp32.c
-index e000470..e7eec53 100644
+index e000470..d8923a9 100644
 --- a/hw/xtensa/esp32.c
 +++ b/hw/xtensa/esp32.c
 @@ -25,6 +25,7 @@
@@ -344,7 +359,7 @@ index e000470..e7eec53 100644
  #include "hw/sd/dwc_sdmmc.h"
  #include "core-esp32/core-isa.h"
  #include "qemu/datadir.h"
-@@ -518,7 +519,17 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
+@@ -518,7 +519,24 @@ static void esp32_soc_realize(DeviceState *dev, Error **errp)
  
      esp32_soc_add_unimp_device(sys_mem, "esp32.analog", DR_REG_ANA_BASE, 0x1000);
      esp32_soc_add_unimp_device(sys_mem, "esp32.rtcio", DR_REG_RTCIO_BASE, 0x400);
@@ -358,6 +373,13 @@ index e000470..e7eec53 100644
 +     * qom-set, which is how an external analog simulator feeds it.
 +     */
 +    DeviceState *sens = qdev_new(TYPE_ESP32_SENS);
++    /*
++     * Fixed QOM path /machine/peripheral/sens so the host can always
++     * qom-set adc1-value. Without a parent, realize() files the device
++     * under /machine/unattached/device[N], whose index shifts per run.
++     */
++    object_property_add_child(container_get(qdev_get_machine(), "/peripheral"),
++                              "sens", OBJECT(sens));
 +    qdev_realize(sens, &s->periph_bus, &error_abort);
 +    esp32_soc_add_periph_device(sys_mem, sens, DR_REG_SENS_BASE);
      esp32_soc_add_unimp_device(sys_mem, "esp32.iomux", DR_REG_IO_MUX_BASE, 0x2000);
@@ -411,7 +433,7 @@ index 163b41a..7b2a867 100644
 -} Esp32GpioClass;
 +} Esp32GpioClass;
 \ No newline at end of file
-diff --git a/.qp_after/include/hw/misc/esp32_sens.h b/include/hw/misc/esp32_sens.h
+diff --git a/include/hw/misc/esp32_sens.h b/include/hw/misc/esp32_sens.h
 new file mode 100644
 index 0000000..6c54f20
 --- /dev/null

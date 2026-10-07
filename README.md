@@ -10,11 +10,13 @@
 >
 > **Read this first:** the firmware binary is *parsed, not executed* **inside the
 > simulation loop**. Separately from the co-simulation, the real compiled image
-> does boot under Espressif's QEMU through ROM, the second-stage bootloader and
-> `app_main()` — a captured boot log, no instrumentation. It then panics on its
-> first ADC read, because that QEMU models no SAR ADC. The ADC/GPIO model that
-> would close the last loop is in `tools/qemu-patch/` and **has never been
-> compiled**. See [firmware execution status](#firmware-execution-status).
+> boots under Espressif's QEMU through ROM, the second-stage bootloader and
+> `app_main()` — and, since the ADC/GPIO model in `tools/qemu-patch/` was
+> compiled in and verified (2026-10-07), it now **runs its control loop and
+> responds to analog values injected from the host** via a QEMU monitor
+> command. What is still missing is the *automatic* bridge: nothing feeds
+> those values from ngspice or reads the gate decision back. See
+> [firmware execution status](#firmware-execution-status).
 
 ---
 
@@ -30,11 +32,11 @@ Each goal is stated as one testable sentence and flagged with the same grammar u
 - [x] **ACHIEVED —** The closed loop includes a real feedback divider that lives in the SPICE netlist, not a Python fudge factor. Evidence: `tests/test_cosim_control.py::TestDividerSemantics` and `TestThresholdsMatchFirmware` assert the divider semantics and that both closed-loop paths reproduce the firmware's 1995/2030 counts; `test_schematic_editor.py` asserts the palette symbol pin order matches the netlister.
 - [x] **ACHIEVED —** There is an LTspice-familiar schematic editor UX. Evidence: `tests/test_ui_polish.py` (47), `tests/test_editor_workflow.py` (36), `tests/test_schematic_editor.py` (28), and `tests/test_ui_parity.py` (12) cover placement, wiring, hotkeys, zoom/pan, undo, value editing, net labeling, simulation, and KiCad export. The palette shortcut letters are the same functional grammar used by LTspice/KiCad; the icon artwork is drawn at runtime from own geometry, not imported.
 - [x] **ACHIEVED —** The compiled firmware boots in an emulator through ROM, the second-stage bootloader, and `app_main()`. Evidence: `bridge/qemu_orchestrator.py` boots `firmware/.../qemu_flash.bin` under Espressif QEMU and reaches both `BOOT_MARKERS` on UART (5 ROM boots, 5 `app_main()` entries). This is boot, not the control loop.
-- [ ] **PARTIAL —** The compiled firmware executes, but it does **not** drive the simulation loop. What works: boots to `app_main()` as above. What does not: the first real ADC read never completes under stock QEMU because `esp32.sens` is an `unimplemented-device` stub; measured 4 watchdog panics / 45 s and **0 control-loop samples**. Evidence: [docs/systems-map.md](docs/systems-map.md) Layer 4 and the "Firmware execution status" table. The intended fix (`tools/qemu-patch/`) applies cleanly to the pinned source but has never been compiled, so the patch's register semantics are UNVERIFIED, and there is currently no host-side code path that reads the emulated ADC and feeds it back into ngspice.
+- [x] **ACHIEVED via manual QOM control —** The compiled firmware boots **and** runs its real control loop in the patched emulator, **and** responds to analog values injected from the host. Evidence: `qemu-system-xtensa` built from the pinned Espressif tree with `tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch` (regenerated from the working tree, re-verified by configuring and fully building a **fresh source export + patch**); a 90 s boot yields **900 000 control-loop samples with zero panics** — the former `adc_oneshot_read()` watchdog panic is gone — and `qom-set /machine/peripheral/sens adc1-value <n>` changes the sample reported on the next iteration, flipping the gate **ON → OFF at 3456** (the firmware’s own hysteresis reacting to injected input). Precisely what is *not* covered: feeding is **manual** (a monitor command) — the automatic orchestrator bridge (ngspice ↔ QEMU) is **not yet wired**; `bridge/qemu_orchestrator.py` neither sets `adc1-value` nor reads the gate decision back, so no closed loop passes through the emulated chip yet. Details: [docs/systems-map.md](docs/systems-map.md) §4/§8 and the "Firmware execution status" table.
 - [x] **ACHIEVED —** An open-source license is in place. Evidence: `LICENSE` is Apache-2.0; [README.md](README.md#📄-license) states it. Third-party material is handled explicitly: Qucs-S is studied, not copied (GPL-2.0-or-later cannot mix into Apache-2.0); LTspice screenshots are local-only and gitignored.
 - [ ] **NOT YET —** CI is not verified as passing on a fresh clone. Evidence: `.github/workflows/cosim-ci.yml` exists and is YAML-parsed/step-order-checked, but it has never executed in CI history in this environment (no Docker, no remote). The workflow does include a `python tools/run_tests.py` step, which is the same runner that locally produces **257 tests across 16 suites, exit 0** — so the test suite itself is ready, but the CI path is **UNVERIFIED**, not CONFIRMED WORKING. Also **NOT YET** in the literal sense: a fresh clone needs two things the repo does not contain — a Python environment and `libngspice` — and the setup scripts (`setup.ps1` / `setup.sh`) fetch the DLL rather than including it.
 
-One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the green suite means the Python controller matches three scraped constants in a C file. It does **not** mean the firmware works on silicon, the thresholds are calibrated, the QEMU patch compiles, or that there is a working analog↔emulated-chip data path today.
+One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the green suite means the Python controller matches three scraped constants in a C file. It does **not** mean the firmware works on silicon or that the thresholds are calibrated. Two things this caveat used to warn about are now settled — the QEMU patch compiles and is reproducible from a fresh source export, and an analog↔emulated-chip data path exists — but that path is a **manual** `qom-set` command, not an automatic bridge.
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -62,11 +64,7 @@ One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the 
 
 ## 🚀 Quickstart Guide
 
-### 1. Setup — from a fresh clone
-
-PROJECT_WOWKISPICE needs two things that are not in the repository: a Python
-environment, and the `libngspice` shared library (the analytic solver is the
-whole point — nothing here is faked).
+### 1. Setup — from a fresh clonePROJECT_WOWKISPICE needs two things that are not in the repository: a Python environment, and the `libngspice` shared library (the analytic solver is the whole point — nothing here is faked). **Never done this before? Follow [SETUP.md](SETUP.md) — every step from a bare Windows machine, including WSL2, PlatformIO and the QEMU build.**
 
 **Windows**
 ```powershell
@@ -248,14 +246,16 @@ responds — which it can only do if it is reading the circuit. Retuning the
 thresholds moves the operating point (1024 counts → 0.825 V, 3072 counts →
 2.481 V).
 
-> **Limitation, stated plainly:** the firmware *binary* is still parsed, not
-> executed. What executes is the decision logic and its constants, lifted from
-> the firmware's own source. Espressif's QEMU does boot the compiled `.elf`
-> through ROM, the second-stage bootloader and `app_main()`, but nothing couples
-> that guest to the analog solver yet — QEMU models no ESP32 SAR ADC, so the
-> firmware panics at `adc_oneshot_read()` and completes 0 control-loop samples.
-> The netlist says which mode a pin is in, and the editor never shows a
-> behaviour the solver did not produce.
+> **Limitation, stated plainly:** inside the co-simulation loop the firmware
+> *binary* is still parsed, not executed — what executes there is the decision
+> logic and its constants, lifted from the firmware's own source. Separately,
+> the patched Espressif QEMU boots the compiled `.elf` through ROM, the
+> bootloader, `app_main()` and a full control loop — **900 000 samples / 90 s,
+> zero panics** — and a manual `qom-set /machine/peripheral/sens adc1-value N`
+> feeds it analog values it visibly reacts to (gate ON → OFF at 3456). Nothing
+> yet couples that guest to the analog solver *automatically*. The netlist says
+> which mode a pin is in, and the editor never shows a behaviour the solver did
+> not produce.
 
 #### Firmware execution status
 
@@ -267,9 +267,10 @@ What each "firmware" capability actually does today:
 | Import control constants from firmware **source** (`#define` regex) | **Works.** `bridge/control_law.py` |
 | Declared GPIO pin profiles (authored JSON) | **Works.** `bridge/gpio_model.py` |
 | Close the loop against a real ngspice solve | **Works.** `bridge/cosim_runner.py` |
-| Execute compiled machine instructions | **Partial.** `bridge/qemu_orchestrator.py` boots the real `.elf` through ROM, bootloader and `app_main()` in Espressif's QEMU, and reads its UART. It is not coupled to ngspice. |
-| Run the firmware's control loop | **Does not.** Over 45 s: 5 ROM boots, 5 `app_main()` calls, 4 watchdog panics, **0 control-loop samples**. QEMU's `esp32.sens` is one of ~24 `unimplemented-device` stubs, and `esp32_gpio_write()` drops writes outright. |
-| Fix the above | **In progress, unproven.** `tools/qemu-patch/` adds `esp32_sens.c` and a writable GPIO model (409 insertions). It applies cleanly to the pinned Espressif source but has never been compiled. |
+| Execute compiled machine instructions | **Works (patched QEMU).** The real `.elf` runs through ROM, bootloader, `app_main()` and the full control loop: **900 000 samples / 90 s, zero panics**. `bridge/qemu_orchestrator.py` reads its UART but does not yet feed it values (not coupled to ngspice). |
+| Run the firmware's control loop | **Works (patched QEMU), verified 2026-10-07** on a build made from `tools/qemu-patch/` + the pinned source. Under *stock* QEMU it still fails as before: 4 watchdog panics / 45 s, **0 control-loop samples** (`esp32.sens` unimplemented, `esp32_gpio_write()` drops writes). |
+| Respond to injected analog values | **Works, manually.** `qom-set /machine/peripheral/sens adc1-value N` (QEMU monitor) changes the sample the firmware prints; the gate flips **ON → OFF at 3456**. Fixed QOM path, identical across boots. |
+| Fix the above | **Done and verified.** `tools/qemu-patch/0001-*.patch` (6 files, 431 insertions) compiles, boots, and was re-verified end to end from a fresh source export + patch. The automatic ngspice ↔ QEMU bridge is the remaining, deliberately deferred step. |
 | Renode lockstep co-simulation | **Abandoned.** `bridge/renode_orchestrator.py` is kept for reference only. Renode cannot decode the Xtensa `entry` instruction (393 occurrences in an ESP-IDF build) and executed none of our firmware. QEMU is the current emulator target. Note that its `--mode benchmark` path is *not* the Renode one — it runs the pure-Python `mock_controller`. |
 
 There is no code path from a `.bin`/`.elf` to GPIO or ADC behaviour *inside the
@@ -402,8 +403,8 @@ python tests/test_ui_polish.py
   `screenshot_editor.py` and `overnight_ollama.py` (local LLM batch runner).
   `tools/ngspice_dll/` and `tools/renode/` are gitignored vendor binaries
   (`tools/renode/` is stale and unused — Renode cannot execute this firmware,
-  see [above](#firmware-execution-status)); `tools/qemu-patch/` is an
-  uncompiled QEMU device model.
+  see [above](#firmware-execution-status)); `tools/qemu-patch/` is the
+  compiled-and-boot-tested SAR ADC + GPIO QEMU device-model patch.
   `setup.ps1` / `setup.sh` fetch ngspice on demand.
 * `tests/` — Automated verification test suites and benchmark runners.
 * `.github/workflows/` — Automated GitHub Actions CI/CD co-simulation workflow.
