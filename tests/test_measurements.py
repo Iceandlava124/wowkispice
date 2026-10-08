@@ -275,13 +275,163 @@ class TestAgainstRealSolver(unittest.TestCase):
         self.assertFalse(any(l.startswith(".tran") for l in lines), lines)
 
     def test_unknown_analysis_is_rejected(self):
+        # "noise" used to be the example of an unknown analysis; it is now a
+        # real supported mode (wired in the analysis-mode audit pass), so the
+        # rejection check uses an analysis that genuinely does not exist.
+        with self.assertRaises(ValueError):
+            rc_schematic().compile_netlist(analysis="fourier")
+
+    def test_noise_and_disto_cards_compile(self):
+        g = rc_schematic()
+        lines, _nets, _warns = g.compile_netlist(
+            analysis="noise", noise_output_net="out",
+            ac_start_hz=10.0, ac_stop_hz=1e5)
+        self.assertTrue(any(l.startswith(".noise V(out) ") for l in lines),
+                        lines)
+        self.assertFalse(any(l.startswith(".tran") for l in lines), lines)
+        self.assertTrue(any("AC 1" in l for l in lines
+                            if l.startswith("V1")), lines)
+        # .noise without a target net must fail loudly, not guess one.
         with self.assertRaises(ValueError):
             rc_schematic().compile_netlist(analysis="noise")
+
+        lines, _nets, _warns = g.compile_netlist(
+            analysis="disto", ac_start_hz=100.0, ac_stop_hz=1e5)
+        self.assertTrue(any(l.startswith(".disto dec ") for l in lines),
+                        lines)
+        self.assertTrue(any(l.startswith(".ac dec") for l in lines), lines)
+        self.assertTrue(any("distof1" in l for l in lines), lines)
+        self.assertFalse(any(l.startswith(".tran") for l in lines), lines)
 
     def test_missing_vector_is_reported_not_silently_empty(self):
         g = rc_schematic()
         with self.assertRaises(analysis_runner.AnalysisError):
             analysis_runner.run_bode(g, "no_such_net", start_hz=10.0, stop_hz=1e4)
+
+
+class TestStepMetrics(unittest.TestCase):
+    """step_metrics against answers known analytically."""
+
+    def test_analytic_rc_step(self):
+        tau = 1e-3
+        n = 2001
+        times = [i * 5e-6 for i in range(n)]           # 0 .. 10 ms = 10 tau
+        values = [1.0 - math.exp(-t / tau) for t in times]
+        m = measurements.step_metrics(times, values)
+        self.assertEqual(m["direction"], "rising")
+        self.assertAlmostEqual(m["v_final"], 1.0, delta=0.01)
+        # 50% crossing of an exponential RC step is tau*ln2 ...
+        self.assertAlmostEqual(m["delay_s"], tau * math.log(2.0),
+                               delta=0.01 * tau)
+        # ... and its 10-90% rise time is tau*ln9.
+        self.assertAlmostEqual(m["rise_s"], tau * math.log(9.0),
+                               delta=0.05 * tau)
+        self.assertLess(m["overshoot_pct"], 1.0,
+                        "monotonic rise must not report overshoot")
+        self.assertLess(m["undershoot_pct"], 1.0,
+                        "a monotonic rise must not report its own approach "
+                        "as undershoot")
+        # enters the +/-2% band at tau*ln(50) and stays there.
+        self.assertAlmostEqual(m["settling_s"], tau * math.log(50.0),
+                               delta=0.1 * tau)
+        # slew is the same 80% swing over the sampled 10-90% rise; linear
+        # interpolation on an exponential lands a hair off the identity.
+        self.assertAlmostEqual(m["slew_v_ms"], 0.8 / (m["rise_s"] * 1000.0),
+                               delta=1e-4)
+
+    def test_ringy_step_reports_overshoot(self):
+        tau = 1e-3
+        n = 3001
+        times = [i * 5e-6 for i in range(n)]           # 0 .. 15 ms
+        values = []
+        for t in times:
+            if t < 3 * tau:
+                values.append(1.0 - math.exp(-t / tau))
+            elif 4 * tau <= t < 4.2 * tau:
+                values.append(1.25)                    # 25% bump on plateau
+            else:
+                values.append(1.0)
+        m = measurements.step_metrics(times, values)
+        self.assertAlmostEqual(m["overshoot_pct"], 25.0, delta=1.0)
+        self.assertLess(m["undershoot_pct"], 1.0)
+        self.assertIsNotNone(m["settling_s"])
+
+    def test_flat_trace_reports_no_step(self):
+        times = [i * 1e-5 for i in range(50)]
+        m = measurements.step_metrics(times, [2.5] * 50)
+        self.assertIsNone(m["direction"])
+        self.assertIsNone(m["delay_s"])
+        self.assertIsNone(m["settling_s"])
+
+
+class TestNoiseAndYield(unittest.TestCase):
+    """Noise analysis and per-schematic Monte Carlo against the real solver."""
+
+    def test_noise_matches_resistor_thermal_noise(self):
+        """RC low-pass: output noise density at DC must equal sqrt(4kTR)
+        (ngspice runs at TEMP = 27 C), and must roll off above the corner."""
+        g = rc_schematic("1k", "1u")
+        # corner = 159 Hz; sweep two decades past it so the 1-pole rolloff
+        # is unambiguous (10 kHz would only roll off ~63x).
+        out = analysis_runner.run_noise(g, "out", start_hz=0.1,
+                                        stop_hz=1e5,
+                                        points_per_decade=10)
+        k = 1.380649e-23
+        temp = 273.15 + 27.0
+        expected = math.sqrt(4 * k * temp * 1000.0)    # R = 1k
+        self.assertGreater(len(out["freqs"]), 10)
+        self.assertEqual(len(out["freqs"]), len(out["onoise_density"]))
+        self.assertAlmostEqual(out["onoise_density"][0], expected,
+                               delta=0.05 * expected)
+        # corner = 1/(2*pi*1k*1u) ~ 159 Hz; at 100 kHz a 1-pole filter has
+        # rolled off ~630x, not stayed flat.
+        self.assertLess(out["onoise_density"][-1],
+                        0.01 * out["onoise_density"][0])
+        self.assertIsNotNone(out["total_output"])
+        self.assertGreater(out["total_output"], 0.0)
+
+    def test_monte_carlo_perturbs_the_schematic_and_restores_it(self):
+        g = rc_schematic("1k", "1u")
+        out = analysis_runner.run_monte_carlo(
+            g, "out", iterations=8, tol_pct=10.0, yield_pct=5.0, seed=7)
+        self.assertEqual(out["iterations"], 8)
+        self.assertEqual(len(out["samples"]), 8)
+        self.assertGreater(out["std"], 0.0,
+                           "tolerance produced no spread - the perturbation "
+                           "never reached the netlist")
+        self.assertGreater(out["max"], out["min"])
+        self.assertGreaterEqual(out["yield_actual_pct"], 0.0)
+        self.assertLessEqual(out["yield_actual_pct"], 100.0)
+        self.assertEqual(g.components["R1"].value, "1k",
+                         "monte carlo left R1 modified")
+        self.assertEqual(g.components["C1"].value, "1u",
+                         "monte carlo left C1 modified")
+
+
+class TestDistortion(unittest.TestCase):
+    """`.disto` harmonic ratios end to end: biased diode + load, real solver."""
+
+    def test_distortion_reports_hd2_hd3(self):
+        g = SchematicNetlistEngine()
+        g.add_component(SchematicComponent("V1", "V", "V1", "0.5", -100, 0))
+        g.add_component(SchematicComponent("D1", "D", "D1", "", 0, 0))
+        g.add_component(SchematicComponent("R1", "R", "R1", "1k", 100, 0))
+        g.add_component(SchematicComponent("GND1", "GND", "GND", "", 0, 100))
+        g.add_wire("V1:+", "D1:A", "a")
+        g.add_wire("D1:K", "R1:1", "out")
+        g.add_wire("R1:2", "GND1:1", "gnd")
+        g.add_wire("V1:-", "GND1:1", "gnd")
+
+        out = analysis_runner.run_disto(g, "out", start_hz=100.0,
+                                        stop_hz=1e4, points_per_decade=4)
+        self.assertGreater(len(out["freqs"]), 5)
+        self.assertEqual(len(out["hd2"]), len(out["freqs"]))
+        self.assertEqual(len(out["hd3"]), len(out["freqs"]))
+        for ratio in out["hd2"] + out["hd3"]:
+            self.assertTrue(math.isfinite(ratio), ratio)
+            self.assertGreaterEqual(ratio, 0.0, ratio)
+        self.assertGreater(max(out["hd2"]), 0.0,
+                           "a biased diode must produce some second harmonic")
 
 
 if __name__ == "__main__":

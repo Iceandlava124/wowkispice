@@ -325,6 +325,15 @@ class NgSpiceEngine:
 
     def load_circuit(self, netlist_lines: List[str]):
         lines = [line.strip() for line in netlist_lines if line.strip()]
+        # ngspice treats the FIRST line of a deck as its title and drops it
+        # from the circuit. A netlist that starts with a device line ("V1 in 0
+        # ...") therefore loses its source: the remaining nodes float, the DC
+        # operating point reports "singular matrix", and ngSpice_Command("run")
+        # wedges forever inside gmin/source stepping. Every netlist this app
+        # generates already begins with a `*` comment; hand-typed ones (Netlist
+        # Editor, tests) may not, so guarantee a title line here.
+        if not lines or not lines[0].startswith("*"):
+            lines.insert(0, "* WOWKISPICE circuit")
         if not any(l.lower() == ".end" for l in lines):
             lines.append(".end")
 

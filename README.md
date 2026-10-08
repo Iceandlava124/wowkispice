@@ -278,6 +278,55 @@ simulation*. Loading an image gives you metadata; behaviour comes from
 separately importing the `.c` source or hand-writing a law. See
 `tools/qemu-patch/README.md` for the register-level detail.
 
+### Analysis-mode wiring status (per the analysis-mode audit)
+
+The editor now exposes every analysis the audit classified as "engine exists,
+not wired". These were **named, scoped items**, not silently absent:
+
+- **DC curve tracer / semiconductor I-V** - `bridge/studio_engine.trace_mosfet_iv`
+  and `trace_diode_iv` already exist and run real `.dc` sweeps; the editor now
+  wires them through the **I-V Curve Tracer** tab (Simulate ▸ Run I-V Curve
+  Tracer, `Ctrl+Shift+D`). This was the confirmed quick win.
+- **Parametric sweep UI** (e.g. Rload or Vin vs Vout) - now wired: the
+  **Parametric Sweep** tab (Simulate ▸ Run Parametric Sweep, `Ctrl+Shift+S`)
+  re-solves the schematic once per step, overlays the curves, and restores the
+  document afterwards.
+- **UART packet decode in the editor** - now wired: the **Serial** tab has a
+  net picker + baud selector + **Decode TX** button that runs
+  `studio_engine.decode_uart_packets` over the last run's trace (mid-swing
+  threshold → uniform 4-samples-per-bit grid → 8N1 deserialize). The decoder's
+  canned demo fallback is filtered out, so an undecodable trace reports "no
+  valid frames" instead of inventing packets.
+- **Real per-schematic Monte Carlo / yield** - now wired: the **Monte Carlo** tab
+  (Simulate ▸ Run Monte Carlo / Yield, `Ctrl+Shift+M`) runs
+  `bridge/analysis_runner.run_monte_carlo`, which perturbs every R/C/L by a
+  tolerance and **re-solves the drawn schematic** once per sample, then reports
+  sigma, min/max and yield against spec as a histogram. (The studio engine's
+  `run_monte_carlo` remains what it was: a parametric model of a fixed buck.)
+- **Timing / logic diagram view for GPIO transitions** - now wired: the **Timing**
+  tab (Simulate ▸ Show Timing Diagram, `Ctrl+Shift+G`) stacks a thresholded
+  digital lane per trace of the last run with edge count, duty and measured
+  frequency; flat traces are drawn as honest constant lanes.
+- **Noise / distortion (.noise, .disto)** - now wired: the **Noise** tab
+  (`Ctrl+Shift+N`) and **Distortion** tab (`Ctrl+Shift+T`). The compiler emits
+  `.noise V(out) src dec …` and `.ac` + `.disto` (with the `distof1` source
+  keyword); `analysis_runner.run_noise` / `run_disto` locate ngspice's plots by
+  description (the numbers increment inside a shared session), and HD2/HD3 are
+  reported as harmonic/fundamental ratios in dBc. Noise density is verified
+  against √(4kTR) in the tests.
+- **Interactive step-response / propagation-delay viewer** - now wired: the
+  **Step Response** tab (Simulate ▸ Step Response Metrics, `Ctrl+Shift+E`)
+  runs `bridge/measurements.step_metrics` on any net of the last run and draws
+  the settled level, the ±2% band and the 50% crossing while reporting delay,
+  10-90% rise, overshoot, undershoot, settling and slew.
+
+Still open (named, not started): an `.op` button, a `.dc` sweep *of the user's
+own schematic* (the tracer sweeps fixed demo device models), and everything in
+Phase 4 of the vision doc (AI assistant). See
+`docs/analysis-mode-audit.md` and `docs/deliverables-verification.md`.
+
+### Firmware execution status
+
 ### 4. Launch the Schematic Editor
 ```powershell
 run_editor.bat

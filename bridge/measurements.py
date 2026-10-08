@@ -213,17 +213,108 @@ def rise_fall_time(times: Sequence[float], values: Sequence[float],
     return {"rise_s": rise, "fall_s": fall, "v_low": low, "v_high": high}
 
 
+def step_metrics(times: Sequence[float], values: Sequence[float],
+                 tolerance: float = 0.02) -> Dict[str, object]:
+    """
+    Step-response characterization of a transient trace.
+
+    Reports the settled value, the 50% crossing (propagation delay from the
+    start of the window), the 10-90% transition time, overshoot/undershoot
+    past the settled value (as a percentage of the step), settling time into
+    a +/-`tolerance` band, and the 10-90 slew rate.
+
+    Anything the data cannot support comes back None - a missing crossing is
+    an honest answer; a fabricated one is not.
+    """
+    out: Dict[str, object] = {
+        "points": len(values), "v_start": None, "v_final": None,
+        "step_v": None, "direction": None, "delay_s": None, "rise_s": None,
+        "overshoot_pct": 0.0, "undershoot_pct": 0.0, "settling_s": None,
+        "slew_v_ms": None,
+    }
+    if len(times) != len(values) or len(times) < 3:
+        return out
+    n = len(values)
+    tail = values[max(0, n - max(2, n // 10)):]
+    v_start = float(values[0])
+    v_final = float(sum(tail) / len(tail))
+    span = v_final - v_start
+    out["v_start"] = v_start
+    out["v_final"] = v_final
+    out["step_v"] = span
+    if abs(span) <= 1e-12:
+        return out                      # flat trace: no step to measure
+    rising = span > 0
+    out["direction"] = "rising" if rising else "falling"
+
+    l10 = v_start + 0.10 * span
+    l50 = v_start + 0.50 * span
+    l90 = v_start + 0.90 * span
+    t10 = _crossing_time(times, values, l10, rising=rising)
+    t50 = _crossing_time(times, values, l50, rising=rising)
+    t90 = _crossing_time(times, values, l90, rising=rising)
+    if t50 is not None:
+        out["delay_s"] = t50 - float(times[0])
+    if t10 is not None and t90 is not None and t90 >= t10:
+        rise = t90 - t10
+        out["rise_s"] = rise
+        if rise > 0:
+            out["slew_v_ms"] = 0.8 * abs(span) / (rise * 1000.0)
+
+    # Overshoot only after the 50% crossing: before it, the step itself
+    # would masquerade as overshoot. Undershoot is measured only after the
+    # trace first reaches the settled level, so a monotonic rise does not
+    # report its own approach as an undershoot.
+    i_lo = 0
+    if t50 is not None:
+        for i in range(1, len(times)):
+            if times[i] >= t50:
+                i_lo = i
+                break
+    post = values[i_lo:]
+    if post:
+        if rising:
+            out["overshoot_pct"] = max(
+                0.0, (float(max(post)) - v_final) / abs(span) * 100.0)
+        else:
+            out["overshoot_pct"] = max(
+                0.0, (v_final - float(min(post))) / abs(span) * 100.0)
+        t_final = _crossing_time(times, values, v_final, rising=rising)
+        if t_final is not None:
+            i_fin = 0
+            for i in range(1, len(times)):
+                if times[i] >= t_final:
+                    i_fin = i
+                    break
+            tail_post = values[i_fin:]
+            if tail_post and rising:
+                out["undershoot_pct"] = max(
+                    0.0, (v_final - float(min(tail_post))) / abs(span) * 100.0)
+            elif tail_post:
+                out["undershoot_pct"] = max(
+                    0.0, (float(max(tail_post)) - v_final) / abs(span) * 100.0)
+
+    out["settling_s"] = settling_time(times, values, v_final,
+                                       tolerance=tolerance)
+    return out
+
+
 def _interp_cross(t0, v0, t1, v1, level) -> float:
     if v1 == v0:
         return float(t0)
     return float(t0 + (level - v0) * (t1 - t0) / (v1 - v0))
 
 
-def _crossing_time(times, values, threshold) -> Optional[float]:
+def _crossing_time(times, values, threshold,
+                   rising: bool = True) -> Optional[float]:
+    """First interpolated crossing of `threshold`; `rising=False` asks for a
+    falling crossing (a step that goes down never crosses upward)."""
     for i in range(1, len(times)):
-        if values[i - 1] < threshold <= values[i]:
-            return _interp_cross(times[i - 1], values[i - 1],
-                                 times[i], values[i], threshold)
+        a, b = values[i - 1], values[i]
+        if rising and a < threshold <= b:
+            return _interp_cross(times[i - 1], a, times[i], b, threshold)
+        if not rising and a >= threshold > b:
+            return _interp_cross(times[i - 1], a, times[i], b, threshold)
     return None
 
 

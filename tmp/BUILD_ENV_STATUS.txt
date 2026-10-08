@@ -1,0 +1,93 @@
+BUILD ENVIRONMENT STATUS (updated — read before deciding where/how to build QEMU)
+
+1) meson: INSTALLED now. Path: /c/Users/gudae/Music/qemu-build/qemu-esp_develop_9.2.2_20260417/.qemu-venv/bin/meson
+   Version: 1.12.1  (>=1.5 requirement satisfied)
+   Install method: Python venv (.qemu-venv) + pip install 'meson>=1.5'. Network was available.
+
+2) Already available on host (before this session):
+   - gcc: /c/msys64/ucrt64/bin/gcc  (Rev13, MSYS2 UCRT64, 15.2.0)
+   - pkg-config: /c/msys64/ucrt64/bin/pkg-config  2.5.1
+   - ninja: 1.13.0 (Python Scripts)
+   - git: 2.51.0.windows.2 (mingw64)
+   - patch: /usr/bin/patch
+   Note: host C compiler is MSYS2 UCRT64 gcc, NOT a separate WSL ubuntu apt environment necessarily.
+         (Earlier "WSL Ubuntu" framing may have been approximate — the actual compiler in PATH is MSYS2 UCRT64.)
+
+3) STILL MISSING (tried MSYS2 UCRT64 pacman, targets not found / not installed):
+   - mingw-w64-ucrt-x86_64-flex  -> "target not found"
+   - mingw-w64-ucrt-x86_64-bison -> "target not found"
+   - glib-2.0-dev (glib2)        -> STILL MISSING after pacman -S attempt
+   - pixman-1-dev (pixman)        -> STILL MISSING after pacman -S attempt
+   - libgcrypt-dev (libgcrypt)    -> STILL MISSING after pacman -S attempt
+   So: flex, bison, glib-2.0, pixman-1, libgcrypt dev packages are NOT yet available via the
+   UCRT64 pacman names tried.
+
+4) Network: AVAILABLE. google/github returned 200 (~0.4-0.5s). pip could resolve meson.
+
+WHAT TO DO (agent decision guide):
+A) First: apply the patch in the pinned QEMU source tree
+     cd /qemu-build/qemu-esp_develop_9.2.2_20260417
+     patch -p1 -i /app/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
+     (or git apply). Record result + changed files.
+   Note: patch binary and git are available on host. The agent can also do this from the container
+   only if patch/git exist there — but the container has NONE of these, so the PATCH APPLY step must
+   happen on the HOST side (or the agent must install patch/git in the container first, which needs
+   network and is slower). Recommended: agent instructs the host-side (human or agent-on-host) to apply
+   the patch, OR agent uses a host-side executor. Since the agent runs INSIDE the container with no patch/git,
+   the cleanest is: agent reports that patch apply must be done on the host, and either (a) asks the human
+   to run the patch command and report back, or (b) if the agent can drive host commands through some bridge,
+   do it there. If neither is possible now, record that patch apply is the first host-side prerequisite.
+
+B) Build tools: meson is now available (venv). gcc/pkg-config/ninja/git/patch available. The missing
+   pieces for a full QEMU build are glib-2.0-dev, pixman-1-dev, libgcrypt-dev, flex, bison.
+   Recommended next action: run the HOST ./configure and SEE what it actually reports as missing.
+     cd /qemu-build/qemu-esp_develop_9.2.2_20260417
+     .qemu-venv/bin/meson setup build --wipe -Dtarget_list=xtensa-softmmu
+     (or ./configure --target-list=xtensa-softmmu --enable-trace-backends=nop)
+   Then meson/ninja will tell you exactly which dependency is missing. That is faster than guessing
+   package names. If configure/meson says "flex bison required" or "glib-2.0 required", install only
+   what it says, using the correct MSYS2 package names (may be mingw-w64-x86_64-* rather than
+   mingw-w64-ucrt-x86_64-*, or may need a different MSYS2 environment: MINGW64/CLANG64/UCXT64 etc.).
+   Network is available, so pip/pacman downloads can work if the right package names are used.
+
+C) If configure/meson can be satisfied (or only needs a small additional install), run:
+     ninja -C build -j4
+   and record the qemu-system-xtensa output path.
+
+D) Boot verification (gate 1):
+   Once qemu-system-xtensa exists, boot:
+     -M esp32 -drive file=<absolute path to qemu_flash.bin>,if=mtd,format=raw -serial stdio -nographic
+   (Confirm exact machine/flash syntax from tools/qemu-patch/README.md first — esp32 machine may use
+   -drive if=mtd, or -global driver=cfi.pflash03ION, or -flashdir / -drive file=... format=raw.)
+   Observe serial output:
+     - app_main() reached: "I (11381) BUCK_CTRL: Starting ESP32 Buck Converter Closed-Loop Controller..."
+       and "I (11381) BUCK_CTRL: Entering high-speed hysteretic control loop..."
+     - No "Guru Meditation Error: Core 0 panic'ed (Interrupt wdt timeout on CPU0)" before the loop.
+     - At least one control-loop sample completes past adc_oneshot_read().
+   Record: app_main reached (Y/N), wdt panic (Y/N), control-loop samples observed (count if possible),
+   any SENS/MEAS_STATUS/MEAS1_DONE_SAR related log lines, qemu-system-xtensa path, boot cmd used.
+
+E) adc1-value injection (if gate 1 needs a real sample value):
+   In the QEMU monitor (typically -monitor stdio or via the serial/console), find the SENS device QOM
+   path with (qemu) info qtree, then:
+     (qemu) qom-set <sens-path> adc1-value <N>
+   The SENS device is created on the periph-bus; its QOM path is something under
+   /machine/soc/esp32-periph-bus/<sens-instance>. Record the exact path once found.
+
+F) Record everything in /tmp/HERMES_PHASE_A_RESULT.md:
+   - patch apply result (success/fail, files changed, host vs container)
+   - build environment: meson ok, gcc/pkg-config/ninja/git/patch ok, missing pieces, configure output
+   - whether build succeeded, qemu-system-xtensa path, or failure log
+   - gate 1 boot result (app_main, wdt panic, samples, cmd, any SENS clues)
+   - adc1-value QOM path if found
+   - recommended next step
+
+IMPORTANT CONSTRAINTS:
+- Network is available, so host-side package installation (pacman/pip) can work if correct names used.
+- The hermes agent container itself has NO build tools (meson/ninja/gcc/pkg-config/git/patch/flex/bison all absent),
+  so QEMU ./configure + ninja cannot be done inside the container unless tools are installed there first.
+  Therefore the BUILD step should happen on the HOST.
+- The agent can still do: read sources/patch/README, decide the plan, instruct/observe the host build,
+  and (if qemu-system-xtensa ends up inside the container or accessible) run the boot verification.
+  If qemu-system-xtensa is built on the host, the agent may need host-side access to run it; otherwise
+  report the binary path and boot command and ask the human to run the boot and paste output.

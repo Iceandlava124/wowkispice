@@ -206,6 +206,7 @@ class SchematicNetlistEngine:
         ac_start_hz: float = 1.0,
         ac_stop_hz: float = 1e6,
         ac_points_per_decade: int = 20,
+        noise_output_net: Optional[str] = None,
     ) -> Tuple[List[str], List[str], List[str]]:
         """
         Compile the schematic component graph into an executable SPICE netlist.
@@ -217,15 +218,19 @@ class SchematicNetlistEngine:
 
         `analysis` selects the analysis card: "tran" for the usual transient
         run, "ac" for a small-signal frequency sweep (which also stamps AC 1 on
-        the first independent source, since .ac ignores DC values).
+        the first independent source, since .ac ignores DC values), "noise"
+        for a `.noise V(noise_output_net) <src> dec ...` output-noise sweep
+        over the same frequency range parameters.
 
         `mcu_pins` controls the MCU symbols in a "Transient only" run: "drive"
         emits each wired pin as a source, "ignore" leaves them undriven and says
         so in a comment, so a pure-analog run really is pure analog.
         """
         analysis = (analysis or "tran").lower()
-        if analysis not in ("tran", "ac"):
-            raise ValueError(f"unknown analysis '{analysis}' (use 'tran' or 'ac')")
+        if analysis not in ("tran", "ac", "noise", "disto"):
+            raise ValueError(
+                f"unknown analysis '{analysis}' "
+                "(use 'tran', 'ac', 'noise' or 'disto')")
         mcu_pins = (mcu_pins or "drive").lower()
         if mcu_pins not in ("drive", "ignore"):
             raise ValueError(
@@ -245,6 +250,7 @@ class SchematicNetlistEngine:
         has_source = False
         emitted = 0
         ac_marked = False
+        noise_src: Optional[str] = None
 
         for comp in sorted(self.components.values(), key=lambda c: c.name):
             ctype = comp.comp_type.upper()
@@ -275,14 +281,20 @@ class SchematicNetlistEngine:
 
             if ctype in ("V", "I"):
                 has_source = True
+                if noise_src is None:
+                    noise_src = designator     # .noise input reference
                 if re.fullmatch(r"[+-]?\d+(\.\d+)?([eE][+-]?\d+)?", value):
                     card = f"DC {value}"
                 else:
                     card = value  # PULSE(...), PWL(...), SIN(...) pass through verbatim
-                if analysis == "ac" and not ac_marked:
+                if analysis in ("ac", "noise", "disto") and not ac_marked:
                     # .ac drives the first independent source with its AC
                     # magnitude; without this the sweep has nothing to excite.
+                    # .disto additionally needs distof1 so the source carries
+                    # a fundamental for the Volterra expansion to work on.
                     card = f"{card} AC 1"
+                    if analysis == "disto":
+                        card = f"{card} distof1 1 0"
                     ac_marked = True
                 lines.append(f"{designator} {' '.join(pin_nets)} {card}")
             elif ctype == "D":
@@ -316,10 +328,11 @@ class SchematicNetlistEngine:
             warnings.append("No ground node: place a GND symbol (or name a net '0'/'GND') before running.")
         if not has_source:
             warnings.append("No independent source (V/I): simulation output will be all zeros.")
-        elif analysis == "ac" and not ac_marked:
+        elif analysis in ("ac", "noise", "disto") and not ac_marked:
             warnings.append(
-                "AC analysis needs an independent V/I source; none was stamped with "
-                "an AC magnitude, so the sweep has no excitation.")
+                "AC/noise/distortion analysis needs an independent V/I source; "
+                "none was stamped with an AC magnitude, so the sweep has no "
+                "excitation.")
         for cid, comp in sorted(self.components.items()):
             ctype = comp.comp_type.upper()
             canonical = self._CANONICAL_PINS.get(ctype)
@@ -333,6 +346,29 @@ class SchematicNetlistEngine:
         if analysis == "ac":
             lines.append(f".ac dec {int(ac_points_per_decade)} "
                          f"{ac_start_hz:g} {ac_stop_hz:g}")
+        elif analysis == "noise":
+            if not noise_output_net:
+                raise ValueError(
+                    "noise analysis needs an output net (noise_output_net=...)")
+            if noise_src is None:
+                raise ValueError(
+                    "noise analysis needs an independent source as its input "
+                    "reference")
+            lines.append(
+                f".noise V({noise_output_net}) {noise_src} dec "
+                f"{int(ac_points_per_decade)} {ac_start_hz:g} {ac_stop_hz:g}")
+        elif analysis == "disto":
+            # Both cards: .ac supplies the fundamental reference (HD = 2f1/3f1
+            # over f1) and .disto sweeps the Volterra harmonic analysis over
+            # the same grid.
+            if noise_src is None:
+                raise ValueError(
+                    "distortion analysis needs an independent source as its "
+                    "input reference")
+            sweep = (f"{int(ac_points_per_decade)} "
+                     f"{ac_start_hz:g} {ac_stop_hz:g}")
+            lines.append(f".ac dec {sweep}")
+            lines.append(f".disto dec {sweep}")
         else:
             lines.append(f".tran {tstep_us:.2f}u {duration_ms:.1f}m uic")
         lines.append(".end")
