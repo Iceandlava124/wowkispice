@@ -57,4 +57,12 @@ firmware/*/sdkconfig.*
 # QPainterPath at runtime. See docs/systems-map.md "Third-party material".
 docs/ltspice-reference/
 docs/qucs-reference/
+# Old icon-sheet / editor screenshot artifacts from earlier publication drafts.
+# The editor toolbar is now generated at runtime from tools/icon_sheet.py, so
+# these PNGs are not project content and should stay untracked.
+docs/editor-dark.png
+docs/editor-demo.png
+docs/editor-light.png
+docs/icon-sheet.png
+tests/buck_converter_response.png
 .worktrees/

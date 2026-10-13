@@ -48,14 +48,25 @@ jobs:
       # Renode cannot decode the Xtensa `entry` instruction and executed zero
       # instructions of this firmware. The emulator target is Espressif QEMU
       # now (bridge/qemu_orchestrator.py). See docs/legacy-module-audit.md.
+      # Pure-Python closed loop in bridge/mock_controller.py; no emulator.
+      # This replaced the abandoned Renode cluster, deleted 2026-10-09:
+      # Renode cannot decode the Xtensa `entry` instruction and executed zero
+      # instructions of this firmware. The emulator target is Espressif QEMU
+      # now (bridge/qemu_orchestrator.py). See docs/legacy-module-audit.md.
       - name: Run Python mock closed-loop benchmark (no emulator)
         run: |
           python bridge/mock_controller.py --time 10.0 --plot tests/ci_waveform.png
+
+      - name: Run structural tests for the icon sheet workflow
+        run: |
+          python tools/check_icons.py
 
       - name: Upload Simulation Waveforms Artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: simulation-waveforms
-          path: tests/*.png
+          path: |
+            tests/ci_waveform.png
+            !tests/buck_converter_response.png
           retention-days: 7
