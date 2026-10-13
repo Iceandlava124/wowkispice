@@ -1,6 +1,0 @@
-REMINDER — start QEMU Phase A now (read /tmp/HERMES_PHASE_A_TASK.txt and /tmp/HOST_BUILD_ADVISORY.txt if it exists):
-1) 컨테이너 안에서 패치 적용 시도: cd /qemu-build/qemu-esp_develop_9.2.2_20260417 && patch -p1 -i /app/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch  (또는 git apply). 결과 기록.
-2) 빌드 도구 판단: 컨테이너 안에 meson/ninja/gcc 없음. 호스트에는 gcc(MSYS2 UCRT64 15.2.0)/pkg-config/ninja/git/patch 있음, meson+glib/pixman/libgcrypt-dev+flex+bison 없음. 네트워크 있으면 호스트에 pacman(pip)로 빌드 도구 설치 후 호스트에서 ./configure && ninja. 네트워크 없으면 패치 적용+부팅 검증까지만 하고 빌드 보류 보고.
-3) 빌드가 되면: ./configure --target-list=xtensa-softmmu --enable-trace-backends=nop && ninja -j4. qemu-system-xtensa 경로 기록.
-4) 부팅 검증(gate 1): 패치로 빌드된 qemu-system-xtensa로 -M esp32 -drive file=<qemu_flash.bin 절대경로>,if=mtd,format=raw -serial stdio -nographic (인자는 README 확인). app_main() 도달 + wdt 공황 없이 제어 루프 샘플 >=1회 확인. 결과 /tmp/HERMES_PHASE_A_RESULT.md에 기록.
-5) adc1-value 주입은 QEMU 모니터 qom-set <sens-path> adc1-value <N>. SENS 장치 QOM 경로는 info qtree로 확인.

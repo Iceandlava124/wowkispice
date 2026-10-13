@@ -16,7 +16,7 @@ import os
 import sys
 import time
 import numpy as np
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Optional
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -101,7 +101,7 @@ class IndustrialVerificationEngine:
         - Settling Time (ts to within ±2% of steady state)
         - Recovery Slew Rate (V/ms)
         """
-        metrics = self.sim_engine.run_simulation(
+        self.sim_engine.run_simulation(
             duration_ms=6.0,
             vin=12.0,
             vtarget=vtarget,

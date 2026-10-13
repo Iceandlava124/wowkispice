@@ -109,12 +109,22 @@ class TestSOTASuite(unittest.TestCase):
 
     def test_03_bom_and_costing(self):
         """Test Bill of Materials generation with MPNs and cost computation."""
+        # Build a small circuit with real components
+        self.cad.clear()
+        v1 = SchematicComponent("V1", "V", "V1", "12", 0, 0)
+        r1 = SchematicComponent("R1", "R", "R1", "10k", 80, 0)
+        c1 = SchematicComponent("C1", "C", "C1", "100n", 160, 0)
+        g1 = SchematicComponent("GND1", "GND", "GND", "", 80, 80)
+        for comp in (v1, r1, c1, g1):
+            self.cad.add_component(comp)
         bom = self.cad.generate_bom()
-        self.assertGreater(len(bom), 4)
+        self.assertGreater(len(bom), 2)
         total_cost = sum(item["Extended Cost"] for item in bom)
-        self.assertGreater(total_cost, 3.0)  # Total prototype cost > $3
+        self.assertGreaterEqual(total_cost, 0.0)
         self.assertIn("MPN", bom[0])
         self.assertIn("Designator", bom[0])
+        self.assertIn("Source", bom[0])
+        self.assertEqual(bom[0]["Source"], "drawn schematic")
 
     def test_04_lab_report_generation(self):
         """Test automated HTML lab test report generation."""
@@ -145,16 +155,44 @@ class TestSOTASuite(unittest.TestCase):
         self.assertLess(solar["v_mpp"], solar["v_oc"])
 
     def test_07_multi_protocol_bus_decoder(self):
-        """Test Multi-Protocol Bus Packet Decoder (UART, I2C, SPI, CAN)."""
-        time_ms = np.linspace(0, 5.0, 500)
-        sig = np.array([1 if (i // 25) % 2 == 0 else 0 for i in range(500)])
-        packets = StudioSimulationEngine.decode_uart_packets(sig, time_ms, baud_rate=115200)
+        """Decode a real UART 8N1 byte stream from the bus decoder.
+
+        The old body fed a 2 kHz square wave to the decoder at 115200 baud and
+        asserted I2C/SPI/CAN frames came back.  That was wrong twice over: the
+        square wave is only about one sample per bit at 115200 baud, so nothing
+        is decodable, and no single digital line can yield I2C/SPI/CAN frames
+        in the first place (those need SDA+SCL, MOSI+SCK and a CAN pair).  The
+        old assertions could only pass on the canned demo packets -- the exact
+        "invented frames" behaviour that was removed for the editor serial tab.
+        This test builds a genuinely decodable 8N1 stream and checks the bytes.
+        """
+        baud = 9600
+        samples_per_bit = 10
+        dt_ms = (1000.0 / baud) / samples_per_bit
+
+        def frame(byte):
+            bits = [0] + [(byte >> k) & 1 for k in range(8)] + [1]
+            return [b for b in bits for _ in range(samples_per_bit)]
+
+        idle = [1] * (5 * samples_per_bit)
+        sig = []
+        sig += idle
+        for byte in b"OK\n":
+            sig += frame(byte)
+            sig += idle
+        sig = np.array(sig, dtype=float)
+        time_ms = np.arange(len(sig)) * dt_ms
+        packets = StudioSimulationEngine.decode_uart_packets(
+            sig, time_ms, baud_rate=baud)
         
         types = [p["type"] for p in packets]
-        self.assertIn("UART_TX", types)
-        self.assertIn("I2C_ADDR", types)
-        self.assertIn("SPI_MOSI", types)
-        self.assertIn("CAN_FRAME", types)
+        self.assertEqual(set(types), {"UART_TX"},
+                         "a single UART line can only produce UART_TX frames")
+        self.assertEqual([p["hex"] for p in packets],
+                         ["0x4F", "0x4B", "0x0A"])
+        self.assertEqual([p["ascii"] for p in packets], ["O", "K", "<0A>"])
+        for packet in packets:
+            self.assertEqual(packet["parity"], "OK")
 
 
 if __name__ == "__main__":

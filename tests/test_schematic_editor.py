@@ -305,7 +305,6 @@ class TestClosedLoopEditorPath(unittest.TestCase):
         win.close()
 
     def test_clear_control_law_reverts_to_the_open_loop_path(self):
-        from bridge import cosim_runner
 
         win, _spec = self._closed_loop_window()
         win.model.control_laws.clear()
@@ -578,14 +577,12 @@ class TestAnalysisPanels(unittest.TestCase):
         matplotlib.use("Agg")
         import matplotlib.backends.backend_pdf as _pdf
         import matplotlib.pyplot as plt
-        from bridge import measurements
         good = [n for n, v in win._last_traces.items() if len(v) == len(win._last_time)]
         self.assertTrue(good, "no complete traces to export")
         with _pdf.PdfPages(path) as pdf:
             for name in good:
                 fig, ax = plt.subplots(figsize=(8.27, 11.69))
                 ax.plot([t * 1000.0 for t in win._last_time], win._last_traces[name])
-                s = measurements.trace_stats(win._last_time, win._last_traces[name])
                 ax.set_title(name)
                 pdf.savefig(fig)
                 plt.close(fig)

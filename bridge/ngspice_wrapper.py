@@ -7,7 +7,6 @@ high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
 import ctypes
 import ctypes.util
 import os
-import sys
 import threading
 from typing import Callable, Optional, Dict, Any, List, Tuple
 

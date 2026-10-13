@@ -121,7 +121,7 @@ device models).
 - The I-V curve tracer wiring, its test, and the README wiring-status
   checklist are in the working tree (see `README.md` → "Analysis-mode wiring
   status (per the analysis-mode audit)").
-- **Full suite green: 305 tests, 16 suites** — after fixing the real cause of
+- **Full suite green: 309 tests, 17 suites** — after fixing the real cause of
   the long-hanging `.meas` tests: `load_circuit()` never gave ngspice a title
   line, and ngspice treats the first line of every deck as the title, so a
   hand-typed netlist lost its first device line (floating nodes → singular DC
@@ -139,3 +139,56 @@ device models).
   √(4kTR) at 27 °C within 5% (4.07 nV/√Hz for 1 kΩ), with the 1-pole rolloff
   above the corner; `.disto` HD2/HD3 come out finite and non-negative, with a
   biased diode producing real second-harmonic content.
+
+- Reconciliation record (2026-10-08, this session): two audits conflicted on
+  whether noise, distortion, per-schematic Monte Carlo, step response and timing
+  were built. Resolution method was **code first, then test**: each was checked
+  for a reachable editor handler in `ui/schematic_editor.py`, an implementing
+  function in `bridge/`, and a test in `tests/`; the exact analysis tests were
+  then run and are green in this session's rerun.
+
+  Reconciliation table (all CONFIRMED unless noted):
+  - Noise `.noise`: reachable (`ui/schematic_editor.py:run_noise_analysis`,
+    menu "Run &Noise Analysis" `Ctrl+Shift+N`); implements
+    `bridge/analysis_runner.py:run_noise` with the `.noise` card in
+    `bridge/cad_engine.py:compile_netlist`; covered by
+    `tests/test_measurements.py:TestNoiseAndYield.test_noise_matches_resistor_
+    thermal_noise` and `tests/test_schematic_editor.py:TestAnalysisPanels.test_
+    noise_tab_measures_resistor_thermal_noise`. Status: **CONFIRMED**.
+  - Distortion `.disto`: reachable (`ui/schematic_editor.py:run_distortion_analysis`,
+    menu "Run &Distortion Analysis (.disto)" `Ctrl+Shift+T`); implements
+    `bridge/analysis_runner.py:run_disto` with the `.ac`+`.disto`+`distof1` cards
+    in `bridge/cad_engine.py:compile_netlist`; covered by
+    `tests/test_measurements.py:TestDistortion.test_distortion_reports_hd2_hd3`
+    and `tests/test_schematic_editor.py:TestAnalysisPanels.test_distortion_tab_
+    reports_harmonics_in_dbc`. Status: **CONFIRMED**.
+  - Per-schematic Monte Carlo / yield: reachable (`ui/schematic_editor.py:run_yield_study`,
+    menu "Run Monte Carlo / &Yield" `Ctrl+Shift+M`); implements
+    `bridge/analysis_runner.py:run_monte_carlo`; covered by
+    `tests/test_measurements.py:TestNoiseAndYield.test_monte_carlo_perturbs_the_
+    schematic_and_restores_it` and `tests/test_schematic_editor.py:TestAnalysisPanels.test_
+    monte_carlo_tab_solves_real_samples_and_restores_the_doc`. Status: **CONFIRMED**.
+  - Step response / propagation delay: reachable (`ui/schematic_editor.py:analyze_step_response`,
+    menu "&Step Response Metrics" `Ctrl+Shift+E`); implements
+    `bridge/measurements.py:step_metrics` plus the editor handler; covered by
+    `tests/test_measurements.py:TestStepMetrics` (3 tests) and
+    `tests/test_schematic_editor.py:TestAnalysisPanels.test_step_response_tab_
+    measures_delay_rise_and_settling`. Status: **CONFIRMED**.
+  - Timing / logic diagram: reachable (`ui/schematic_editor.py:draw_timing_diagram`,
+    menu "Show &Timing Diagram" `Ctrl+Shift+G`); implements
+    `bridge/gpio_model.py:analyze_pin` + `measured_frequency` plus the editor
+    handler; covered by `tests/test_schematic_editor.py:TestAnalysisPanels.test_
+    timing_tab_draws_digital_lanes_from_the_last_run`. Status: **CONFIRMED**.
+
+  Compiler claim also corrected by code: `bridge/cad_engine.py:compile_netlist`
+  already accepts `analysis in ("tran", "ac", "noise", "disto")` (line 229), so
+  the older audit's "only tran/ac" wording is wrong. Status: **CONFIRMED**.
+
+  Genuinely still open (not resolved by this reconciliation):
+  - `.op` button — absent; only raw-netlist escape hatch.
+  - `.dc` sweep of the user's own schematic — tracer sweeps fixed demo device
+    models only; not a UI button.
+  - Automatic ngspice↔QEMU bridge — QEMU boot + manual `qom-set` injection are
+    real; the automatic orchestrator is not yet wired. Status: **CONFIRMED OPEN**.
+
+  Count verified in this session's rerun: 309 tests, 17 suites, all green.

@@ -81,7 +81,6 @@ So the correct `divider` is 1.0 **when `sense_net` is the divider output**
 output_voltages()` exists so a caller can check before trusting a run.
 """
 
-import math
 import os
 import re
 from typing import Dict, List, Optional, Tuple

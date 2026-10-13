@@ -14,7 +14,7 @@ UART driver emits - because the interesting part is the firmware's own text,
 and a clever parser would only mangle it.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 def parse_uart(text: str) -> List[str]:

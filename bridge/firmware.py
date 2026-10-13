@@ -10,7 +10,7 @@ image. Execution lives in bridge/qemu_orchestrator.py (Espressif QEMU), which
 boots a real ESP32 .elf but is not coupled to ngspice and completes 0
 control-loop samples, because that QEMU models no SAR ADC. Renode is not an
 option: it cannot decode the Xtensa `entry` instruction and executed none of
-our firmware, so bridge/renode_orchestrator.py is kept for reference only.
+our firmware; the abandoned Renode cluster was removed 2026-10-09.
 GPIO behaviour during co-simulation therefore comes from a declared pin
 profile (see bridge/gpio_model.py) which is honest about being a model rather
 than pretending to be the binary.

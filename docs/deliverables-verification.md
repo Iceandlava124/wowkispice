@@ -8,7 +8,7 @@ file evidence; nothing is marked achieved on the strength of a design doc.
 assistant) and the packaging/DB layers are NOT built — they exist only as
 design notes (`overnight/04-ai-assistant-design.md`). Every analysis mode
 from the audit is now wired into the editor (noise, `.disto`, per-schematic
-Monte Carlo, timing view, step-response metrics), suite green at 305 tests.**
+Monte Carlo, timing view, step-response metrics), suite green at 309 tests.**
 
 ---
 
@@ -118,7 +118,7 @@ the Bode tab (`analysis_runner.run_bode`) and the qualification battery
 | Digital timing diagram tab + `Ctrl+Shift+G` (thresholded lanes, edges/duty/freq) | ✅ | `test_schematic_editor` (1) |
 | Wrapper title-line fix (root cause of the hanging `.meas` suite) | ✅ | fixes `test_ui_polish` (76/76) |
 | `docs/analysis-mode-audit.md` + README deferral checklist | ✅ | — |
-| **Full suite** | ✅ | **305 tests, 16 suites, all green** |
+| **Full suite** | ✅ | **309 tests, 17 suites, all green** |
 
 ## Still open (remaining vision scope)
 

@@ -119,14 +119,11 @@ class TestStudioEngineSuite(unittest.TestCase):
         c_val = 100.0
         rload = 5.0
         
-        # Independent theoretical calculation
-        expected_f0 = 1.0 / (2.0 * np.pi * np.sqrt((l_val * 1e-6) * (c_val * 1e-6)))  # ~2321.5 Hz
 
         bode = StudioSimulationEngine.run_real_spice_bode(l_val_uh=l_val, c_val_uf=c_val, rload=rload)
         
         freqs = bode["freqs_hz"]
         mag_db = bode["mag_db"]
-        phase_deg = bode["phase_deg"]
         
         self.assertGreater(len(freqs), 20)
         self.assertEqual(len(freqs), len(mag_db))
@@ -229,15 +226,38 @@ class TestStudioEngineSuite(unittest.TestCase):
 
     def test_08_protocol_packet_decoder(self):
         """
-        Verify hardware UART 8N1 bit-exact deserializer.
+        Verify the hardware UART 8N1 bit-exact deserializer.
+
+        The stimulus is a real 8N1 byte stream: one start bit, eight data bits
+        (LSB first), one stop bit, ten samples per bit.  The previous square
+        wave gave about one sample per bit at 115200 baud, which is not
+        decodable and made the decoder return an empty list.
         """
-        time_ms = np.linspace(0, 5.0, 500)
-        sig = np.array([1 if (i // 25) % 2 == 0 else 0 for i in range(500)])
-        packets = StudioSimulationEngine.decode_uart_packets(sig, time_ms, baud_rate=115200)
+        baud = 9600
+        samples_per_bit = 10
+        dt_ms = (1000.0 / baud) / samples_per_bit
+
+        def frame(byte):
+            bits = [0] + [(byte >> k) & 1 for k in range(8)] + [1]
+            return [b for b in bits for _ in range(samples_per_bit)]
+
+        idle = [1] * (5 * samples_per_bit)
+        sig = []
+        sig += idle
+        for byte in b"OK\n":
+            sig += frame(byte)
+            sig += idle
+        sig = np.array(sig, dtype=float)
+        time_ms = np.arange(len(sig)) * dt_ms
+
+        packets = StudioSimulationEngine.decode_uart_packets(
+            sig, time_ms, baud_rate=baud)
         self.assertIsInstance(packets, list)
         self.assertGreater(len(packets), 0)
         self.assertIn("hex", packets[0])
         self.assertIn("ascii", packets[0])
+        self.assertEqual([p["hex"] for p in packets],
+                         ["0x4F", "0x4B", "0x0A"])
 
     def test_09_project_json_serialization(self):
         """

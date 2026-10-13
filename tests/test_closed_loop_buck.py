@@ -5,7 +5,6 @@ test_closed_loop_buck.py - Automated unit test for Closed-loop buck converter re
 import sys
 import os
 import unittest
-import numpy as np
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

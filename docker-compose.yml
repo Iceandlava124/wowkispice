@@ -11,7 +11,7 @@ services:
     environment:
       - SIM_DURATION_MS=10.0
       - SIM_TSTEP_US=0.5
-    # Pure-Python mock closed loop (bridge/mock_controller). --mode benchmark
-    # never launches an emulator despite the file name; it is kept here as a
-    # deliberate, real check of that module. See docs/legacy-module-audit.md.
-    command: python3 bridge/renode_orchestrator.py --mode benchmark --time 10.0 --plot output/waveform.png
+    # Pure-Python mock closed loop (bridge/mock_controller). The abandoned
+    # Renode wrapper was deleted 2026-10-09; this runs the module directly.
+    # See docs/legacy-module-audit.md.
+    command: python3 bridge/mock_controller.py --time 10.0 --plot output/waveform.png

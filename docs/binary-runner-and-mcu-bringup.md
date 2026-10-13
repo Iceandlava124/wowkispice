@@ -4,19 +4,33 @@
 specification, written to be implemented directly.
 **Audience:** embedded engineer implementing from this document alone.
 **Related records:** `docs/systems-map.md` §7–§9, `tools/qemu-patch/README.md`,
-`docs/legacy-module-audit.md`.
+`docs/legacy-module-audit.md`, `docs/pilot-checklist.md`.
 
 ## 1. Goal
 
+This repo does **not** use HDL as the controller. The core idea is simpler and
+more concrete:
+
+- the **real firmware binary** is the controller;
+- the **analog side** is ngspice, and it should eventually be the **PCB**, not
+  just the functional buck circuit;
+- the two meet through **scripted injection + readback** and then through a
+  **sampled-data hardware-in-the-loop** coupling, with ngspice still solving the
+  analog network.
+
 Today the closed loop runs **declared** controller behaviour: a pin profile
 (`bridge/gpio_model.py`) or a control law parsed from firmware source
-(`bridge/control_law.py`). The real firmware binary is executed only under QEMU,
+(`bridge/control_law.py`). The real firmware binary executes only under QEMU,
 disconnected from the solver.
 
-The **binary runner** closes that gap: the real image is the controller — its
-ADC input comes from the ngspice solve, and its GPIO decisions drive ngspice
-`external` sources. The second goal is to make adding a new MCU (and testing it
-beside the others) a checklist instead of a project.
+The **binary runner** closes that gap: the real image is the controller — its ADC
+input comes from the ngspice solve, and its GPIO decisions drive ngspice
+`external` sources.
+
+The second goal is to make adding a new MCU (and testing it beside the others) a
+checklist instead of a project. The third goal is to move the analog network from
+“schematic buck converter” toward “PCB-level board sim”, so the mixed-signal result
+is a board answer, not just a functional one.
 
 ## 2. What already works — verified, do not rebuild
 
@@ -54,6 +68,18 @@ contract instead.
 ## 5. Milestones
 
 ### M0 — scripted injection + gate readback (the unblocking step)
+
+Deliverable prototype implemented: `bridge/firmware_runner.py`.
+
+- `bridge/firmware_runner.py` provides programmatic ADC injection and gate readback
+  for the ESP32 firmware path, with the real QMP path exercised only when
+  `WOSP_QEMU` and a QMP socket are configured.
+- The same helpers are importable and behave cleanly when `WOSP_QEMU` is absent, so
+  the rest of the product keeps working and the real path is clearly marked as
+  UNVERIFIED without the environment.
+- Tests: `tests/test_firmware_runner.py` (importability, gate-bit semantics, clean
+  "not configured" failure paths, and a real-QMP-only class when
+  `WOSP_QEMU` is set).
 
 Deliverable: automation (new `bridge/qemu_monitor.py`, or new functions in
 `bridge/qemu_orchestrator.py`) that can:
@@ -99,7 +125,8 @@ Interface sketch — new `bridge/binary_runner.py`:
 ```python
 run_binary_cosim(model, pin_specs, *, firmware_image, qemu, machine="esp32",
                  tstep_us=0.5, duration_ms=5.0,
-                 poll_interval_steps=..., progress_callback=None,
+                 poll_interval_steps=...,
+                 progress_callback=None,
                  stop_flag=None) -> CosimRun
 ```
 
@@ -117,7 +144,32 @@ run_binary_cosim(model, pin_specs, *, firmware_image, qemu, machine="esp32",
 - assert non-trivial gate activity (switches > 0, duty in a plausible band);
 - skipped without `WOSP_QEMU`, so CI stays green where QEMU is absent.
 
-### M2 — UI wiring (optional)
+### M2 — PCB-level analog network (the mixed-signal target)
+
+The functional buck netlist is a start, but the real target is **pcb sim** with
+the firmware in the loop. The current plan therefore adds a board network layer:
+
+1. **Start from the functional circuit** — the M0/M1 buck topology is the
+   control loop the firmware expects. Do not replace that until the runner works.
+2. **Add board parasitics and routing** — trace resistance, via/plane impedance,
+   connector impedance, and any sensed-vs-loaded node separation, so the ADC
+   sense net is a real board node and not an ideal point.
+3. **Keep the firmware as the controller** — the PCB sim does not get a new
+   HDL controller; the gate still comes from the real firmware image under QEMU
+   once the runner is wired.
+4. **Compare board vs functional** — the PCB run is the same firmware, same
+   buck topology intent, richer analog network. Differences are a board answer
+   (parasitics, layout sensitivity, sense-node movement), not “a different
+   controller”.
+
+**Acceptance:**
+- the PCB netlist compiles and runs through ngspice;
+- the runner can still couple the firmware ADC input and gate output into it;
+- the result differs from the functional buck by board effects you can name
+  (trace resistance, sense-node shift, ground bounce, connector parasitics),
+  and those effects are reported rather than hidden.
+
+### M3 — UI wiring (optional)
 
 Add a "Run on firmware binary" mode beside the declared-law cosim (F2), reusing
 the existing `progress_callback` / `stop_flag` plumbing. Keep declared-law mode
@@ -176,6 +228,9 @@ WOSP_QEMU=/path/to/qemu-system-xtensa python -m pytest tests/test_qemu_binary_ru
   into an interrupt-watchdog panic. Only the patched build runs the loop.
 - **The in-repo `.venv` may be stale**; run tests with a Python 3.12 that has
   `requirements.txt` installed (see README Quickstart).
+- **PCB parasitics are easy to overclaim** — a pretty trace model is not a
+  validated board answer. Name the parasitics you include and which ones you
+  are ignoring, and report the result as a board estimate until proven otherwise.
 
 ## 9. References
 
@@ -186,3 +241,4 @@ WOSP_QEMU=/path/to/qemu-system-xtensa python -m pytest tests/test_qemu_binary_ru
 - `bridge/cosim_runner.py` + `bridge/control_law.py` — the external-source
   contract the runner reuses.
 - `tests/test_closed_loop_buck.py` — firmware-constants cross-check pattern.
+- `docs/pilot-checklist.md` — the editor-side runbook for the functional buck + F2.

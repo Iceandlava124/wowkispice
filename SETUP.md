@@ -78,15 +78,16 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 ngspice DLL (4 MB, checksum-verified) into `tools/ngspice_dll/`, and proves
 Python can bind it. It is idempotent — rerun it any time.
 
-**First checkpoint** — the test suite:
+**First checkpoint** — the environment, then the test suite:
 
 ```powershell
-python tools\run_tests.py
+.\run_selfcheck.bat                  # deps + ngspice + a known solve + suites
+python tools\run_tests.py            # suites only
 ```
 
-Expect `257 tests passed, all suites green` and exit code 0. If it is not
-green, stop and fix that before continuing — everything later assumes this
-line.
+Expect `SELF-CHECK: PASS` and `309 tests passed, all suites green`, both with
+exit code 0. If it is not green, stop and fix that before continuing —
+everything later assumes this line.
 
 ## Part D — Build the ESP32 firmware (Windows, first run ~15-30 min)
 
@@ -174,7 +175,8 @@ Keep the source in your WSL home (`~/qemu-esp`) — building on `/mnt/c`
 
 ```powershell
 cd $env:USERPROFILE\PROJECT_WOWKISPICE
-python tools\run_tests.py            # -> 257 tests passed, all suites green
+.\run_selfcheck.bat                  # -> SELF-CHECK: PASS, 309 tests green
+python tools\run_tests.py            # -> 309 tests passed, all suites green
 python tools\demo_closed_loop.py     # -> PASS in ~40 seconds
 ```
 

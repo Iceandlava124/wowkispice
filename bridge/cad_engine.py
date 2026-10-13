@@ -7,10 +7,7 @@ Provides:
 4. Bill of Materials (BOM) Generator with DigiKey/LCSC Part Number & Costing
 """
 
-import os
 import re
-import sys
-import json
 from typing import Dict, List, Any, Tuple, Optional
 
 
@@ -23,8 +20,12 @@ class SchematicComponent:
         value: str,
         x: float,
         y: float,
+        *,
+        description: str = "(no description)",
+        values: str = "(no values)",
         footprint: str = "",
         mpn: str = "",
+        manufacturer: str = "(unknown)",
         cost_usd: float = 0.0,
         pins: Optional[Dict[str, str]] = None,
         rotation: float = 0.0
@@ -37,6 +38,9 @@ class SchematicComponent:
         self.y = y
         self.footprint = footprint
         self.mpn = mpn
+        self.manufacturer = manufacturer
+        self.description = description
+        self.values = values
         self.cost_usd = cost_usd
         # Dict mapping pin_name -> net_name
         self.pins = pins or {}
@@ -53,6 +57,7 @@ class SchematicComponent:
             "y": self.y,
             "footprint": self.footprint,
             "mpn": self.mpn,
+            "manufacturer": self.manufacturer,
             "cost_usd": self.cost_usd,
             "pins": self.pins,
             "rotation": self.rotation
@@ -661,80 +666,32 @@ class SchematicNetlistEngine:
         return lines
 
     def generate_bom(self) -> List[Dict[str, Any]]:
-        """Generate a complete Bill of Materials (BOM) with commercial MPNs and cost."""
-        bom = [
-            {
-                "Designator": "U1",
-                "Description": "Dual-Core 240MHz Wi-Fi/BLE MCU",
-                "Manufacturer": "Espressif",
-                "MPN": "ESP32-WROOM-32E",
-                "Package": "Module SMD",
+        """Return a drawing-derived BOM from placed components.
+
+        Raises ValueError if the schematic has no components placed.
+        """
+        if not self.components:
+            raise ValueError(
+                "empty schematic: no components placed. Do not guess a BOM "
+                "from a reference design — place parts first (use the demo query "
+                "or draw a schematic).")
+        rows: List[Dict[str, Any]] = []
+        for comp in sorted(self.components.values(), key=lambda c: c.name):
+            ctype = comp.comp_type.upper()
+            if ctype == "GND":
+                continue
+            rows.append({
+                "Designator": comp.name,
+                "Description": getattr(comp, "description", None) or "(no description)",
+                "Manufacturer": comp.manufacturer or "(unknown)",
+                "MPN": comp.mpn or "(unknown)",
+                "Footprint": comp.footprint or "-",
                 "Quantity": 1,
-                "Unit Cost (USD)": 2.65,
-                "Extended Cost": 2.65
-            },
-            {
-                "Designator": "Q1",
-                "Description": "100V 33A N-Channel Power MOSFET",
-                "Manufacturer": "Infineon / Vishay",
-                "MPN": "IRF540NPBF",
-                "Package": "TO-220AB",
-                "Quantity": 1,
-                "Unit Cost (USD)": 0.72,
-                "Extended Cost": 0.72
-            },
-            {
-                "Designator": "D1",
-                "Description": "40V 1A Schottky Barrier Rectifier",
-                "Manufacturer": "ON Semiconductor",
-                "MPN": "1N5819",
-                "Package": "DO-41",
-                "Quantity": 1,
-                "Unit Cost (USD)": 0.12,
-                "Extended Cost": 0.12
-            },
-            {
-                "Designator": "L1",
-                "Description": "47µH 4.5A Shielded Power Inductor",
-                "Manufacturer": "Bourns / Wurth",
-                "MPN": "SDR1307-470KL",
-                "Package": "13x13mm SMD",
-                "Quantity": 1,
-                "Unit Cost (USD)": 0.58,
-                "Extended Cost": 0.58
-            },
-            {
-                "Designator": "C1",
-                "Description": "100µF 35V Low-ESR Electrolytic Cap",
-                "Manufacturer": "Panasonic / Nichicon",
-                "MPN": "EEU-FR1V101",
-                "Package": "Radial 8x11.5mm",
-                "Quantity": 1,
-                "Unit Cost (USD)": 0.28,
-                "Extended Cost": 0.28
-            },
-            {
-                "Designator": "R1, R2",
-                "Description": "10kΩ 1% 0.25W Precision Metal Film",
-                "Manufacturer": "Yageo / Vishay",
-                "MPN": "MFR-25FRF52-10K",
-                "Package": "Axial 0207",
-                "Quantity": 2,
-                "Unit Cost (USD)": 0.03,
-                "Extended Cost": 0.06
-            },
-            {
-                "Designator": "R_LOAD",
-                "Description": "5.0Ω 10W Power Resistor",
-                "Manufacturer": "Ohmite",
-                "MPN": "280-CR10-5.0-RC",
-                "Package": "Ceramic Wirewound",
-                "Quantity": 1,
-                "Unit Cost (USD)": 0.85,
-                "Extended Cost": 0.85
-            }
-        ]
-        return bom
+                "Unit Cost (USD)": comp.cost_usd,
+                "Extended Cost": comp.cost_usd,
+                "Source": "drawn schematic" if self.components else "reference buck converter (explicit)"
+            })
+        return rows
 
     def export_kicad_schematic(self, output_path: str, origins=None, title: str = "WOSP Schematic"):
         """

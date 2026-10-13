@@ -1,6 +1,6 @@
 # Legacy Module Audit
 
-**Date:** 2026-10-04 · **Status:** current. Supersedes the 2026-10-03 draft,
+**Date:** 2026-10-04, updated 2026-10-09 · **Status:** current. Supersedes the 2026-10-03 draft,
 which was a pre-cleanup proposal ("nothing deleted, nothing moved") and is no
 longer accurate.
 
@@ -32,7 +32,7 @@ That was ~2,200 LOC of parallel UI removed with **zero test deletions**: the
 bridge modules underneath were kept, and the one capability worth keeping (the
 fault-injection / temperature-corner qualification battery) was ported.
 
-## 1. Still dead — no importer, no test, no launcher
+## 1. Dead — no importer, no test, no launcher (deleted 2026-10-09)
 
 ### `bridge/circuit_stepper.py` (82 LOC)
 Unchanged since the first audit. The only text matches anywhere are its own
@@ -40,14 +40,17 @@ docstring and two bullet points in `overnight/01-implementation-plan.md`, which
 is a planning document, not an importer. No Python import, no test reference,
 no launcher, no `__main__` guard — it is not runnable standalone.
 
-**Still outstanding.** This is the one deletion the audit recommended and
-nothing has actioned it.
+**Deleted 2026-10-09.** This is the one deletion the audit recommended; its
+only mentions were its own docstring, planning documents, and audits.
 
-## 2. Renode cluster — abandoned, retained for reference
+## 2. Renode cluster — abandoned, deleted 2026-10-09
 
-Four files, 152 LOC. Nothing in the active editor or bridge core imports them.
+Four files, 152 LOC, all deleted 2026-10-09 along with the gitignored
+`tools/renode/` tree (298 MB). Nothing in the active editor or bridge core
+imported them. CI and `docker-compose.yml` now call
+`bridge/mock_controller.py` directly for the same benchmark run.
 
-| File | LOC | Referenced by |
+| File | LOC | Was referenced by |
 |---|---|---|
 | `bridge/renode_orchestrator.py` | 86 | `docker-compose.yml`, `.github/workflows/cosim-ci.yml` (both as subprocess argv) |
 | `bridge/renode_adc_peripheral.py` | 36 | `bridge/esp32_buck.repl:18` as a *string*, not an import |
@@ -58,13 +61,13 @@ Four files, 152 LOC. Nothing in the active editor or bridge core imports them.
 importable. `import bridge.renode_adc_peripheral` raises
 `NameError: name 'request' is not defined`, because `request` is injected by
 Renode's peripheral loader. It is a paste-in desktop-script fragment, not a
-module. Both it and `renode_orchestrator.py` now say so at the top.
+module. Both it and `renode_orchestrator.py` said so at the top.
 
 **Why Renode was dropped**, established 2026-10-03 and confirmed since:
 Renode cannot decode the Xtensa `entry` instruction, which appears 393 times in
 an ordinary ESP-IDF build. It therefore executed *zero* instructions of this
-firmware. The `--mode renode` path shells out to `tools/renode/renode.exe`,
-which is gitignored and has never been run.
+firmware. The `--mode renode` path shelled out to `tools/renode/renode.exe`,
+which was gitignored and had never been run; that binary tree is now deleted.
 
 **The emulator target is now QEMU**, not Renode. `bridge/qemu_orchestrator.py`
 boots the real `.elf` through ROM, second-stage bootloader and `app_main()` in
@@ -82,10 +85,10 @@ mode.
 
 | File | LOC | What depends on it |
 |---|---|---|
-| `bridge/studio_engine.py` | 653 | `bridge/industrial_verification.py:23`, `tests/test_studio_suite.py` (9 tests), `tests/test_sota_suite.py` (7 tests) |
+| `bridge/studio_engine.py` | 635 | `bridge/industrial_verification.py:23`, `tests/test_studio_suite.py` (9 tests), `tests/test_sota_suite.py` (7 tests) |
 | `bridge/industrial_verification.py` | 440 | `tests/test_industrial_verification.py` (5 tests) |
-| `bridge/report_generator.py` | 178 | `tests/test_sota_suite.py` |
-| `bridge/mock_controller.py` | 194 | `bridge/renode_orchestrator.py:27`, `tests/test_closed_loop_buck.py` (1 test), plus Docker and CI via `--mode benchmark` |
+| `bridge/report_generator.py` | 176 | `tests/test_sota_suite.py` |
+| `bridge/mock_controller.py` | 228 | `tests/test_closed_loop_buck.py` (1 test); Docker and CI now call it directly for the `--time 10.0` benchmark (formerly via the deleted `renode_orchestrator.py`) |
 
 The blast radius is still **22 tests**. `ui/studio_app.py` and
 `ui/ltspice_workbench.py` dropped out of this list because they are gone; their
@@ -115,7 +118,7 @@ the 22 tests and 2 launcher scripts listed above.
 
 | Item | Status |
 |---|---|
-| `bridge/circuit_stepper.py` (82 LOC, dead) | **Still not deleted** |
+| `bridge/circuit_stepper.py` (82 LOC, dead) | **Deleted 2026-10-09** |
 | `engine` module-global in `mock_controller.py` | **Unfixed** |
-| Renode cluster (4 files, 152 LOC) | Retained deliberately; no code path reaches Renode |
+| Renode cluster (4 files, 152 LOC) | **Deleted 2026-10-09**; CI/compose call `bridge/mock_controller.py` directly; gitignored `tools/renode/` (298 MB) removed |
 | `tools/qemu-patch/` | **Uncompiled.** Applies cleanly to the pinned Espressif source, never through a compiler |

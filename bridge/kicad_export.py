@@ -325,7 +325,7 @@ def export_kicad_netlist(model: SchematicNetlistEngine, output_path: str) -> str
             f'      (property "Reference" "{ref}" (at 0 0 0) (effects (font (size 1.27 1.27)) (justify left)))',
             f'      (property "Value" "{_esc(comp.value)}" (at 0 0 0) (effects (font (size 1.27 1.27)) (justify left)))',
             f'      (property "Footprint" "{_esc(footprint)}" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))',
-            f'      (property "Datasheet" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))',
+            '      (property "Datasheet" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))',
             f'      (tstamps "/{_uid("ts", comp.comp_id)}"))',
         ]
     lines.append("  )")
@@ -545,7 +545,7 @@ def export_kicad_schematic(
             " (effects (font (size 1.27 1.27)) (justify left bottom))"
             f' (uuid "{_uid("label", net_name)}"))')
 
-    lines.append(f'  (sheet_instances (path "/" (page "1")))')
+    lines.append('  (sheet_instances (path "/" (page "1")))')
     lines.append("  (embedded_fonts no)")
     lines.append(")")
 

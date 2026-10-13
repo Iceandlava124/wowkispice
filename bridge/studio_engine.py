@@ -12,7 +12,6 @@ Executes real libngspice C-API simulations for all physics domains:
 import os
 import sys
 import time
-import json
 import numpy as np
 from typing import Dict, List, Any, Tuple, Optional
 
@@ -471,16 +470,7 @@ class StudioSimulationEngine:
         samples_per_bit = int(round(bit_period_ms / dt_ms)) if dt_ms > 0 else 1
         
         if samples_per_bit < 2:
-            return [
-                {"timestamp_ms": 0.12, "type": "UART_TX", "hex": "0x57", "ascii": "W", "parity": "OK"},
-                {"timestamp_ms": 0.45, "type": "UART_TX", "hex": "0x4F", "ascii": "O", "parity": "OK"},
-                {"timestamp_ms": 0.88, "type": "UART_TX", "hex": "0x57", "ascii": "W", "parity": "OK"},
-                {"timestamp_ms": 1.25, "type": "UART_TX", "hex": "0x4B", "ascii": "K", "parity": "OK"},
-                {"timestamp_ms": 1.70, "type": "UART_TX", "hex": "0x49", "ascii": "I", "parity": "OK"},
-                {"timestamp_ms": 2.10, "type": "I2C_ADDR", "hex": "0x3C", "ascii": "SSD1306_OLED", "parity": "ACK"},
-                {"timestamp_ms": 2.65, "type": "SPI_MOSI", "hex": "0x2A", "ascii": "RAM_WRITE", "parity": "CS_LOW"},
-                {"timestamp_ms": 3.20, "type": "CAN_FRAME", "hex": "0x18F004", "ascii": "EEC1_ENGINE", "parity": "CRC_OK"}
-            ]
+            return []
 
         # Scan for falling edge start bits
         i = 0
@@ -518,14 +508,6 @@ class StudioSimulationEngine:
                     i += int(samples_per_bit * 10)
             i += 1
 
-        if len(packets) == 0:
-            packets = [
-                {"timestamp_ms": 0.12, "type": "UART_TX", "hex": "0x57", "ascii": "W", "parity": "OK"},
-                {"timestamp_ms": 0.45, "type": "UART_TX", "hex": "0x4F", "ascii": "O", "parity": "OK"},
-                {"timestamp_ms": 0.88, "type": "UART_TX", "hex": "0x57", "ascii": "W", "parity": "OK"},
-                {"timestamp_ms": 1.25, "type": "UART_TX", "hex": "0x4B", "ascii": "K", "parity": "OK"},
-                {"timestamp_ms": 1.70, "type": "UART_TX", "hex": "0x49", "ascii": "I", "parity": "OK"}
-            ]
         return packets
 
     # =========================================================================

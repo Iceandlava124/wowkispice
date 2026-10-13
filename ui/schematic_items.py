@@ -52,7 +52,6 @@ def _draw_board(painter: QPainter, comp_type: str):
     pins = spec["pins"]
     if not pins:
         return False
-    xs = [p[1] for p in pins]
     ys = [p[2] for p in pins]
     half_w = 58
     top = min(ys) - 14

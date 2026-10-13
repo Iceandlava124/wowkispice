@@ -1,6 +1,6 @@
 # WOSP Systems Map
 
-**Date:** 2026-10-04 · **Scope:** the repository as it exists at commit `60b308c`.
+**Date:** 2026-10-04, updated 2026-10-09 · **Scope:** the repository as it exists after the 2026-10-09 cleanup (first mapped at commit `60b308c`).
 **Purpose:** a map for understanding, not a task list. Read the flags literally.
 
 ## How to read this
@@ -17,9 +17,12 @@ the distinctions are the whole point of this document.
 
 A claim of "probably fine" is UNVERIFIED, not CONFIRMED WORKING.
 
-Baseline: `python tools/run_tests.py` -> **257 tests, 15 suites, exit 0**
-(verified repeatedly this session). Any claim below about test coverage refers
-to that run.
+Baseline: `python tools/run_tests.py` -> **309 tests, 17 suites, exit 0**
+(re-verified 2026-10-09 with the repaired `.venv`; the original 2026-10-04
+baseline was 257 tests / 15 suites). Any claim below about test coverage
+refers to the current run. The 17th suite,
+`test_selfcheck.py`, pins `tools/selfcheck.py` — the gate behind
+`run_selfcheck.bat`.
 
 ## Third-party material
 
@@ -58,7 +61,7 @@ skip in CI. The repository retains no third-party images.
 
 # LAYER 1 — SUBSYSTEMS IN ISOLATION
 
-## 1. ngspice engine — `bridge/ngspice_wrapper.py` (406 LOC)
+## 1. ngspice engine — `bridge/ngspice_wrapper.py` (414 LOC)
 
 **What it does.** `ctypes` binding to `libngspice`. Resolves the library in a
 fixed order: explicit argument, `$WOSP_NGSPICE_LIB`, the bundled Windows
@@ -88,7 +91,7 @@ simulations through it. **CONFIRMED WORKING.**
   build than the one the struct definitions were written against. The struct
   layouts in `sharedspice.h` are transcribed by hand.
 
-## 2. Schematic editor / UI — `ui/` (~4,471 LOC)
+## 2. Schematic editor / UI — `ui/` (~6,204 LOC)
 
 `ui/schematic_editor.py` (2,927) is the main window: palette, canvas, menus,
 part hotkeys, control-law import, the run button. `ui/schematic_scene.py` (490)
@@ -202,7 +205,7 @@ It configures `adc_oneshot`, sets up **ADC calibration**
   hardware. No ESP32 board has been involved. `ADC_OVERSAMPLE_N 16` and the
   line-fitting calibration scheme have never run on silicon.
 
-## 5. Control law / closed loop — `bridge/control_law.py` (447) + `bridge/cosim_runner.py` (306)
+## 5. Control law / closed loop — `bridge/control_law.py` (539) + `bridge/cosim_runner.py` (305)
 
 **This is the real closed loop, and it is a different implementation from
 `mock_controller.py`.** See item 6.
@@ -222,7 +225,7 @@ It also scrapes constants out of the real C source
 (`read_firmware_constants`) using a `#define` regex over the aliases
 `ADC_LOW_THRESHOLD`, `ADC_HIGH_THRESHOLD`, `GATE_PIN`.
 
-**How verified.** `tests/test_cosim_control.py` (23 tests) covers spec
+**How verified.** `tests/test_cosim_control.py` (34 tests) covers spec
 normalisation, rejection of bad specs, count conversion, firmware-constant
 extraction (asserting `low_counts == 1995`, `high_counts == 2030`), round-trip
 save/load, and real `run_cosim` executions including the failure paths.
@@ -245,7 +248,7 @@ save/load, and real `run_cosim` executions including the failure paths.
   back-mapping (`_pin_for_source`) is written for it and is not exercised by a
   multi-MCU test.
 
-## 6. Mock controller — `bridge/mock_controller.py` (211 lines)
+## 6. Mock controller — `bridge/mock_controller.py` (228 lines)
 
 **A second, independent closed-loop implementation.** It runs
 `circuits/buck_converter.cir` directly through `ngSpice_Init_Sync`, with its
@@ -255,8 +258,8 @@ gate.
 
 **This is not the loop the editor uses.** `docs/legacy-module-audit.md` and the
 import graph agree: `cosim_runner` is wired into the UI; `mock_controller` is
-only reachable from `renode_orchestrator.py` (misleading name), CI, and
-`docker-compose.yml`.
+only reachable from CI and `docker-compose.yml`, which call it directly (the
+misleadingly named `renode_orchestrator.py` wrapper was deleted 2026-10-09).
 
 **How verified.** `tests/test_closed_loop_buck.py` — **3 tests**
 (`TestThresholdsMatchFirmware` x2, `TestClosedLoopBuck` x1).
@@ -285,7 +288,9 @@ only reachable from `renode_orchestrator.py` (misleading name), CI, and
   consequence of this fix. **This is the one place the more accurate model made
   a margin worse.**
 - **Verdict 2026-10-04: RETIRE the CI/compose entry point; KEEP the module and
-  its tests.** See "Retire or reconcile?" below for the evidence.
+  its tests.** Partly applied 2026-10-09: the legacy wrapper was deleted and
+  CI/compose now call `mock_controller.py` directly; the duplicate step itself
+  was kept. See "Retire or reconcile?" below for the evidence.
 
 ## 6b. Retire or reconcile? — `mock_controller` and the CI path
 
@@ -298,9 +303,9 @@ answers, and the divider work is what made the split obvious.
 
 ### The entry point is pure duplication
 
-`cosim-ci.yml:58` runs
-`python bridge/renode_orchestrator.py --mode benchmark`, and
-`renode_orchestrator.py:50-57` shows that `mock` and `benchmark` both call
+`cosim-ci.yml` now runs `python bridge/mock_controller.py --time 10.0`; until
+2026-10-09 it went through the now-deleted wrapper
+`renode_orchestrator.py --mode benchmark`, whose only working modes both called
 `run_closed_loop_simulation()` — the *same function*
 `tests/test_closed_loop_buck.py:40` calls. And `tools/run_tests.py:61`
 auto-discovers `test_*.py`, so the file that covers it is **already** run by
@@ -320,10 +325,10 @@ consumed by nothing in the repo. It is not "real coverage of that module" —
 the coverage is line 44, which is unconditional and runs on the same trigger.
 
 Two further reasons it is safe to drop rather than repair:
-- `renode_orchestrator.py` is already self-declared deprecated: the `--mode renode`
-  branch has never run this firmware (Renode cannot decode the Xtensa `entry`
-  instruction). Retiring the CI step removes the *last* consumer of a file whose
-  remaining modes are its only working ones.
+- `renode_orchestrator.py` was deleted on 2026-10-09. Its `--mode renode`
+  branch had never run this firmware (Renode cannot decode the Xtensa `entry`
+  instruction), and its only working modes merely wrapped `mock_controller`;
+  CI and compose now name the real module directly.
 - `studio_engine.py` does **not** use `mock_controller`, despite
   `overnight/05-gap-review.md:111` claiming it does. It drives its own
   `GetVSRCData_t` loop (L151). The overnight doc overstates the blast radius;
@@ -340,7 +345,7 @@ Deleting `mock_controller` is the one-way move, and the evidence says not to:
 - `cosim_runner` has **34** tests to its 3, but that asymmetry is the argument
   for *not spending new engineering on the loser*, not for deleting the
   cross-check.
-- It costs nothing: it is 211 lines, already written, already green.
+- It costs nothing: it is 228 lines, already written, already green.
 
 **What retiring does and does not mean.** It means deleting the step at
 `cosim-ci.yml:56-58` and the `cosim-runner` service in `docker-compose.yml:4-17`.
@@ -355,9 +360,12 @@ from a shell" entry point that needs no Qt. The real path has no CLI
 headless artifact is wanted, the fix is a *new* small CLI over `cosim_runner`,
 not a repoint of the existing one. That is new scope, not a repair.
 
-**Not yet done.** This is a recommendation, not an applied change: the CI and
-compose edits are one-way and affect a workflow that has never actually run, so
-they wait on an explicit go-ahead.
+**Applied in part, 2026-10-09.** The legacy wrapper was deleted and CI/compose
+now call `bridge/mock_controller.py` directly, preserving the 10 ms artifact run.
+The fuller retirement argued above — dropping the duplicate CI step and the
+`cosim-runner` service, or replacing them with a headless CLI over `cosim_runner`
+— is still a recommendation, not applied: those edits affect a workflow that has
+never actually run, so they wait on an explicit go-ahead.
 
 ## 7. QEMU orchestrator — `bridge/qemu_orchestrator.py` (252) + `bridge/qtest_client.py` (198) + `bridge/esp32_regs.py` (76)
 
@@ -430,46 +438,52 @@ always addressable at `/machine/peripheral/sens` instead of a per-run
 **Not covered by anything automated.** No test in `tools/run_tests.py`
 touches the QEMU build; verification is manual and needs the external binary.
 `bridge/qemu_orchestrator.py` does not yet feed `adc1-value` — the automatic
-ngspice ↔ QEMU bridge remains the unwritten step (Layer 2, §4).
+ngspice ↔ QEMU bridge remains the unwritten step (Layer 2, §4); it is specified
+implementation-ready in `docs/binary-runner-and-mcu-bringup.md`.
 
-## 9. Renode path — **abandoned**, 4 files
+## 9. Renode path — **abandoned and removed**, 2026-10-09
 
-`bridge/renode_orchestrator.py` (86), `bridge/renode_adc_peripheral.py` (36),
-`bridge/run_cosim.resc` (12), `bridge/esp32_buck.repl` (18).
+Formerly `bridge/renode_orchestrator.py` (86), `bridge/renode_adc_peripheral.py`
+(36), `bridge/run_cosim.resc` (12), `bridge/esp32_buck.repl` (18). All four
+files are deleted, along with the gitignored 298 MB `tools/renode/` binary tree.
+CI and `docker-compose.yml` now call `bridge/mock_controller.py` directly for
+the same 10 ms benchmark run.
 
 **Why precisely, not vaguely.** Renode cannot decode the Xtensa `entry`
 instruction, which occurs 393 times in an ordinary ESP-IDF build. It therefore
 executed **zero instructions** of this firmware. The `--mode renode` branch
-shells out to `tools/renode/renode.exe`, which is gitignored and has never been
-run. **CONFIRMED BROKEN** by measurement, not inspection.
+shelled out to `tools/renode/renode.exe`, which was gitignored and had never
+been run. **CONFIRMED BROKEN** by measurement, not inspection.
 
-Two traps worth naming:
-- `renode_orchestrator.py --mode benchmark` **never touches Renode**. It
-  branches to `bridge/mock_controller.run_closed_loop_simulation`, a pure
-  Python loop. The filename implies emulator coverage the mode never provided.
-  Both CI and `docker-compose.yml` invoke only that mode.
-- `renode_adc_peripheral.py` is not importable at all: it raises
+Two traps it left behind, recorded so the reasoning outlives the code:
+- `renode_orchestrator.py --mode benchmark` **never touched Renode**. It
+  branched to `bridge/mock_controller.run_closed_loop_simulation`, a pure
+  Python loop. The filename implied emulator coverage the mode never provided.
+  Both CI and `docker-compose.yml` invoked only that mode.
+- `renode_adc_peripheral.py` was not importable at all: it raised
   `NameError: name 'request' is not defined`, because `request` is injected by
-  Renode's peripheral loader. It is a paste-in desktop-script fragment.
+  Renode's peripheral loader. It was a paste-in desktop-script fragment.
 
-**CONFIRMED BROKEN / abandoned.** Retained deliberately as a record.
+**Removed, not merely abandoned.** The emulator target is Espressif QEMU
+(`bridge/qemu_orchestrator.py`).
 
 ## 10. Additional subsystems you did not name
 
 | Subsystem | LOC | Role | State |
 |---|---|---|---|
-| `bridge/cad_engine.py` | 712 | **The largest bridge module.** Component/pin graph, SPICE netlist compiler, MCU pin routing, KiCad/LTspice export, BOM. Emits `external` sources for law-bearing pins. | CONFIRMED WORKING (`test_cosim_control`, `test_schematic_editor`, `test_kicad_export`, `test_ui_polish`) |
-| `bridge/measurements.py` | 559 | Waveform analysis, FFT, Bode. Pure array computation, no Qt, no solver dependency. | CONFIRMED WORKING (29 tests) |
+| `bridge/cad_engine.py` | 745 | **The largest bridge module.** Component/pin graph, SPICE netlist compiler, MCU pin routing, KiCad/LTspice export, BOM. Emits `external` sources for law-bearing pins. | CONFIRMED WORKING (`test_cosim_control`, `test_schematic_editor`, `test_kicad_export`, `test_ui_polish`) |
+| `bridge/measurements.py` | 649 | Waveform analysis, FFT, Bode. Pure array computation, no Qt, no solver dependency. | CONFIRMED WORKING (36 tests) |
 | `bridge/kicad_export.py` | 616 | KiCad netlist + `.kicad_sch`, driven from the real graph. | CONFIRMED WORKING (14 tests) |
-| `bridge/studio_engine.py` | 653 | Multi-instrument engine: transient, AC, DC sweep, op-point, Monte Carlo. Owns its own FFT path. | CONFIRMED WORKING (9 + 7 tests) |
+| `bridge/studio_engine.py` | 635 | Multi-instrument engine: transient, AC, DC sweep, op-point, Monte Carlo. Owns its own FFT path. | CONFIRMED WORKING (9 + 7 tests) |
 | `bridge/industrial_verification.py` | 440 | DO-254 / ISO 26262 / IEC 61508 qualification battery. Reachable from the UI under **Tools ▸ Qualification**. | CONFIRMED WORKING (5 tests) |
-| `bridge/report_generator.py` | 178 | HTML / Markdown / PDF test reports. | CONFIRMED WORKING (via `test_sota_suite`) |
-| `bridge/analysis_runner.py` | 134 | Post-simulation FFT and Bode replays that need their own run. | CONFIRMED WORKING (via `test_measurements.py` and `test_schematic_editor.py`, including the `AnalysisError` path) |
+| `bridge/report_generator.py` | 176 | HTML / Markdown / PDF test reports. | CONFIRMED WORKING (via `test_sota_suite`) |
+| `bridge/analysis_runner.py` | 470 | Post-simulation FFT and Bode replays that need their own run. | CONFIRMED WORKING (via `test_measurements.py` and `test_schematic_editor.py`, including the `AnalysisError` path) |
 | `bridge/gpio_model.py` | 218 | Open-loop declared pin profiles (the *pre*-control-law path). | CONFIRMED WORKING (28 tests) |
 | `bridge/serial_console.py` | 89 | UART / `print()` capture panel. | CONFIRMED WORKING (via `test_editor_workflow`) |
-| `bridge/circuit_stepper.py` | 82 | **Dead.** No importer, no test, no launcher. | CONFIRMED BROKEN (dead by construction) |
-| `tools/ui_parity.py` | 444 | Theme-robust layout parity. Wraps the vendored `imgdiff`. | CONFIRMED WORKING (11 tests) |
+| `bridge/circuit_stepper.py` | 82 | **Dead.** No importer, no test, no launcher; deleted 2026-10-09. | REMOVED (was dead by construction) |
+| `tools/ui_parity.py` | 457 | Theme-robust layout parity. Wraps the vendored `imgdiff`. | CONFIRMED WORKING (12 tests) |
 | `tools/imgdiff.py` | 493 | Vendored MIT, upstream body byte-identical. Upstream's own `layout` mode. | **CONFIRMED BROKEN** for cross-theme comparison: it scores our two themes of one window at 8.1/100, because it thresholds absolute luminance and compares per-cell edge density. Do not use it directly; `ui_parity` wraps it. |
+| `tools/selfcheck.py` | 285 | One-command environment gate: interpreter, dependencies, ngspice load, a known circuit against closed-form answers, then the suites; `run_selfcheck.bat` wraps it. | CONFIRMED WORKING (`test_selfcheck.py`) |
 
 ---
 
@@ -500,7 +514,7 @@ covers netlist generation end to end.
 **Connection:** `GetVSRCData` callback per timestep; the law reads its sense
 net from ngspice's C buffer and returns the pin voltage.
 
-**State: CONFIRMED WORKING.** 23 tests in `test_cosim_control.py`, including
+**State: CONFIRMED WORKING.** 34 tests in `test_cosim_control.py`, including
 real executions and the diagnostic paths.
 
 **Failure points.**

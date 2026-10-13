@@ -19,8 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PyQt5.QtCore import QPointF, QEvent, Qt
-from PyQt5.QtGui import QMouseEvent
+from PyQt5.QtCore import QPointF
 from PyQt5.QtWidgets import QApplication, QInputDialog, QMessageBox
 
 from bridge import kicad_export
@@ -309,7 +308,6 @@ class TestSimulationControls(unittest.TestCase):
             self.assertFalse(trap.warned("nothing to run"), trap.messages)
 
     def test_mcu_only_without_a_law_says_so(self):
-        from bridge.cad_engine import SchematicComponent, SchematicNetlistEngine
         win = SchematicEditor()
         with DialogTrap() as trap:
             win.mode_box.setCurrentText("MCU only")
@@ -340,7 +338,6 @@ class TestSimulationControls(unittest.TestCase):
         why the real Stop button runs on the GUI thread while the solver runs
         on a worker.
         """
-        import time
         engine = NgSpiceEngine(verbose=False)
         steps = []
         engine.progress_callback = lambda t, n: steps.append(n)

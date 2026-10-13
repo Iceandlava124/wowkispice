@@ -10,8 +10,6 @@ Produces comprehensive, publishable HTML / Markdown / PDF test reports containin
 - Bill of Materials (BOM) & Firmware Code Snapshot
 """
 
-import os
-import sys
 import time
 from typing import Dict, Any, Optional
 
@@ -26,7 +24,7 @@ class LabReportGenerator:
         """Generate a rich, standalone HTML test report with embedded styling and tables."""
         t_str = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
         
-        html = f"""<!DOCTYPE html>
+        html = rf"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">

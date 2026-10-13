@@ -13,8 +13,7 @@ import re
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen, QPainterPath
-from PyQt5.QtWidgets import (QApplication, QGraphicsPathItem, QGraphicsScene,
-                             QGraphicsItem)
+from PyQt5.QtWidgets import QApplication, QGraphicsPathItem, QGraphicsScene
 
 from bridge.cad_engine import SchematicComponent, SchematicNetlistEngine
 from ui.schematic_items import ComponentItem, GhostItem, JunctionItem, WireItem

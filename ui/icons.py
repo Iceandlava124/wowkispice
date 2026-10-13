@@ -7,8 +7,8 @@ re-colours the whole toolbar by passing a different pen colour.
 """
 
 from PyQt5.QtCore import QPointF, QRectF, Qt
-from PyQt5.QtGui import (QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,
-                         QPolygonF)
+from PyQt5.QtGui import (QColor, QIcon, QImage, QPainter, QPainterPath, QPen,
+                         QPixmap, QPolygonF)
 
 _SUPERSAMPLE = 4
 SIZE = 32
@@ -327,7 +327,6 @@ def raw_image(name, color, size=SIZE) -> "QImage":
     """The same glyph painted 1:1 into an offscreen QImage, no device pixel
     ratio. pixmap() is DPR-scaled for crispness on screen, which makes it
     awkward to inspect pixel by pixel; this is the inspectable form."""
-    from PyQt5.QtGui import QImage
     img = QImage(size, size, QImage.Format_ARGB32)
     img.fill(Qt.transparent)
     glyph = GLYPHS.get(name)

@@ -16,7 +16,7 @@ Simulate flow (F2):
 import json
 import os
 import sys
-from typing import Dict
+from typing import Dict, List
 
 import pyqtgraph as pg
 from PyQt5.QtCore import (QPointF, QRect, QRectF, QSize, Qt, QThread,
@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QDialog, QMenu, QMessageBox, QLineEdit, QPlainTextEdit,
     QProgressBar, QPushButton, QScrollArea, QSplitter,
     QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
-    QDoubleSpinBox, QToolBar,
+    QDoubleSpinBox, QSpinBox, QToolBar,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -434,7 +434,6 @@ class SchematicView(QGraphicsView):
         scale = abs(self.transform().m11()) or 1.0
         step = self._tick_step(scale)
         rect = self.scene_rect_of()
-        vp = self.viewport().geometry()
 
         painter.setRenderHint(QPainter.Antialiasing, True)
         font = theme.mono_font(7)
@@ -1111,7 +1110,15 @@ class SchematicEditor(QMainWindow):
         self._cursor_lines = []
         self._curves = []
 
-        results_tabs = QTabWidget()
+        self.results_tabs = results_tabs = QTabWidget()
+        # The tab bar must never dictate the window minimum.  With scroll
+        # buttons disabled and elision off, QTabBar requests the summed width
+        # of all 15 tab labels (~2551 px), and QSplitter passes that straight
+        # up to the window, starving the canvas down to its 420 px floor.
+        # Scrolling plus right-elision collapses the bar's minimum instead.
+        results_tabs.setUsesScrollButtons(True)
+        results_tabs.setElideMode(Qt.ElideRight)
+        self.results_tabs.setDocumentMode(False)
         self.mcu_tab = QWidget()
         mcu_layout = QVBoxLayout(self.mcu_tab)
         self.firmware_label = QLabel("<b>Firmware</b><br>No MCU placed yet.")
@@ -1283,6 +1290,457 @@ class SchematicEditor(QMainWindow):
         bode_layout.addWidget(self.bode_phase, 1)
         bode_layout.addWidget(self.bode_info)
         results_tabs.addTab(bode_panel, "Bode")
+
+        # ---- Timing / digital lanes tab ----
+        self.timing_plot = pg.PlotWidget(background="w", title="Timing diagram")
+        self.timing_plot.addLegend()
+        self.timing_plot.setLabel("bottom", "Time", units="ms")
+        self.timing_plot.setLabel("left", "Digital level")
+        self.timing_info = QLabel("No timing diagram yet.")
+        self.timing_info.setWordWrap(True)
+        self.timing_panel = timing_panel = QWidget()
+        timing_layout = QVBoxLayout(timing_panel)
+        timing_layout.setContentsMargins(0, 0, 0, 0)
+        timing_layout.addWidget(self.timing_plot)
+        timing_layout.addWidget(self.timing_info)
+        results_tabs.addTab(timing_panel, "Timing")
+
+        # ---- Step response metrics tab ----
+        step_panel = QWidget()
+        step_layout = QVBoxLayout(step_panel)
+        step_layout.setContentsMargins(0, 0, 0, 0)
+        step_controls_host = QWidget()
+        step_controls = QGridLayout(step_controls_host)
+        step_controls.setContentsMargins(0, 0, 0, 0)
+        step_controls.addWidget(QLabel(" Output net "), 0, 0)
+        self.step_net_box = QComboBox()
+        self.step_net_box.setEditable(True)
+        step_controls.addWidget(self.step_net_box, 0, 1)
+        step_run = QPushButton("Measure Step Response")
+        step_run.clicked.connect(self.analyze_step_response)
+        step_controls.addWidget(step_run, 0, 2)
+        step_controls.setColumnStretch(1, 1)
+        step_controls_scroll = QScrollArea()
+        step_controls_scroll.setFrameShape(QFrame.NoFrame)
+        step_controls_scroll.setWidget(step_controls_host)
+        step_controls_scroll.setWidgetResizable(True)
+        step_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        step_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        step_controls_scroll.setFixedHeight(step_controls_host.sizeHint().height() + 14)
+        step_layout.addWidget(step_controls_scroll)
+        self.step_plot = pg.PlotWidget(background="w", title="Step response")
+        self.step_plot.addLegend()
+        self.step_plot.setLabel("bottom", "Time", units="ms")
+        self.step_plot.setLabel("left", "Voltage", units="V")
+        self.step_info = QLabel("No step response yet.")
+        self.step_info.setWordWrap(True)
+        self.step_last = None
+        step_layout.addWidget(self.step_plot)
+        step_layout.addWidget(self.step_info)
+        results_tabs.addTab(step_panel, "Step Response")
+
+        # ---- Noise analysis tab ----
+        noise_panel = QWidget()
+        noise_layout = QVBoxLayout(noise_panel)
+        noise_layout.setContentsMargins(0, 0, 0, 0)
+        noise_controls_host = QWidget()
+        noise_controls = QGridLayout(noise_controls_host)
+        noise_controls.setContentsMargins(0, 0, 0, 0)
+        noise_controls.addWidget(QLabel(" Output net "), 0, 0)
+        self.noise_net_box = QComboBox()
+        self.noise_net_box.setEditable(True)
+        noise_controls.addWidget(self.noise_net_box, 0, 1)
+        noise_controls.addWidget(QLabel(" Start Hz "), 1, 0)
+        self.noise_start_box = QDoubleSpinBox()
+        self.noise_start_box.setRange(0.01, 1e9)
+        self.noise_start_box.setDecimals(3)
+        self.noise_start_box.setValue(10.0)
+        noise_controls.addWidget(self.noise_start_box, 1, 1)
+        noise_controls.addWidget(QLabel(" Stop Hz "), 1, 2)
+        self.noise_stop_box = QDoubleSpinBox()
+        self.noise_stop_box.setRange(10.0, 1e12)
+        self.noise_stop_box.setDecimals(1)
+        self.noise_stop_box.setValue(1e6)
+        noise_controls.addWidget(self.noise_stop_box, 1, 3)
+        noise_controls.addWidget(QLabel(" Points/dec "), 1, 4)
+        self.noise_pts_box = QSpinBox()
+        self.noise_pts_box.setRange(1, 100)
+        self.noise_pts_box.setValue(10)
+        noise_controls.addWidget(self.noise_pts_box, 1, 5)
+        noise_run = QPushButton("Run Noise Analysis")
+        noise_run.clicked.connect(self.run_noise_analysis)
+        noise_controls.addWidget(noise_run, 1, 6)
+        noise_controls.setColumnStretch(1, 1)
+        noise_controls_scroll = QScrollArea()
+        noise_controls_scroll.setFrameShape(QFrame.NoFrame)
+        noise_controls_scroll.setWidget(noise_controls_host)
+        noise_controls_scroll.setWidgetResizable(True)
+        noise_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        noise_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        noise_controls_scroll.setFixedHeight(noise_controls_host.sizeHint().height() + 14)
+        noise_layout.addWidget(noise_controls_scroll)
+        self.noise_plot = pg.PlotWidget(background="w", title="Noise spectral density")
+        self.noise_plot.addLegend()
+        self.noise_plot.setLabel("bottom", "Frequency", units="Hz")
+        self.noise_plot.setLabel("left", "Density", units="V/sqrt(Hz)")
+        self.noise_info = QLabel("No noise analysis yet.")
+        self.noise_info.setWordWrap(True)
+        self.noise_last = None
+        noise_layout.addWidget(self.noise_plot)
+        noise_layout.addWidget(self.noise_info)
+        results_tabs.addTab(noise_panel, "Noise")
+
+        # ---- Distortion analysis tab ----
+        disto_panel = QWidget()
+        disto_layout = QVBoxLayout(disto_panel)
+        disto_layout.setContentsMargins(0, 0, 0, 0)
+        disto_controls_host = QWidget()
+        disto_controls = QGridLayout(disto_controls_host)
+        disto_controls.setContentsMargins(0, 0, 0, 0)
+        disto_controls.addWidget(QLabel(" Output net "), 0, 0)
+        self.disto_net_box = QComboBox()
+        self.disto_net_box.setEditable(True)
+        disto_controls.addWidget(self.disto_net_box, 0, 1)
+        disto_controls.addWidget(QLabel(" Start Hz "), 1, 0)
+        self.disto_start_box = QDoubleSpinBox()
+        self.disto_start_box.setRange(0.01, 1e9)
+        self.disto_start_box.setDecimals(3)
+        self.disto_start_box.setValue(100.0)
+        disto_controls.addWidget(self.disto_start_box, 1, 1)
+        disto_controls.addWidget(QLabel(" Stop Hz "), 1, 2)
+        self.disto_stop_box = QDoubleSpinBox()
+        self.disto_stop_box.setRange(10.0, 1e12)
+        self.disto_stop_box.setDecimals(1)
+        self.disto_stop_box.setValue(100000.0)
+        disto_controls.addWidget(self.disto_stop_box, 1, 3)
+        disto_controls.addWidget(QLabel(" Pts/dec "), 1, 4)
+        self.disto_pts_box = QSpinBox()
+        self.disto_pts_box.setRange(1, 100)
+        self.disto_pts_box.setValue(4)
+        disto_controls.addWidget(self.disto_pts_box, 1, 5)
+        disto_run = QPushButton("Run Distortion Analysis")
+        disto_run.clicked.connect(self.run_distortion_analysis)
+        disto_controls.addWidget(disto_run, 1, 6)
+        disto_controls.setColumnStretch(1, 1)
+        disto_controls_scroll = QScrollArea()
+        disto_controls_scroll.setFrameShape(QFrame.NoFrame)
+        disto_controls_scroll.setWidget(disto_controls_host)
+        disto_controls_scroll.setWidgetResizable(True)
+        disto_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        disto_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        disto_controls_scroll.setFixedHeight(disto_controls_host.sizeHint().height() + 14)
+        disto_layout.addWidget(disto_controls_scroll)
+        self.disto_plot = pg.PlotWidget(background="w", title="Harmonic distortion")
+        self.disto_plot.addLegend()
+        self.disto_plot.setLabel("bottom", "Frequency", units="Hz")
+        self.disto_plot.setLabel("left", "HD", units="dBc")
+        self.disto_info = QLabel("No distortion analysis yet.")
+        self.disto_info.setWordWrap(True)
+        self.disto_last = None
+        disto_layout.addWidget(self.disto_plot)
+        disto_layout.addWidget(self.disto_info)
+        results_tabs.addTab(disto_panel, "Distortion")
+
+        # ---- Monte Carlo / yield tab ----
+        mc_panel = QWidget()
+        mc_layout = QVBoxLayout(mc_panel)
+        mc_layout.setContentsMargins(0, 0, 0, 0)
+        mc_controls_host = QWidget()
+        mc_controls = QGridLayout(mc_controls_host)
+        mc_controls.setContentsMargins(0, 0, 0, 0)
+        mc_controls.addWidget(QLabel(" Output net "), 0, 0)
+        self.mc_net_box = QComboBox()
+        self.mc_net_box.setEditable(True)
+        mc_controls.addWidget(self.mc_net_box, 0, 1)
+        mc_controls.addWidget(QLabel(" Iterations "), 1, 0)
+        self.mc_iters_box = QSpinBox()
+        self.mc_iters_box.setRange(2, 1000)
+        self.mc_iters_box.setValue(40)
+        mc_controls.addWidget(self.mc_iters_box, 1, 1)
+        mc_controls.addWidget(QLabel(" Tol % "), 1, 2)
+        self.mc_tol_box = QDoubleSpinBox()
+        self.mc_tol_box.setRange(0.01, 100.0)
+        self.mc_tol_box.setDecimals(2)
+        self.mc_tol_box.setValue(5.0)
+        mc_controls.addWidget(self.mc_tol_box, 1, 3)
+        mc_controls.addWidget(QLabel(" Yield % "), 1, 4)
+        self.mc_yield_box = QDoubleSpinBox()
+        self.mc_yield_box.setRange(0.0, 100.0)
+        self.mc_yield_box.setDecimals(2)
+        self.mc_yield_box.setValue(5.0)
+        mc_controls.addWidget(self.mc_yield_box, 1, 5)
+        mc_run = QPushButton("Run Monte Carlo / Yield")
+        mc_run.clicked.connect(self.run_yield_study)
+        mc_controls.addWidget(mc_run, 1, 6)
+        mc_controls.setColumnStretch(1, 1)
+        mc_controls_scroll = QScrollArea()
+        mc_controls_scroll.setFrameShape(QFrame.NoFrame)
+        mc_controls_scroll.setWidget(mc_controls_host)
+        mc_controls_scroll.setWidgetResizable(True)
+        mc_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        mc_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        mc_controls_scroll.setFixedHeight(mc_controls_host.sizeHint().height() + 14)
+        mc_layout.addWidget(mc_controls_scroll)
+        self.mc_plot = pg.PlotWidget(background="w", title="Monte Carlo histogram")
+        self.mc_plot.addLegend()
+        self.mc_plot.setLabel("bottom", "Settled value", units="V")
+        self.mc_plot.setLabel("left", "Samples")
+        self.mc_info = QLabel("No Monte Carlo run yet.")
+        self.mc_info.setWordWrap(True)
+        self.mc_last = None
+        self.mc_bars = None
+        mc_layout.addWidget(self.mc_plot)
+        mc_layout.addWidget(self.mc_info)
+        results_tabs.addTab(mc_panel, "Monte Carlo")
+
+        # ---- Parametric sweep tab ----
+        sweep_panel = QWidget()
+        sweep_layout = QVBoxLayout(sweep_panel)
+        sweep_layout.setContentsMargins(0, 0, 0, 0)
+        sweep_run_row = QHBoxLayout()
+        refresh_sweep = QPushButton("Refresh sweep controls")
+        refresh_sweep.clicked.connect(self.refresh_sweep_controls)
+        sweep_run_row.addWidget(refresh_sweep)
+        sweep_run_row.addStretch(1)
+        sweep_layout.addLayout(sweep_run_row)
+        sweep_controls_host = QWidget()
+        sweep_controls = QGridLayout(sweep_controls_host)
+        sweep_controls.setContentsMargins(0, 0, 0, 0)
+        sweep_controls.addWidget(QLabel(" Component "), 0, 0)
+        self.sweep_comp_box = QComboBox()
+        sweep_controls.addWidget(self.sweep_comp_box, 0, 1)
+        sweep_controls.addWidget(QLabel(" Sweep net "), 1, 0)
+        self.sweep_net_box = QComboBox()
+        self.sweep_net_box.setEditable(True)
+        sweep_controls.addWidget(self.sweep_net_box, 1, 1)
+        sweep_controls.addWidget(QLabel(" Start "), 2, 0)
+        self.sweep_start_box = QDoubleSpinBox()
+        self.sweep_start_box.setRange(0.0, 1e9)
+        self.sweep_start_box.setDecimals(3)
+        sweep_controls.addWidget(self.sweep_start_box, 2, 1)
+        sweep_controls.addWidget(QLabel(" Stop "), 2, 2)
+        self.sweep_stop_box = QDoubleSpinBox()
+        self.sweep_stop_box.setRange(0.0, 1e9)
+        self.sweep_stop_box.setDecimals(3)
+        sweep_controls.addWidget(self.sweep_stop_box, 2, 3)
+        sweep_controls.addWidget(QLabel(" Steps "), 3, 0)
+        self.sweep_steps_box = QSpinBox()
+        self.sweep_steps_box.setRange(2, 100)
+        self.sweep_steps_box.setValue(5)
+        sweep_controls.addWidget(self.sweep_steps_box, 3, 1)
+        sweep_run = QPushButton("Run Parametric Sweep")
+        sweep_run.clicked.connect(self.run_sweep)
+        sweep_controls.addWidget(sweep_run, 3, 2)
+        sweep_controls.setColumnStretch(1, 1)
+        sweep_controls_scroll = QScrollArea()
+        sweep_controls_scroll.setFrameShape(QFrame.NoFrame)
+        sweep_controls_scroll.setWidget(sweep_controls_host)
+        sweep_controls_scroll.setWidgetResizable(True)
+        sweep_controls_scroll.setFixedHeight(sweep_controls_host.sizeHint().height() + 14)
+        sweep_layout.addWidget(sweep_controls_scroll)
+        self.sweep_plot = pg.PlotWidget(background="w", title="Parametric sweep overlay")
+        self.sweep_plot.addLegend()
+        self.sweep_plot.setLabel("bottom", "Time", units="ms")
+        self.sweep_plot.setLabel("left", "Voltage", units="V")
+        self.sweep_info = QLabel("No sweep yet.")
+        self.sweep_info.setWordWrap(True)
+        self.sweep_last = None
+        sweep_layout.addWidget(self.sweep_plot)
+        sweep_layout.addWidget(self.sweep_info)
+        results_tabs.addTab(sweep_panel, "Parametric Sweep")
+
+        # ---- I-V curve tracer tab ----
+        curve_panel = QWidget()
+        curve_layout = QVBoxLayout(curve_panel)
+        curve_layout.setContentsMargins(0, 0, 0, 0)
+        curve_controls_host = QWidget()
+        curve_controls = QGridLayout(curve_controls_host)
+        curve_controls.setContentsMargins(0, 0, 0, 0)
+        curve_controls.addWidget(QLabel(" Device "), 0, 0)
+        self.curve_device_box = QComboBox()
+        self.curve_device_box.addItem("MOSFET (IRF540N family)")
+        self.curve_device_box.addItem("Diode families (Schottky/Si/Zener)")
+        curve_controls.addWidget(self.curve_device_box, 0, 1)
+        curve_controls.addWidget(QLabel(" Vmax "), 1, 0)
+        self.curve_vmax_box = QDoubleSpinBox()
+        self.curve_vmax_box.setRange(0.1, 100.0)
+        self.curve_vmax_box.setDecimals(2)
+        self.curve_vmax_box.setValue(15.0)
+        curve_controls.addWidget(self.curve_vmax_box, 1, 1)
+        curve_controls.addWidget(QLabel(" Points "), 1, 2)
+        self.curve_pts_box = QSpinBox()
+        self.curve_pts_box.setRange(10, 500)
+        self.curve_pts_box.setValue(40)
+        curve_controls.addWidget(self.curve_pts_box, 1, 3)
+        curve_controls.addWidget(QLabel(" Vfmax "), 2, 0)
+        self.curve_vfmax_box = QDoubleSpinBox()
+        self.curve_vfmax_box.setRange(0.1, 5.0)
+        self.curve_vfmax_box.setDecimals(2)
+        self.curve_vfmax_box.setValue(1.0)
+        curve_controls.addWidget(self.curve_vfmax_box, 2, 1)
+        curve_run = QPushButton("Run Curve Tracer")
+        curve_run.clicked.connect(self.run_curve_tracer)
+        curve_controls.addWidget(curve_run, 2, 2)
+        curve_controls.setColumnStretch(1, 1)
+        curve_controls_scroll = QScrollArea()
+        curve_controls_scroll.setFrameShape(QFrame.NoFrame)
+        curve_controls_scroll.setWidget(curve_controls_host)
+        curve_controls_scroll.setWidgetResizable(True)
+        curve_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        curve_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        curve_controls_scroll.setFixedHeight(curve_controls_host.sizeHint().height() + 14)
+        curve_layout.addWidget(curve_controls_scroll)
+        self.curve_plot = pg.PlotWidget(background="w", title="I-V curve tracer")
+        self.curve_plot.addLegend()
+        self.curve_plot.setLabel("bottom", "Voltage", units="V")
+        self.curve_plot.setLabel("left", "Current", units="A")
+        self.curve_info = QLabel("No curve tracer run yet.")
+        self.curve_info.setWordWrap(True)
+        self.curve_last = None
+        curve_layout.addWidget(self.curve_plot)
+        curve_layout.addWidget(self.curve_info)
+        results_tabs.addTab(curve_panel, "I-V Curve Tracer")
+
+        # ---- PV / MPPT tab ----
+        pv_panel = QWidget()
+        pv_layout = QVBoxLayout(pv_panel)
+        pv_layout.setContentsMargins(0, 0, 0, 0)
+        pv_controls_host = QWidget()
+        pv_controls = QGridLayout(pv_controls_host)
+        pv_controls.setContentsMargins(0, 0, 0, 0)
+        pv_controls.addWidget(QLabel(" Irradiance (W/m^2) "), 0, 0)
+        self.pv_irr_box = QDoubleSpinBox()
+        self.pv_irr_box.setRange(0.0, 2000.0)
+        self.pv_irr_box.setDecimals(1)
+        self.pv_irr_box.setValue(1000.0)
+        pv_controls.addWidget(self.pv_irr_box, 0, 1)
+        pv_controls.addWidget(QLabel(" Temperature (C) "), 1, 0)
+        self.pv_temp_box = QDoubleSpinBox()
+        self.pv_temp_box.setRange(-40.0, 85.0)
+        self.pv_temp_box.setDecimals(1)
+        self.pv_temp_box.setValue(25.0)
+        pv_controls.addWidget(self.pv_temp_box, 1, 1)
+        pv_controls.addWidget(QLabel(" Points "), 2, 0)
+        self.pv_pts_box = QSpinBox()
+        self.pv_pts_box.setRange(10, 1000)
+        self.pv_pts_box.setValue(150)
+        pv_controls.addWidget(self.pv_pts_box, 2, 1)
+        pv_run = QPushButton("Run Solar PV / MPPT Trace")
+        pv_run.clicked.connect(self.run_pv)
+        pv_controls.addWidget(pv_run, 2, 2)
+        pv_controls.setColumnStretch(1, 1)
+        pv_controls_scroll = QScrollArea()
+        pv_controls_scroll.setFrameShape(QFrame.NoFrame)
+        pv_controls_scroll.setWidget(pv_controls_host)
+        pv_controls_scroll.setWidgetResizable(True)
+        pv_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        pv_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        pv_controls_scroll.setFixedHeight(pv_controls_host.sizeHint().height() + 14)
+        pv_layout.addWidget(pv_controls_scroll)
+        self.pv_iv_plot = pg.PlotWidget(background="w", title="I-V curve")
+        self.pv_iv_plot.addLegend()
+        self.pv_iv_plot.setLabel("bottom", "Voltage", units="V")
+        self.pv_iv_plot.setLabel("left", "Current", units="A")
+        self.pv_p_plot = pg.PlotWidget(background="w", title="P-V curve")
+        self.pv_p_plot.addLegend()
+        self.pv_p_plot.setLabel("bottom", "Voltage", units="V")
+        self.pv_p_plot.setLabel("left", "Power", units="W")
+        self.pv_info = QLabel("No PV trace yet.")
+        self.pv_info.setWordWrap(True)
+        self.pv_last = None
+        pv_layout.addWidget(self.pv_iv_plot)
+        pv_layout.addWidget(self.pv_p_plot)
+        pv_layout.addWidget(self.pv_info)
+        results_tabs.addTab(pv_panel, "PV / MPPT")
+
+        # ---- AWG tab ----
+        awg_panel = QWidget()
+        awg_layout = QVBoxLayout(awg_panel)
+        awg_layout.setContentsMargins(0, 0, 0, 0)
+        awg_controls_host = QWidget()
+        awg_controls = QGridLayout(awg_controls_host)
+        awg_controls.setContentsMargins(0, 0, 0, 0)
+        awg_controls.addWidget(QLabel(" Waveform "), 0, 0)
+        self.awg_type_box = QComboBox()
+        self.awg_type_box.addItems(["Sine", "Square", "Triangle", "Sawtooth",
+                                    "White Noise", "Exponential Decay", "Chirp Sweep"])
+        awg_controls.addWidget(self.awg_type_box, 0, 1)
+        awg_controls.addWidget(QLabel(" Frequency (Hz) "), 1, 0)
+        self.awg_freq_box = QDoubleSpinBox()
+        self.awg_freq_box.setRange(0.1, 1e6)
+        self.awg_freq_box.setDecimals(3)
+        self.awg_freq_box.setValue(1000.0)
+        awg_controls.addWidget(self.awg_freq_box, 1, 1)
+        awg_controls.addWidget(QLabel(" Amplitude (Vpp) "), 2, 0)
+        self.awg_amp_box = QDoubleSpinBox()
+        self.awg_amp_box.setRange(0.0, 20.0)
+        self.awg_amp_box.setDecimals(3)
+        self.awg_amp_box.setValue(3.3)
+        awg_controls.addWidget(self.awg_amp_box, 2, 1)
+        awg_controls.addWidget(QLabel(" Offset (V) "), 3, 0)
+        self.awg_offset_box = QDoubleSpinBox()
+        self.awg_offset_box.setRange(-10.0, 10.0)
+        self.awg_offset_box.setDecimals(3)
+        self.awg_offset_box.setValue(0.0)
+        awg_controls.addWidget(self.awg_offset_box, 3, 1)
+        awg_controls.addWidget(QLabel(" Duration (ms) "), 4, 0)
+        self.awg_duration_box = QDoubleSpinBox()
+        self.awg_duration_box.setRange(0.01, 10000.0)
+        self.awg_duration_box.setDecimals(2)
+        self.awg_duration_box.setValue(5.0)
+        awg_controls.addWidget(self.awg_duration_box, 4, 1)
+        awg_controls.addWidget(QLabel(" Points "), 5, 0)
+        self.awg_points_box = QSpinBox()
+        self.awg_points_box.setRange(100, 100000)
+        self.awg_points_box.setValue(2000)
+        awg_controls.addWidget(self.awg_points_box, 5, 1)
+        awg_run = QPushButton("Generate AWG Waveform")
+        awg_run.clicked.connect(self.run_awg)
+        awg_controls.addWidget(awg_run, 5, 2)
+        awg_controls.setColumnStretch(1, 1)
+        awg_controls_scroll = QScrollArea()
+        awg_controls_scroll.setFrameShape(QFrame.NoFrame)
+        awg_controls_scroll.setWidget(awg_controls_host)
+        awg_controls_scroll.setWidgetResizable(True)
+        awg_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        awg_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        awg_controls_scroll.setFixedHeight(awg_controls_host.sizeHint().height() + 14)
+        awg_layout.addWidget(awg_controls_scroll)
+        self.awg_plot = pg.PlotWidget(background="w", title="AWG waveform")
+        self.awg_plot.addLegend()
+        self.awg_plot.setLabel("bottom", "Time", units="ms")
+        self.awg_plot.setLabel("left", "Voltage", units="V")
+        self.awg_info = QLabel("No AWG waveform yet.")
+        self.awg_info.setWordWrap(True)
+        self.awg_last = None
+        awg_layout.addWidget(self.awg_plot)
+        awg_layout.addWidget(self.awg_info)
+        results_tabs.addTab(awg_panel, "AWG")
+
+        # ---- Serial / UART decode tab (wiring only; view exists above) ----
+        serial_controls_host = QWidget()
+        serial_controls = QGridLayout(serial_controls_host)
+        serial_controls.setContentsMargins(0, 0, 0, 0)
+        serial_controls.addWidget(QLabel(" Decoded net "), 0, 0)
+        self.serial_net_box = QComboBox()
+        self.serial_net_box.setEditable(True)
+        serial_controls.addWidget(self.serial_net_box, 0, 1)
+        serial_controls.addWidget(QLabel(" Baud "), 1, 0)
+        self.serial_baud_box = QSpinBox()
+        self.serial_baud_box.setRange(300, 1000000)
+        self.serial_baud_box.setSingleStep(100)
+        self.serial_baud_box.setValue(115200)
+        serial_controls.addWidget(self.serial_baud_box, 1, 1)
+        serial_decode = QPushButton("Decode UART from net")
+        serial_decode.clicked.connect(self.decode_uart_from_net)
+        serial_controls.addWidget(serial_decode, 1, 2)
+        serial_controls.setColumnStretch(1, 1)
+        serial_controls_scroll = QScrollArea()
+        serial_controls_scroll.setFrameShape(QFrame.NoFrame)
+        serial_controls_scroll.setWidget(serial_controls_host)
+        serial_controls_scroll.setWidgetResizable(True)
+        serial_controls_scroll.setFixedHeight(serial_controls_host.sizeHint().height() + 14)
+        serial_layout.addWidget(serial_controls_scroll)
 
         self.center_split = QSplitter(Qt.Horizontal)
         self.center_split.addWidget(self.view)
@@ -1520,6 +1978,35 @@ class SchematicEditor(QMainWindow):
                                         "Ctrl+F", icon_name="fft"))
         sim_menu.addAction(self._action("Run &Bode / AC Sweep", self.run_bode,
                                         "Ctrl+B", icon_name="bode"))
+        sim_menu.addSeparator()
+        sim_menu.addAction(self._action("Run Noise Analysis", self.run_noise_analysis,
+                                        "", "Small-signal output noise spectral density",
+                                        icon_name="noise"))
+        sim_menu.addAction(self._action("Run Distortion Analysis (.disto)", self.run_distortion_analysis,
+                                        "", "Harmonic distortion HD2/HD3 vs frequency",
+                                        icon_name="disto"))
+        sim_menu.addAction(self._action("Run Monte Carlo / Yield", self.run_yield_study,
+                                        "", "Tolerance/yield over the user schematic",
+                                        icon_name="mc"))
+        sim_menu.addAction(self._action("Run Parametric Sweep", self.run_sweep,
+                                        "", "Re-solve once per stepped component value",
+                                        icon_name="sweep"))
+        sim_menu.addAction(self._action("Show Timing Diagram", self.draw_timing_diagram,
+                                        "", "Threshold traces into stacked digital lanes",
+                                        icon_name="timing"))
+        sim_menu.addAction(self._action("Step Response Metrics", self.analyze_step_response,
+                                        "", "Delay/rise/settling from measurements.step_metrics",
+                                        icon_name="step"))
+        sim_menu.addSeparator()
+        sim_menu.addAction(self._action("Run Solar PV / MPPT Trace", self.run_pv,
+                                        "", "Real PV I-V + P-V from the physical model",
+                                        icon_name="pv"))
+        sim_menu.addAction(self._action("Generate AWG Waveform", self.run_awg,
+                                        "", "Synthesis-only waveform generator",
+                                        icon_name="awg"))
+        sim_menu.addAction(self._action("Run I-V Curve Tracer", self.run_curve_tracer,
+                                        "", "MOSFET/diode DC curve tracer (real .dc)",
+                                        icon_name="curve"))
         sim_menu.addAction(self._action("Clear Cursors", self.clear_cursors,
                                         "Ctrl+Shift+K", icon_name="cursors"))
         sim_menu.addSeparator()
@@ -2202,7 +2689,6 @@ class SchematicEditor(QMainWindow):
                     reg_err = "-"
                 else:
                     if law_spec and pin == law_spec.get("pin"):
-                        from bridge import control_law
                         declared = control_law.describe_law(law_spec)
                     else:
                         declared = gpio_model.describe_pin(pin, profile.get(pin, {}))
@@ -2477,7 +2963,6 @@ class SchematicEditor(QMainWindow):
             return
         self.plot.clear()
         self._curves = []
-        first = next(iter(traces))
         total = max(len(v) for v in traces.values())
         times_s = [i * dt for i in range(total)]
         self._last_time = times_s
@@ -2733,7 +3218,7 @@ class SchematicEditor(QMainWindow):
             data = curve.getData()
             if not data or data[0] is None or len(data[0]) == 0:
                 continue
-            xs, ys = data[0], data[1]
+            xs = data[0]
             index = _nearest_index(xs, data_pt.x())
             if index is None:
                 continue
@@ -2912,6 +3397,534 @@ class SchematicEditor(QMainWindow):
         self._refresh_netlist_view()
 
     # ------------------------------------------------------------------
+    # Serial / UART decode
+    # ------------------------------------------------------------------
+    def _sync_serial_nets(self):
+        """Wire the traces from the last run into the Serial tab's net picker.
+
+        Any scalar trace can be treated as a UART TX candidate for decode; the
+        Serial tab lets the user pick which net to decode.
+        """
+        traces = getattr(self, "_last_traces", {})
+        nets = sorted(traces.keys())
+        self.serial_net_box.clear()
+        if nets:
+            self.serial_net_box.addItems(nets)
+            if self.serial_net_box.findText(self.serial_net_box.currentText()) < 0:
+                self.serial_net_box.setCurrentIndex(0)
+        else:
+            self.serial_net_box.addItem("")
+            self.serial_net_box.setCurrentIndex(0)
+
+    def decode_uart_from_net(self):
+        """UART 8N1 decode of the selected trace through studio_engine."""
+        from bridge.studio_engine import StudioSimulationEngine
+
+        traces = getattr(self, "_last_traces", {})
+        if not traces:
+            QMessageBox.information(self, "UART decode",
+                                    "Run a transient simulation first (F2).")
+            return
+        net = self.serial_net_box.currentText().strip()
+        if not net or net not in traces:
+            QMessageBox.information(self, "UART decode",
+                                    "Select a decoded net on the Serial tab.")
+            return
+        values = traces[net]
+        if len(values) < 20:
+            QMessageBox.information(self, "UART decode",
+                                    f"Trace '{net}' is too short to decode.")
+            return
+        try:
+            import numpy as np
+            v = np.asarray(values, dtype=float)
+            v = np.asarray(values, dtype=float)
+            lo = float(v.min())
+            hi = float(v.max())
+            span = (hi - lo) if hi > lo else 0.0
+            if span < 1.0:
+                self.serial_status.setText("no valid 8n1 frames")
+                self.serial_view.setPlainText("")
+                return
+            t = getattr(self, "_last_time", None)
+            if t is None or len(t) != len(values):
+                t = list(range(len(values)))
+            logic = (v > 1.65).astype(np.int8)
+            time_ms = (np.asarray(t, dtype=float) * 1000.0).tolist()
+            packets = StudioSimulationEngine.decode_uart_packets(
+                logic, time_ms,
+                baud_rate=int(self.serial_baud_box.value()))
+        except Exception as exc:
+            QMessageBox.warning(self, "UART decode failed", str(exc))
+            self.log(f"UART decode failed: {exc}")
+            return
+
+        real = packets
+        if not real:
+            self.serial_status.setText("no valid 8n1 frames")
+            self.serial_view.setPlainText("")
+            return
+
+        lines = []
+        for p in real:
+            ascii_repr = repr(p.get("ascii", "?"))
+            line = (f"{p.get('timestamp_ms', 0):.3f} ms  "
+                    f"{p.get('type', '?'):10s}  "
+                    f"{p.get('hex', '?'):>7s}  "
+                    f"{ascii_repr}"
+                    + (f"  ({p.get('parity', '')})" if p.get('parity') else ""))
+            lines.append(line)
+        status = f"Decoded {len(real)} frame" + ("s" if len(real) != 1 else "")
+        self.serial_status.setText(status)
+        self.serial_view.setPlainText("\n".join(lines))
+        self.log(f"UART decode of {net}: {status}")
+
+    # ------------------------------------------------------------------
+    # Timing / step / noise / distortion / monte carlo / sweep
+    # ------------------------------------------------------------------
+    def draw_timing_diagram(self):
+        """Threshold the last traces into stacked digital lanes."""
+        from bridge.gpio_model import DEFAULT_THRESHOLD
+
+        traces = getattr(self, "_last_traces", {})
+        times = getattr(self, "_last_time", None)
+        if not traces or not times or len(times) < 2:
+            QMessageBox.information(self, "Timing diagram",
+                                    "Run a transient simulation first (F2).")
+            return
+        self.results_tabs.setCurrentWidget(self.timing_panel)
+        self.timing_lanes = []
+        self.timing_plot.clear()
+        threshold = DEFAULT_THRESHOLD
+        colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd",
+                  "#ff7f0e", "#8c564b", "#17becf", "#e377c2"]
+        for i, (name, values) in enumerate(traces.items()):
+            if len(values) != len(times):
+                continue
+            digital = [1.0 if v > threshold else 0.0 for v in values]
+            t_ms = [t * 1000.0 for t in times]
+            pen = pg.mkPen(colors[i % len(colors)], width=2)
+            self.timing_plot.plot(t_ms, digital, pen=pen, name=name)
+            indices = [j for j in range(1, len(digital))
+                       if digital[j] != digital[j - 1]]
+            edges = len(indices)
+            ones = sum(1 for b in digital if b > 0.5)
+            total = len(digital)
+            duty = 100.0 * ones / total if total else 0.0
+            if edges >= 2:
+                # frequency from average period between rising edges
+                rises = [j for j in indices if digital[j] > 0.5]
+                if len(rises) >= 2:
+                    periods = [t_ms[rises[k + 1]] - t_ms[rises[k]]
+                               for k in range(len(rises) - 1)]
+                    avg_period = sum(periods) / len(periods)
+                    freq_hz = (1000.0 / avg_period) if avg_period > 0 else 0.0
+                else:
+                    freq_hz = 0.0
+            else:
+                freq_hz = 0.0
+            lane = (f"{name}  -  {edges} edges, {duty:.0f}% duty, "
+                    f"{freq_hz:.0f} Hz" if freq_hz else
+                    f"{name}  -  0 edges, {duty:.0f}% duty")
+            self.timing_lanes.append(lane)
+        self.timing_plot.setTitle(
+            f"Timing diagram - {len(self.timing_lanes)} lane(s)")
+        self.timing_info.setText(" | ".join(self.timing_lanes))
+        self.log("Timing diagram: " + " | ".join(self.timing_lanes))
+
+    def analyze_step_response(self):
+        """Step response metrics on the picked net via measurements.step_metrics."""
+        from bridge import measurements
+
+        traces = getattr(self, "_last_traces", {})
+        times = getattr(self, "_last_time", None)
+        if not times or not traces:
+            QMessageBox.information(self, "Step response",
+                                    "Run a transient simulation first (F2).")
+            return
+        net = self.step_net_box.currentText().strip()
+        if not net or net not in traces:
+            QMessageBox.information(self, "Step response",
+                                    "Select an output net on the Step Response tab.")
+            return
+        values = traces[net]
+        if len(values) != len(times):
+            QMessageBox.information(self, "Step response",
+                                    f"Trace '{net}' is incomplete.")
+            return
+        self.step_last = measurements.step_metrics(times, values)
+        t_ms = [t * 1000.0 for t in times]
+        self.step_plot.clear()
+        self.step_plot.plot(t_ms, values, pen=pg.mkPen("#1f77b4", width=2),
+                            name=net)
+        if self.step_last.get("delay_s") is not None:
+            self.step_plot.plot([self.step_last["delay_s"] * 1000.0] * 2,
+                                [min(values), max(values)],
+                                pen=pg.mkPen("#d62728", width=2, style=Qt.DashLine),
+                                name="delay")
+        if self.step_last.get("rise_s") is not None and self.step_last.get("delay_s") is not None:
+            rise_start = self.step_last["delay_s"]
+            rise_end = rise_start + self.step_last["rise_s"]
+            self.step_plot.plot([rise_start * 1000.0, rise_end * 1000.0],
+                                [min(values), max(values)],
+                                pen=pg.mkPen("#2ca02c", width=2, style=Qt.DashLine),
+                                name="rise")
+        self.step_plot.setTitle(f"Step response - {net}")
+        bits = [f"{net}", f"step {self.step_last.get('step_v', 0):.3f} V"]
+        if self.step_last.get("delay_s") is not None:
+            bits.append(f"delay {self.step_last['delay_s']*1000:.3f} ms")
+        if self.step_last.get("rise_s") is not None:
+            bits.append(f"rise {self.step_last['rise_s']*1000:.3f} ms")
+        if self.step_last.get("settling_s") is not None:
+            bits.append(f"settling {self.step_last['settling_s']*1000:.3f} ms")
+        bits.append(f"overshoot {self.step_last.get('overshoot_pct', 0):.2f}%")
+        self.step_info.setText("   ".join(bits))
+        self.log("Step response: " + "   ".join(bits))
+
+    def run_noise_analysis(self):
+        """Small-signal output noise spectral density via analysis_runner.run_noise."""
+        from bridge import analysis_runner
+
+        if not getattr(self, "_last_time", None):
+            QMessageBox.information(self, "Noise analysis",
+                                    "Run a transient simulation first (F2) to set up the schematic.")
+            return
+        net = self.noise_net_box.currentText().strip()
+        if not net:
+            _lines, nets, _w = self.model.compile_netlist()
+            if not nets:
+                QMessageBox.information(self, "Noise analysis",
+                                        "This schematic has no nets.")
+                return
+            self.noise_net_box.addItems(nets)
+            net = nets[0]
+        start = self.noise_start_box.value()
+        stop = self.noise_stop_box.value()
+        if stop <= start:
+            QMessageBox.warning(self, "Noise analysis",
+                                "Stop frequency must exceed start.")
+            return
+        try:
+            out = analysis_runner.run_noise(
+                self.model, net,
+                start_hz=start, stop_hz=stop,
+                points_per_decade=int(self.noise_pts_box.value()))
+        except analysis_runner.AnalysisError as exc:
+            QMessageBox.warning(self, "Noise analysis failed", str(exc))
+            self.log(f"Noise analysis failed: {exc}")
+            return
+        self.noise_last = out
+        self.noise_plot.clear()
+        self.noise_plot.plot(out["freqs"], out["onoise_density"],
+                             pen=pg.mkPen("#1f77b4", width=2), name="output")
+        if out.get("inoise_density"):
+            self.noise_plot.plot(out["freqs"], out["inoise_density"],
+                                 pen=pg.mkPen("#d62728", width=2),
+                                 name="input")
+        self.noise_plot.setTitle(f"Noise - {net}")
+        self.noise_plot.setLogMode(x=True)
+        total = out.get("total_output")
+        info = (f"{net}: DC density {out['onoise_density'][0]*1e9:.2f} nV/sqrt(Hz), "
+                f"integrated {total*1e6:.3f} uV" if total is not None else
+                f"{net}: DC density {out['onoise_density'][0]*1e9:.2f} nV/sqrt(Hz)")
+        self.noise_info.setText(info)
+        self.log(f"Noise analysis of {net}: {info}")
+        if self.bode_net_box.findText(net) < 0:
+            self.bode_net_box.addItem(net)
+        self._sync_serial_nets()
+
+    def run_distortion_analysis(self):
+        """Harmonic distortion (.disto) via analysis_runner.run_disto."""
+        from bridge import analysis_runner
+
+        if not getattr(self, "_last_time", None):
+            QMessageBox.information(self, "Distortion analysis",
+                                    "Run a transient simulation first (F2) to set up the schematic.")
+            return
+        net = self.disto_net_box.currentText().strip()
+        if not net:
+            _lines, nets, _w = self.model.compile_netlist()
+            if not nets:
+                QMessageBox.information(self, "Distortion analysis",
+                                        "This schematic has no nets.")
+                return
+            self.disto_net_box.addItems(nets)
+            net = nets[0]
+        start = self.disto_start_box.value()
+        stop = self.disto_stop_box.value()
+        if stop <= start:
+            QMessageBox.warning(self, "Distortion analysis",
+                                "Stop frequency must exceed start.")
+            return
+        try:
+            out = analysis_runner.run_disto(
+                self.model, net,
+                start_hz=start, stop_hz=stop,
+                points_per_decade=int(self.disto_pts_box.value()))
+        except analysis_runner.AnalysisError as exc:
+            QMessageBox.warning(self, "Distortion analysis failed", str(exc))
+            self.log(f"Distortion analysis failed: {exc}")
+            return
+        self.disto_last = out
+        self.disto_plot.clear()
+        self.disto_plot.plot(out["freqs"], out["hd2"],
+                             pen=pg.mkPen("#1f77b4", width=2), name="HD2")
+        self.disto_plot.plot(out["freqs"], out["hd3"],
+                             pen=pg.mkPen("#d62728", width=2), name="HD3")
+        self.disto_plot.setTitle(f"Distortion - {net}")
+        self.disto_plot.setLogMode(x=True)
+        self.disto_info.setText(
+            f"{net}: HD2 {out['hd2'][0]:.2f} dBc, HD3 {out['hd3'][0]:.2f} dBc")
+        self.log(f"Distortion analysis of {net}: "
+                 f"HD2 {out['hd2'][0]:.2f} dBc, HD3 {out['hd3'][0]:.2f} dBc")
+        if self.bode_net_box.findText(net) < 0:
+            self.bode_net_box.addItem(net)
+        self._sync_serial_nets()
+
+    def run_yield_study(self):
+        """Monte Carlo / yield on the user schematic via analysis_runner.run_monte_carlo."""
+        from bridge import analysis_runner
+
+        if not getattr(self, "_last_time", None):
+            QMessageBox.information(self, "Monte Carlo",
+                                    "Run a transient simulation first (F2) to set up the schematic.")
+            return
+        net = self.mc_net_box.currentText().strip()
+        if not net:
+            _lines, nets, _w = self.model.compile_netlist()
+            if not nets:
+                QMessageBox.information(self, "Monte Carlo",
+                                        "This schematic has no nets.")
+                return
+            self.mc_net_box.addItems(nets)
+            net = nets[0]
+        iterations = int(self.mc_iters_box.value())
+        try:
+            out = analysis_runner.run_monte_carlo(
+                self.model, net,
+                iterations=iterations,
+                tol_pct=self.mc_tol_box.value(),
+                yield_pct=self.mc_yield_box.value())
+        except analysis_runner.AnalysisError as exc:
+            QMessageBox.warning(self, "Monte Carlo failed", str(exc))
+            self.log(f"Monte Carlo failed: {exc}")
+            return
+        self.mc_last = out
+        self.mc_plot.clear()
+        self.mc_bars = None
+        if out["samples"]:
+            import numpy as np
+            h, edges = np.histogram(out["samples"], bins=10)
+            centers = [(edges[i] + edges[i + 1]) / 2.0 for i in range(len(h))]
+            self.mc_bars = pg.BarGraphItem(x=centers, height=h.tolist(),
+                                            width=0.9,
+                                            pen=pg.mkPen("#1f77b4", width=1),
+                                            brush=pg.mkBrush("#1f77b4"))
+            self.mc_plot.addItem(self.mc_bars)
+            self.mc_plot.setLabel("bottom", "Settled value", units="V")
+            self.mc_plot.setLabel("left", "Samples")
+            self.mc_plot.setTitle(f"Monte Carlo - {net} ({out['iterations']} runs)")
+        info = (f"{net}: {out['iterations']} runs, nominal {out['nominal']:.4f} V, "
+                f"std {out['std']:.4f} V, yield {out['yield_actual_pct']:.1f}%")
+        self.mc_info.setText(info)
+        self.log(f"Monte Carlo on {net}: {info}")
+        if self.bode_net_box.findText(net) < 0:
+            self.bode_net_box.addItem(net)
+        self._sync_serial_nets()
+
+    def refresh_sweep_controls(self):
+        """Populate the sweepable-component picker from the current schematic."""
+        self.sweep_comp_box.clear()
+        for comp in self.model.components.values():
+            ctype = (comp.comp_type or "").upper()
+            if ctype not in ("R", "C", "L"):
+                continue
+            try:
+                from bridge.analysis_runner import spice_value
+                spice_value(comp.value)
+            except (TypeError, ValueError):
+                continue
+            idx = self.sweep_comp_box.count()
+            self.sweep_comp_box.addItem(comp.name or comp.comp_id)
+            self.sweep_comp_box.setItemData(idx, comp.comp_id)
+        _lines, nets, _w = self.model.compile_netlist()
+        self.sweep_net_box.clear()
+        if nets:
+            self.sweep_net_box.addItems(nets)
+
+    def run_sweep(self):
+        """Parametric sweep: re-solve once per stepped component value, overlay."""
+        from bridge.ngspice_wrapper import NgSpiceEngine
+        from bridge.analysis_runner import spice_value
+
+        if not getattr(self, "_last_time", None):
+            QMessageBox.information(self, "Parametric sweep",
+                                    "Run a transient simulation first (F2) to set up the schematic.")
+            return
+        comp_id = self.sweep_comp_box.currentData()
+        if not comp_id:
+            QMessageBox.information(self, "Parametric sweep",
+                                    "Select a sweepable component (R/C/L) first.")
+            return
+        comp = self.model.components.get(comp_id)
+        if comp is None:
+            QMessageBox.information(self, "Parametric sweep",
+                                    f"Component {comp_id} not found.")
+            return
+        net = self.sweep_net_box.currentText().strip()
+        if not net:
+            _lines, nets, _w = self.model.compile_netlist()
+            if not nets:
+                QMessageBox.information(self, "Parametric sweep",
+                                        "This schematic has no nets.")
+                return
+            self.sweep_net_box.addItems(nets)
+            net = nets[0]
+        start = self.sweep_start_box.value()
+        stop = self.sweep_stop_box.value()
+        if stop <= start:
+            QMessageBox.warning(self, "Parametric sweep",
+                                "Stop must exceed start.")
+            return
+        steps = int(self.sweep_steps_box.value())
+        if steps < 2:
+            QMessageBox.warning(self, "Parametric sweep",
+                                "At least 2 steps.")
+            return
+        base_value = comp.value
+        try:
+            spice_value(base_value)
+        except (TypeError, ValueError):
+            QMessageBox.warning(self, "Parametric sweep",
+                                f"Component {comp_id} has a non-numeric value.")
+            return
+        values = [start + (stop - start) * i / (steps - 1) for i in range(steps)]
+        results = []
+        engine = None
+        try:
+            engine = NgSpiceEngine(verbose=False)
+            for v in values:
+                comp.value = f"{v:.6g}"
+                lines, _nets, _warns = self.model.compile_netlist()
+                engine.load_circuit(lines)
+                rc = engine.cmd("run")
+                times = engine.get_vector_array("time")
+                trace = engine.get_vector_array(net)
+                if rc == 0 and times and trace and len(trace) == len(times):
+                    results.append((v, list(times), list(trace)))
+        finally:
+            comp.value = base_value
+
+        self.sweep_last = results
+        self.sweep_plot.clear()
+        colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd",
+                  "#ff7f0e", "#8c564b", "#17becf", "#e377c2"]
+        for i, (v, times, trace) in enumerate(results):
+                self.sweep_plot.plot([t * 1000.0 for t in times], trace,
+                                     pen=pg.mkPen(colors[i % len(colors)], width=2),
+                                     name=f"{v:.1f}")
+        self.sweep_plot.setTitle(
+            f"Parametric sweep - {comp_id} ({len(results)} steps)")
+        self.sweep_info.setText(
+            f"{comp_id}: {len(results)} steps, "
+            f"{values[0]:.1f} to {values[-1]:.1f}")
+        self.log(f"Parametric sweep: {comp_id} {len(results)} steps")
+        if self.bode_net_box.findText(net) < 0:
+            self.bode_net_box.addItem(net)
+        self._sync_serial_nets()
+
+    # ------------------------------------------------------------------
+    # Instrument tabs: PV, AWG, I-V curve tracer
+    # ------------------------------------------------------------------
+    def run_pv(self):
+        """Solar PV / MPPT trace via studio_engine.trace_solar_pv."""
+        from bridge.studio_engine import StudioSimulationEngine
+
+        irr = self.pv_irr_box.value()
+        temp = self.pv_temp_box.value()
+        pts = int(self.pv_pts_box.value())
+        out = StudioSimulationEngine.trace_solar_pv(
+            irradiance_w_m2=irr, temp_c=temp, points=pts)
+        self.pv_last = out
+        self.pv_iv_plot.clear()
+        self.pv_iv_plot.plot(out["v_arr"], out["i_arr"],
+                             pen=pg.mkPen("#1f77b4", width=2), name="I-V")
+        self.pv_p_plot.clear()
+        self.pv_p_plot.plot(out["v_arr"], out["p_arr"],
+                             pen=pg.mkPen("#d62728", width=2), name="P-V")
+        self.pv_iv_plot.setTitle("I-V curve")
+        self.pv_p_plot.setTitle("P-V curve")
+        self.pv_info.setText(
+            f"Pmax {out['p_max_w']:.3f} W, Voc {out['v_oc']:.3f} V, "
+            f"Isc {out['i_sc']:.3f} A, Vmp {out['v_mpp']:.3f} V, "
+            f"Imp {out['i_mpp']:.3f} A, FF {out['fill_factor']:.3f}")
+        self.log(f"PV trace: {self.pv_info.text()}")
+
+    def run_awg(self):
+        """AWG waveform synthesis via studio_engine.generate_awg_signal."""
+        from bridge.studio_engine import StudioSimulationEngine
+
+        t, sig = StudioSimulationEngine.generate_awg_signal(
+            wave_type=self.awg_type_box.currentText(),
+            freq_hz=self.awg_freq_box.value(),
+            amp_v=self.awg_amp_box.value(),
+            offset_v=self.awg_offset_box.value(),
+            duration_ms=self.awg_duration_box.value(),
+            points=int(self.awg_points_box.value()))
+        self.awg_last = (t, sig)
+        self.awg_plot.clear()
+        self.awg_plot.plot(t, sig,
+                           pen=pg.mkPen("#1f77b4", width=2),
+                           name=self.awg_type_box.currentText())
+        self.awg_plot.setTitle(
+            f"AWG - {self.awg_type_box.currentText()} "
+            f"{self.awg_freq_box.value():.0f} Hz")
+        self.awg_info.setText(
+            f"{len(t)} points, {self.awg_type_box.currentText()}, "
+            f"max {max(sig):.3f} V, min {min(sig):.3f} V")
+        self.log(f"AWG: {self.awg_info.text()}")
+
+    def run_curve_tracer(self):
+        """I-V curve tracer via studio_engine trace_mosfet_iv / trace_diode_iv."""
+        from bridge.studio_engine import StudioSimulationEngine
+
+        idx = self.curve_device_box.currentIndex()
+        self.curve_plot.clear()
+        self.curve_last = None
+        if idx == 0:
+            pts = int(self.curve_pts_box.value())
+            vmax = self.curve_vmax_box.value()
+            out = StudioSimulationEngine.trace_mosfet_iv(vds_max=vmax, points=pts)
+            self.curve_last = out
+            colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd",
+                      "#ff7f0e", "#8c564b", "#17becf", "#e377c2"]
+            for i, curve in enumerate(out["curves"]):
+                self.curve_plot.plot(curve["vds"], curve["id_amps"],
+                                     pen=pg.mkPen(colors[i % len(colors)], width=2),
+                                     name=f"Vgs={curve['vgs']:.1f} V")
+            info = (f"{len(out['curves'])} curves, Vds points {len(out['vds'])}, "
+                    f"Vth {out.get('vth', 0):.2f} V, Rds(on) {out.get('rdson_mohm', 0):.0f} mohm")
+        else:
+            pts = int(self.curve_pts_box.value())
+            vfmax = self.curve_vfmax_box.value()
+            out = StudioSimulationEngine.trace_diode_iv(vf_max=vfmax, points=pts)
+            self.curve_last = out
+            self.curve_plot.plot(out["vf"], out["i_schottky"],
+                                 pen=pg.mkPen("#1f77b4", width=2),
+                                 name="Schottky (1N5819)")
+            self.curve_plot.plot(out["vf"], out["i_silicon"],
+                                 pen=pg.mkPen("#d62728", width=2),
+                                 name="Silicon (1N4148)")
+            self.curve_plot.plot(out["vf"], out["i_zener"],
+                                 pen=pg.mkPen("#2ca02c", width=2),
+                                 name="Zener")
+            info = (f"{len(out['vf'])} Vf points, "
+                    f"families plotted: Schottky, Silicon, Zener")
+        self.curve_plot.setTitle("I-V curve tracer")
+        self.curve_info.setText(info)
+        self.log(f"Curve tracer: {info}")
+
+    # ------------------------------------------------------------------
     # Result export
     # ------------------------------------------------------------------
     def export_results_csv(self):
@@ -3020,7 +4033,6 @@ class SchematicEditor(QMainWindow):
 
         self.log("=== closed-loop co-simulation ===")
         for pin, spec in laws.items():
-            from bridge import control_law
             self.log(f"  {pin}: {control_law.describe_law(spec)}")
 
         try:

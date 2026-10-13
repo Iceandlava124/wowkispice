@@ -19,7 +19,7 @@ than reporting a tidy-looking zero.
 import os
 import re
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -141,7 +141,6 @@ def run_cosim(
 
     _check_laws_against_netlist(model, executables, run)
 
-    owns_engine = engine is None
     if engine is None:
         try:
             engine = NgSpiceEngine(verbose=False)

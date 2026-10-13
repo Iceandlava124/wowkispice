@@ -4,7 +4,6 @@ Reads ESP-IDF's tools.json. Platform-independent: we want to see every
 platform's entry so we can pick the linux-amd64 one for WSL2.
 """
 import json
-import sys
 
 TOOLS = r"C:\Users\gudae\.platformio\packages\framework-espidf\tools\tools.json"
 

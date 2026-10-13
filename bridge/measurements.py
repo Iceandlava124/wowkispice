@@ -17,9 +17,8 @@ Time is in seconds and values in volts throughout, matching ngspice, so nothing
 has to be converted at the call site.
 """
 
-import cmath
 import math
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 EPS = 1e-15
 

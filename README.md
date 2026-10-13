@@ -28,13 +28,13 @@
 Each goal is stated as one testable sentence and flagged with the same grammar used in [docs/systems-map.md](docs/systems-map.md): **ACHIEVED** = a test or proof in this repo demonstrates it, with evidence cited; **PARTIAL** = part works and part does not, and the gap is named; **NOT YET** = something concrete is blocking it.
 
 - [x] **ACHIEVED —** The analog solver is a real `libngspice` C DLL, not an approximation. Evidence: [tools/prove_physics_engine.py](tools/prove_physics_engine.py) and [tests/test_ngspice_dll_proof.py](tests/test_ngspice_dll_proof.py) inspect the loaded DLL and C function pointers in RAM, then verify a dynamically generated RC step response and an underdamped RLC ringing frequency/envelope against closed-form ODEs, with assertions that raise on failure.
-- [x] **ACHIEVED —** The repo can run a genuine per-timestep closed-loop co-simulation between an analog solve and a firmware-derived controller. Evidence: `tests/test_cosim_control.py` (23 tests) and `tests/test_closed_loop_buck.py` (3 tests) exercise `bridge/cosim_runner.py` and `bridge/control_law.py`, including real runs where `GetVSRCData` reads the sense net from ngspice's C buffer each timestep. Note: the controller is a Python model whose three constants were scraped from the C source — see the fidelity gap below.
+- [x] **ACHIEVED —** The repo can run a genuine per-timestep closed-loop co-simulation between an analog solve and a firmware-derived controller. Evidence: `tests/test_cosim_control.py` (34 tests) and `tests/test_closed_loop_buck.py` (3 tests) exercise `bridge/cosim_runner.py` and `bridge/control_law.py`, including real runs where `GetVSRCData` reads the sense net from ngspice's C buffer each timestep. Note: the controller is a Python model whose three constants were scraped from the C source — see the fidelity gap below.
 - [x] **ACHIEVED —** The closed loop includes a real feedback divider that lives in the SPICE netlist, not a Python fudge factor. Evidence: `tests/test_cosim_control.py::TestDividerSemantics` and `TestThresholdsMatchFirmware` assert the divider semantics and that both closed-loop paths reproduce the firmware's 1995/2030 counts; `test_schematic_editor.py` asserts the palette symbol pin order matches the netlister.
-- [x] **ACHIEVED —** There is an LTspice-familiar schematic editor UX. Evidence: `tests/test_ui_polish.py` (47), `tests/test_editor_workflow.py` (36), `tests/test_schematic_editor.py` (28), and `tests/test_ui_parity.py` (12) cover placement, wiring, hotkeys, zoom/pan, undo, value editing, net labeling, simulation, and KiCad export. The palette shortcut letters are the same functional grammar used by LTspice/KiCad; the icon artwork is drawn at runtime from own geometry, not imported.
+- [x] **ACHIEVED —** There is an LTspice-familiar schematic editor UX. Evidence: `tests/test_ui_polish.py` (76), `tests/test_editor_workflow.py` (36), `tests/test_schematic_editor.py` (40), and `tests/test_ui_parity.py` (12) cover placement, wiring, hotkeys, zoom/pan, undo, value editing, net labeling, simulation, and KiCad export. The palette shortcut letters are the same functional grammar used by LTspice/KiCad; the icon artwork is drawn at runtime from own geometry, not imported.
 - [x] **ACHIEVED —** The compiled firmware boots in an emulator through ROM, the second-stage bootloader, and `app_main()`. Evidence: `bridge/qemu_orchestrator.py` boots `firmware/.../qemu_flash.bin` under Espressif QEMU and reaches both `BOOT_MARKERS` on UART (5 ROM boots, 5 `app_main()` entries). This is boot, not the control loop.
 - [ ] **PARTIAL —** The compiled firmware boots **and** runs its real control loop in the patched emulator, **and** responds to analog values injected from the host — but only through a manual QEMU monitor command, not the automatic bridge that is the actual goal. Evidence: `qemu-system-xtensa` built from the pinned Espressif tree with `tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch` (regenerated from the working tree, re-verified by configuring and fully building a **fresh source export + patch**); a 90 s boot yields **900 000 control-loop samples with zero panics** — the former `adc_oneshot_read()` watchdog panic is gone — and `qom-set /machine/peripheral/sens adc1-value <n>` changes the sample reported on the next iteration, flipping the gate **ON → OFF at 3456** (the firmware’s own hysteresis reacting to injected input). What this is **not** yet: feeding is **manual** (a monitor command) — the automatic orchestrator bridge (ngspice ↔ QEMU) that would make compiled firmware *drive the simulation loop* is **not yet wired**; `bridge/qemu_orchestrator.py` neither sets `adc1-value` nor reads the gate decision back, so no closed loop passes through the emulated chip yet. That is the open goal, now closer. Details: [docs/systems-map.md](docs/systems-map.md) §4/§8 and the "Firmware execution status" table.
 - [x] **ACHIEVED —** An open-source license is in place. Evidence: `LICENSE` is Apache-2.0; [README.md](README.md#📄-license) states it. Third-party material is handled explicitly: Qucs-S is studied, not copied (GPL-2.0-or-later cannot mix into Apache-2.0); LTspice screenshots are local-only and gitignored.
-- [ ] **NOT YET —** CI is not verified as passing on a fresh clone. Evidence: `.github/workflows/cosim-ci.yml` exists and is YAML-parsed/step-order-checked, but it has never executed in CI history in this environment (no Docker, no remote). The workflow does include a `python tools/run_tests.py` step, which is the same runner that locally produces **257 tests across 16 suites, exit 0** — so the test suite itself is ready, but the CI path is **UNVERIFIED**, not CONFIRMED WORKING. Also **NOT YET** in the literal sense: a fresh clone needs two things the repo does not contain — a Python environment and `libngspice` — and the setup scripts (`setup.ps1` / `setup.sh`) fetch the DLL rather than including it.
+- [ ] **NOT YET —** CI is not verified as passing on a fresh clone. Evidence: `.github/workflows/cosim-ci.yml` exists and is YAML-parsed/step-order-checked, but it has never executed in CI history in this environment (no Docker, no remote). The workflow does include a `python tools/run_tests.py` step, which is the same runner that locally produces **309 tests across 17 suites, exit 0** — so the test suite itself is ready, but the CI path is **UNVERIFIED**, not CONFIRMED WORKING. Also **NOT YET** in the literal sense: a fresh clone needs two things the repo does not contain — a Python environment and `libngspice` — and the setup scripts (`setup.ps1` / `setup.sh`) fetch the DLL rather than including it.
 
 One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the test suite covers the Python controller matching three scraped constants in a C file. It does **not** mean the compiled firmware drives the simulation loop or that the thresholds are calibrated. Two things this caveat used to warn about are now settled — the QEMU patch compiles and is reproducible from a fresh source export, and an analog↔emulated-chip data path exists — but that path is a **manual** `qom-set` command, not an automatic bridge, so the firmware-execution goal is still PARTIAL.
 
@@ -64,7 +64,9 @@ One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the 
 
 ## 🚀 Quickstart Guide
 
-### 1. Setup — from a fresh clonePROJECT_WOWKISPICE needs two things that are not in the repository: a Python environment, and the `libngspice` shared library (the analytic solver is the whole point — nothing here is faked). **Never done this before? Follow [SETUP.md](SETUP.md) — every step from a bare Windows machine, including WSL2, PlatformIO and the QEMU build.**
+### 1. Setup — from a fresh clone
+
+PROJECT_WOWKISPICE needs two things that are not in the repository: a Python environment, and the `libngspice` shared library (the analytic solver is the whole point — nothing here is faked). **Never done this before? Follow [SETUP.md](SETUP.md) — every step from a bare Windows machine, including WSL2, PlatformIO and the QEMU build.**
 
 **Windows**
 ```powershell
@@ -103,10 +105,20 @@ error lists every path it tried.
 
 ### 2. Verify the install
 ```powershell
-.\run_tests.bat          # Windows
+.\run_selfcheck.bat         # Windows — one-command environment gate
+python tools/selfcheck.py   # Linux / macOS
+```
+The self-check is the gate: interpreter, dependencies, loading `ngspice.dll`, a
+known circuit solved against hand-checkable answers (an RC step and a resistor
+divider), then the suites. It prints `SELF-CHECK: PASS` and exits 0 only when
+everything works; add `--quick` to skip the full suite. If anything ever looks
+wrong, run this first.
+
+```powershell
+.\run_tests.bat          # Windows — suites only
 python tools/run_tests.py   # Linux / macOS
 ```
-All 16 suites (257 tests) run against the real solver.
+All 17 suites (309 tests) run against the real solver.
 
 ### 3. Launch the Schematic Editor (flagship PyQt5 app)
 ```powershell
@@ -271,7 +283,8 @@ What each "firmware" capability actually does today:
 | Run the firmware's control loop | **Works (patched QEMU), verified 2026-10-07** on a build made from `tools/qemu-patch/` + the pinned source. Under *stock* QEMU it still fails as before: 4 watchdog panics / 45 s, **0 control-loop samples** (`esp32.sens` unimplemented, `esp32_gpio_write()` drops writes). |
 | Respond to injected analog values | **Works, manually.** `qom-set /machine/peripheral/sens adc1-value N` (QEMU monitor) changes the sample the firmware prints; the gate flips **ON → OFF at 3456**. Fixed QOM path, identical across boots. |
 | Fix the above | **Done and verified.** `tools/qemu-patch/0001-*.patch` (6 files, 431 insertions) compiles, boots, and was re-verified end to end from a fresh source export + patch. The automatic ngspice ↔ QEMU bridge is the remaining, deliberately deferred step. |
-| Renode lockstep co-simulation | **Abandoned.** `bridge/renode_orchestrator.py` is kept for reference only. Renode cannot decode the Xtensa `entry` instruction (393 occurrences in an ESP-IDF build) and executed none of our firmware. QEMU is the current emulator target. Note that its `--mode benchmark` path is *not* the Renode one — it runs the pure-Python `mock_controller`. |
+| Renode lockstep co-simulation | **Abandoned and removed (2026-10-09).** The four-file cluster (`renode_orchestrator.py`, `renode_adc_peripheral.py`, `run_cosim.resc`, `esp32_buck.repl`) and the gitignored `tools/renode/` tree were deleted. Renode cannot decode the Xtensa `entry` instruction (393 occurrences in an ESP-IDF build) and executed none of our firmware; QEMU is the current emulator target. The CI/Docker benchmark entry point now calls the pure-Python `bridge/mock_controller.py` directly. |
+| Run a firmware **binary** as the closed-loop controller (binary runner) | **Planned; implementable now.** Patched QEMU already executes the real image and accepts ADC injection — the host bridge is specified in [docs/binary-runner-and-mcu-bringup.md](docs/binary-runner-and-mcu-bringup.md). |
 
 There is no code path from a `.bin`/`.elf` to GPIO or ADC behaviour *inside the
 simulation*. Loading an image gives you metadata; behaviour comes from
@@ -433,6 +446,33 @@ python tests/test_ui_polish.py
 
 ---
 
+## 🧭 Roadmap: industry readiness & phased plan
+
+The industry-readiness verdict (YES as a pilot, NO as a production tool) and the
+phased plan with **acceptance criteria for each phase** are documented in
+**[docs/industry-readiness.md](docs/industry-readiness.md)**, which is the living
+record of every go/no-go decision in this project. The same page links the
+binary-runner/M0-M1 spec as the first concrete deliverable of Phase 1.
+
+## 🧭 Roadmap: binary runner & new-MCU bring-up
+
+Today the control loop runs from **declared** behaviour — a pin profile
+(`bridge/gpio_model.py`) or a law parsed from firmware source
+(`bridge/control_law.py`). The real firmware binary executes only under QEMU,
+not yet wired to the solver. The next capability is a **binary runner** that
+closes that loop, plus a repeatable checklist for adding and testing new MCUs.
+
+Both are specified implementation-ready (interfaces, milestones, acceptance
+tests, traps) in **[docs/binary-runner-and-mcu-bringup.md](docs/binary-runner-and-mcu-bringup.md)**; the acceptance-gates for the surrounding phases are in **[docs/industry-readiness.md](docs/industry-readiness.md)**:
+
+- **M0 — scripted injection:** drive `qom-set /machine/peripheral/sens adc1-value N`
+  from Python, read the gate back, and regression-test the measured 3456-count
+  flip boundary.
+- **M1 — closed loop:** feed the solver's divider voltage into the emulated ADC
+  and drive the gate's `external` source from the firmware's real decisions.
+- **New MCUs:** register map + QEMU device model + firmware project + pin/law
+  wiring + tests, per the bring-up checklist.
+
 ## 📁 Repository Structure
 
 * `bridge/` — Low-level `ngspice.dll` C-API ctypes bridge, the schematic→SPICE
@@ -449,15 +489,19 @@ python tests/test_ui_polish.py
   `schematic_symbols.py` (component library), `theme.py` (one palette, dark
   and light) and `icons.py` (runtime-drawn toolbar icons).
 * `tools/` — `prove_physics_engine.py` (solver proof harness), `run_tests.py`,
+  `selfcheck.py` (the environment gate behind `run_selfcheck.bat`),
   `screenshot_editor.py` and `overnight_ollama.py` (local LLM batch runner).
-  `tools/ngspice_dll/` and `tools/renode/` are gitignored vendor binaries
-  (`tools/renode/` is stale and unused — Renode cannot execute this firmware,
+  `tools/ngspice_dll/` is a gitignored vendor binary; the gitignored `tools/renode/` tree was deleted on 2026-10-09
+  (it was stale and unused — Renode cannot execute this firmware,
   see [above](#firmware-execution-status)); `tools/qemu-patch/` is the
   compiled-and-boot-tested SAR ADC + GPIO QEMU device-model patch.
   `setup.ps1` / `setup.sh` fetch ngspice on demand.
 * `tests/` — Automated verification test suites and benchmark runners.
 * `.github/workflows/` — Automated GitHub Actions CI/CD co-simulation workflow.
 * `setup.ps1` / `setup.sh` — one-shot bootstrap (venv + deps + libngspice).
+* `docs/product_vision.md` — original vision snapshot + per-slice status table.
+* `docs/industry-readiness.md` — verdict, blockers, phased plan with acceptance criteria.
+* `docs/capability-inventory.md` — what works today, what is manual, what is planned.
 * `Dockerfile` & `docker-compose.yml` — Containerized headless execution setup.
   **Known broken:** they install a system `libngspice0` but predate the
   `find_library` fallback, and they copy neither `ui/` nor `tools/`.

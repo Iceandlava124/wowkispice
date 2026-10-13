@@ -4,12 +4,13 @@ Uses high-performance native ngspice C callbacks (GetVSRCData / GetSyncData)
 for zero-overhead mixed-signal co-simulation.
 """
 
+import argparse
+import ctypes
 import os
 import sys
-import ctypes
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, List, Any
+from typing import Dict, Any
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -49,7 +50,6 @@ class MockESP32BuckController:
         self.adc_vref = adc_vref
         
         # Feedback voltage thresholds
-        v_fb_target = target_vout * divider_ratio
         v_fb_low = (target_vout - hyst_vout) * divider_ratio
         v_fb_high = (target_vout + hyst_vout) * divider_ratio
         
@@ -134,7 +134,7 @@ def run_closed_loop_simulation(
     global engine
     cir_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "circuits", "buck_converter.cir")
     
-    print(f"=== Starting High-Speed Closed-Loop Co-Simulation ===")
+    print("=== Starting High-Speed Closed-Loop Co-Simulation ===")
     print(f"Circuit: {cir_path}")
     print(f"Total time: {total_time_ms} ms, Resolution: {tstep_us} us")
     
@@ -168,7 +168,7 @@ def run_closed_loop_simulation(
     avg_vout = float(np.mean(steady_vout))
     ripple_p2p = float(np.max(steady_vout) - np.min(steady_vout))
 
-    print(f"\n=== Simulation Results ===")
+    print("\n=== Simulation Results ===")
     print(f"Total synchronized steps:   {len(time_arr)}")
     print(f"Total switch transitions:   {controller.switch_count}")
     print(f"Average Steady-State Vout:  {avg_vout:.4f} V (Target: 3.3000 V)")
@@ -208,4 +208,21 @@ def run_closed_loop_simulation(
 
 
 if __name__ == "__main__":
-    run_closed_loop_simulation()
+    # Headless entry point: replaced the deleted Renode wrapper for CI and
+    # docker-compose, which both ran this module's benchmark at 10 ms.
+    parser = argparse.ArgumentParser(
+        description="Closed-loop mock benchmark (pure Python, no emulator)")
+    parser.add_argument("--time", type=float, default=5.0,
+                        help="Simulation duration in milliseconds")
+    parser.add_argument("--tstep", type=float, default=0.5,
+                        help="Simulation time step in microseconds")
+    parser.add_argument("--plot", type=str,
+                        default="tests/buck_converter_response.png",
+                        help="Path to the output waveform image")
+    args = parser.parse_args()
+    run_closed_loop_simulation(
+        total_time_ms=args.time,
+        tstep_us=args.tstep,
+        save_plot=True,
+        plot_path=args.plot,
+    )

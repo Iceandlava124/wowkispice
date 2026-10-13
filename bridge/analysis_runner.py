@@ -90,7 +90,6 @@ def run_bode(
             "the netlist contains no .ac card; nothing to sweep. "
             + (" ".join(warns)))
 
-    owns = engine is None
     if engine is None:
         try:
             engine = NgSpiceEngine(verbose=False)
@@ -179,7 +178,6 @@ def run_noise(
             "the netlist contains no .noise card; nothing to analyse. "
             + (" ".join(warns)))
 
-    owns = engine is None
     if engine is None:
         try:
             engine = NgSpiceEngine(verbose=False)
@@ -286,7 +284,6 @@ def run_monte_carlo(
             "no sweepable R/C/L parts with numeric values - nothing to "
             "tolerate")
 
-    owns = engine is None
     if engine is None:
         try:
             engine = NgSpiceEngine(verbose=False)
@@ -402,7 +399,6 @@ def run_disto(
             "the netlist contains no .disto card; nothing to analyse. "
             + (" ".join(warns)))
 
-    owns = engine is None
     if engine is None:
         try:
             engine = NgSpiceEngine(verbose=False)

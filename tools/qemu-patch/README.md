@@ -47,7 +47,7 @@ GPIO enable            0x3FF44020   0x00040000   0x00000000   NO
 | `include/hw/gpio/esp32_gpio.h` | Add the output/enable registers and state. |
 | `hw/gpio/esp32_gpio.c` | Latch `out`/`enable` with W1TS/W1TC semantics; make them readable. |
 
-409 insertions, 4 deletions.
+431 insertions, 4 deletions.
 
 The ADC models only what `adc_oneshot_read()` needs: `MEAS_STATUS` reads 0 so
 `adc_oneshot_ll_start()` leaves its wait loop, a rising edge on `MEAS1_START_SAR`
@@ -117,7 +117,9 @@ firmware.
 
 Still not wired: `bridge/qemu_orchestrator.py` does not feed `adc1-value`
 programmatically — feeding is a manual monitor command, and nothing reads the
-gate decision back into ngspice. That is the next session's task.
+gate decision back into ngspice. That is the next session's task; the
+implementation plan (milestones, interfaces, acceptance tests) is
+`docs/binary-runner-and-mcu-bringup.md`.
 
 
 ## Verification that has already happened

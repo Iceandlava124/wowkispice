@@ -1,7 +1,0 @@
-model:
-  provider: ollama
-  base_url: http://host.docker.internal:11434
-  default: qwen2.5-coder:7b-64k
-  fallback: hermes3:8b
-terminal:
-  timeout: 300

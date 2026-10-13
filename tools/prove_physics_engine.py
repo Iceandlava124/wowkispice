@@ -21,7 +21,7 @@ import numpy as np
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bridge.ngspice_wrapper import NgSpiceEngine, VectorInfo
+from bridge.ngspice_wrapper import NgSpiceEngine
 
 
 RLC_FREQ_TOLERANCE = 0.03       # 3% on the damped frequency

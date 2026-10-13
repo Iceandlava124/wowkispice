@@ -5,7 +5,6 @@ test_components_library.py - Verification suite for reverse-engineered component
 import os
 import sys
 import unittest
-import numpy as np
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
