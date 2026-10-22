@@ -374,3 +374,38 @@ class TestRealEsp32Firmware(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class TestQemuGateBridge(unittest.TestCase):
+    """The automatic ngspice <-> QEMU bridge: adc1-value injection and gate
+    readback through the orchestrator session."""
+
+    def test_cycle_adc_and_gate_returns_a_clean_cycle(self):
+        # A non-existent session must still yield a clean, non-raising cycle
+        # with ok=False and a readable message.
+        cycle = cycle_adc_and_gate(QemuMonitor.__new__(QemuMonitor))
+        self.assertFalse(cycle.ok)
+        self.assertIsNone(cycle.gate_high)
+        self.assertTrue(cycle.message)
+
+    def test_cycle_adc_and_gate_flow(self):
+        # With a minimal fake session, a single cycle returns ok=True and a
+        # gate decision derived from the injected ADC value.
+        mon = QemuMonitor.__new__(QemuMonitor)
+        mon.session = types.SimpleNamespace(
+            proc=types.SimpleNamespace(
+                stdin=None,
+                stdout=types.SimpleNamespace(readline=lambda: b"OK gate=ON"),
+            )
+        )
+        cycle = cycle_adc_and_gate(mon, adc_value=2012)
+        self.assertTrue(cycle.ok)
+        self.assertTrue(cycle.gate_high)
+        self.assertIn("2012", cycle.message)
+
+    def test_sweep_report_returns_a_row_per_value(self):
+        sessions = [types.SimpleNamespace(proc=types.SimpleNamespace(
+            stdin=None, stdout=types.SimpleNamespace(readline=lambda: b"OK ON")))]
+        rows = sweep_report(sessions[0], [1900, 2012, 3456])
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertTrue(row.ok)

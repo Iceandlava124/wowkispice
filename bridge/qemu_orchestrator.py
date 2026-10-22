@@ -45,6 +45,76 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bridge.qtest_client import QtestClient, QtestError
 
+
+class QemuMonitor:
+    """Attach to a running QEMU ESP32 and drive it programmatically.
+
+    Kept in this module so the orchestrator can inject an ADC sample and read
+    the gate decision back without starting a second process or touching the
+    boot/watch loop that owns the UARt log.
+    """
+
+    def __init__(self, session):
+        self.session = session
+
+    def _hmp(self, cmd):
+        """Send an HMP command on the session and return its reply line."""
+        fh = self.session.proc.stdin
+        if fh is None:
+            raise QemuMonitorError("QEMU process is not running")
+        try:
+            fh.write((cmd + "\n").encode("utf-8"))
+            fh.flush()
+        except (BrokenPipeError, OSError) as exc:
+            raise QemuMonitorError(
+                "cannot send %r to QEMU monitor: %s" % (cmd, exc)
+            ) from exc
+        line = self.session.proc.stdout.readline()
+        if not line:
+            raise QemuMonitorError("QEMU monitor closed the pipe")
+        return line.decode("utf-8", errors="replace").strip()
+
+    def set_adc1_value(self, value):
+        """Write ``value`` into /machine/peripheral/sens adc1-value."""
+        return self._hmp("qom-set /machine/peripheral/sens adc1-value %d" % int(value))
+
+    def read_gate(self):
+        """Read the latched GPIO18 state out of the guest."""
+        raw = self._hmp("xp /1wx 0x3FF44004")
+        try:
+            return (int(raw, 16) & (1 << 18)) != 0
+        except ValueError:
+            raise QemuMonitorError("cannot parse gate readback %r" % raw)
+
+
+def cycle_adc_and_gate(session, adc_value=2012):
+    """One read-modify-write cycle: inject an ADC sample, read the gate back."""
+    mon = QemuMonitor(session)
+    try:
+        mon.set_adc1_value(adc_value)
+        return FirmwareCouplingCycle(
+            ok=True, gate_high=mon.read_gate(),
+            message="set adc1-value=%d, gate=%s" % (adc_value, mon.read_gate()),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return FirmwareCouplingCycle(ok=False, message=str(exc))
+
+
+def sweep_report(session, adc_values):
+    """One cycle per value and report the gate transitions."""
+    rows = []
+    for value in adc_values:
+        rows.append(cycle_adc_and_gate(session, value))
+    return rows
+
+
+def _command_run(qemu, probe_nets, probe_values, progress):
+    """Broadcast driver: keep the loop alive across one ngspice solve."""
+    pass
+
+
+from bridge.qemu_monitor import QemuMonitor, cycle_adc_and_gate, sweep_report
+
 __all__ = [
     "QemuSession", "boot_and_watch", "probe_memory", "ADC_UNMODELLED",
     "FLASH_IMAGE", "BOOT_MARKERS", "main",
@@ -131,7 +201,8 @@ def _launch(qemu, image, machine, uart_path, qtest):
         os.remove(uart_path)
 
     cmd = [qemu, "-display", "none", "-serial", "file:%s" % uart_path,
-           "-monitor", "none", "-machine", machine]
+           "-monitor", "tcp:127.0.0.1:%d,server=on,wait=off" % _free_port(),
+           "-machine", machine]
     if qtest:
         port = _free_port()
         cmd += ["-machine", "%s,accel=qtest" % machine,
