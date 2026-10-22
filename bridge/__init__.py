@@ -16,6 +16,7 @@ test layers actually use:
 from __future__ import annotations
 
 from . import binary_runner as binary_runner
+from . import firmware_runner as firmware_runner
 from . import qemu_monitor as qemu_monitor
 from . import qemu_orchestrator as qemu_orchestrator
 
@@ -23,19 +24,7 @@ from . import qemu_orchestrator as qemu_orchestrator
 # qtest memory probe, and tests import it directly.
 __all__ = [
     "binary_runner",
+    "firmware_runner",
     "qemu_monitor",
     "qemu_orchestrator",
-    # Thin shim kept only so the long-settled name resolves.
-    "firmware_runner",
 ]
-
-try:
-    from . import firmware_runner as firmware_runner  # noqa: F401
-except ImportError:  # pragma: no cover - the shim is load-bearing for tests
-    import warnings
-    warnings.warn(
-        "bridge.firmware_runner is not importable; unifying the module surface. "
-        "See docs/binary-runner-and-mcu-bringup.md.",
-        ImportWarning,
-        stacklevel=2,
-    )

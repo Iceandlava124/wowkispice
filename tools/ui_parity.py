@@ -205,14 +205,24 @@ def stretch(g, lo_pct=1.0, hi_pct=99.0):
 
 
 def edges_rel(g, frac=0.12):
-    """Gradient magnitude above `frac` of this grid's own range.
+    """Gradient magnitude above `frac` of this grid's own dynamic range.
 
-    imgdiff.edges() is the same operator with a hardcoded 40, which is why it
-    finds almost nothing in a low-contrast dark theme.
+    imgdiff.edges() uses a hardcoded 40, which is why it finds almost nothing
+    in a low-contrast dark theme. Here the threshold is a fraction of the grid's
+    own span (max-min after the caller's contrast stretch), so a dark and a
+    light theme start from the same footing: each image's edge map is derived
+    from its own content, not from an absolute 0-255 scale.
     """
     h = len(g)
     w = len(g[0]) if h else 0
-    threshold = max(1.0, 255.0 * frac)
+    span = 255.0
+    for row in g:
+        for v in row:
+            span = min(span, v)
+    for row in g:
+        for v in row:
+            span = max(span, v)
+    threshold = max(1.0, span * frac)
     out = []
     for y in range(h):
         row = g[y]

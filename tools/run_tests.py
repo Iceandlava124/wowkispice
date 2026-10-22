@@ -14,7 +14,13 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PYTHON = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
-if not os.path.exists(PYTHON):
+# The repo's primary .venv (Py 3.14) cannot install PyQt5/matplotlib from PyPI
+# on this machine, so the Qt/PDF editor suites are run through .venv2, which
+# already has the full stack (matplotlib 3.11.2, PyQt5, pyqtgraph, pytest).
+_ALTERNATE_VENV = os.path.join(ROOT, ".venv2", "Scripts", "python.exe")
+if os.path.exists(_ALTERNATE_VENV):
+    PYTHON = _ALTERNATE_VENV
+elif not os.path.exists(PYTHON):
     PYTHON = sys.executable
 
 COUNT_RE = re.compile(r"Ran (\d+) test")
@@ -35,6 +41,9 @@ def suite_env(name):
                                             "wosp-test-settings",
                                             re.sub(r"[^A-Za-z0-9_.-]", "_", name))
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # Every suite imports bridge.* (and the parity tool wraps tools/imgdiff),
+    # so the repo root must be on sys.path for each suite process.
+    env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
     return env
 
 

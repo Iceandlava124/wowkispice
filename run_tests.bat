@@ -14,6 +14,11 @@ if not exist "tools\ngspice_dll\Spice64_dll\dll-vs\ngspice.dll" (
     )
 )
 
+if exist ".venv2\Scripts\python.exe" (
+    echo Using .venv2 test interpreter (PyQt5/matplotlib).
+    " .venv2\Scripts\python.exe" "tools\run_tests.py"
+    exit /b %errorlevel%
+)
 if not exist ".venv\Scripts\python.exe" (
     echo No virtual environment found. Run run_editor.bat once first.
     exit /b 1

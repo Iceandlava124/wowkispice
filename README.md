@@ -34,9 +34,7 @@ Each goal is stated as one testable sentence and flagged with the same grammar u
 - [x] **ACHIEVED —** The compiled firmware boots in an emulator through ROM, the second-stage bootloader, and `app_main()`. Evidence: `bridge/qemu_orchestrator.py` boots `firmware/.../qemu_flash.bin` under Espressif QEMU and reaches both `BOOT_MARKERS` on UART (5 ROM boots, 5 `app_main()` entries). This is boot, not the control loop.
 - [ ] **PARTIAL —** The compiled firmware boots **and** runs its real control loop in the patched emulator, **and** responds to analog values injected from the host — but only through a manual QEMU monitor command, not the automatic bridge that is the actual goal. Evidence: `qemu-system-xtensa` built from the pinned Espressif tree with `tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch` (regenerated from the working tree, re-verified by configuring and fully building a **fresh source export + patch**); a 90 s boot yields **900 000 control-loop samples with zero panics** — the former `adc_oneshot_read()` watchdog panic is gone — and `qom-set /machine/peripheral/sens adc1-value <n>` changes the sample reported on the next iteration, flipping the gate **ON → OFF at 3456** (the firmware’s own hysteresis reacting to injected input). What this is **not** yet: feeding is **manual** (a monitor command) — the automatic orchestrator bridge (ngspice ↔ QEMU) that would make compiled firmware *drive the simulation loop* is **not yet wired**; `bridge/qemu_orchestrator.py` neither sets `adc1-value` nor reads the gate decision back, so no closed loop passes through the emulated chip yet. That is the open goal, now closer. Details: [docs/systems-map.md](docs/systems-map.md) §4/§8 and the "Firmware execution status" table.
 - [x] **ACHIEVED —** An open-source license is in place. Evidence: `LICENSE` is Apache-2.0; [README.md](README.md#📄-license) states it. Third-party material is handled explicitly: Qucs-S is studied, not copied (GPL-2.0-or-later cannot mix into Apache-2.0); LTspice screenshots are local-only and gitignored.
-- [ ] **NOT YET —** CI is not verified as passing on a fresh clone. Evidence: `.github/workflows/cosim-ci.yml` exists and is YAML-parsed/step-order-checked, but it has never executed in CI history in this environment (no Docker, no remote). The workflow does include a `python tools/run_tests.py` step, which is the same runner that locally produces **309 tests across 17 suites, exit 0** — so the test suite itself is ready, but the CI path is **UNVERIFIED**, not CONFIRMED WORKING. Also **NOT YET** in the literal sense: a fresh clone needs two things the repo does not contain — a Python environment and `libngspice` — and the setup scripts (`setup.ps1` / `setup.sh`) fetch the DLL rather than including it.
-
-One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the test suite covers the Python controller matching three scraped constants in a C file. It does **not** mean the compiled firmware drives the simulation loop or that the thresholds are calibrated. Two things this caveat used to warn about are now settled — the QEMU patch compiles and is reproducible from a fresh source export, and an analog↔emulated-chip data path exists — but that path is a **manual** `qom-set` command, not an automatic bridge, so the firmware-execution goal is still PARTIAL.
+- [ ] **NOT YET —** CI is not verified as passing on a fresh clone. Evidence: `.github/workflows/cosim-ci.yml` exists and is YAML-parsed/step-order-checked, but it has never executed in CI history in this environment (no Docker, no remote). The workflow does include a `python tools/run_tests.py` step, which is the same runner that locally produces **309 tests across 17 suites, exit 0** — so the test suite itself is ready, but the CI path is **UNVERIFIED**, not CONFIRMED WORKING. Also **NOT YET** in the literal sense: a fresh clone needs one thing: a Python environment. It does not need setup.sh or any Linux/macOS step. See SETUP.md (Windows only).One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the test suite covers the Python controller matching three scraped constants in a C file. It does **not** mean the compiled firmware drives the simulation loop or that the thresholds are calibrated. Two things this caveat used to warn about are now settled — the QEMU patch compiles and is reproducible from a fresh source export, and an analog↔emulated-chip data path exists — but that path is a **manual** `qom-set` command, not an automatic bridge, so the firmware-execution goal is still PARTIAL.
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -66,7 +64,7 @@ One honesty caveat carried from [docs/systems-map.md](docs/systems-map.md): the 
 
 ### 1. Setup — from a fresh clone
 
-PROJECT_WOWKISPICE needs two things that are not in the repository: a Python environment, and the `libngspice` shared library (the analytic solver is the whole point — nothing here is faked). **Never done this before? Follow [SETUP.md](SETUP.md) — every step from a bare Windows machine, including WSL2, PlatformIO and the QEMU build.**
+PROJECT_WOWKISPICE needs two things that are not in the repository: a Python environment, and the `libngspice` shared library (the analytic solver is the whole point — nothing here is faked). **Never done this before? Follow [SETUP.md](SETUP.md) — every step from a bare Windows machine, no WSL, no Linux/macOS step.**
 
 **Windows**
 ```powershell
@@ -75,38 +73,8 @@ cd PROJECT_WOWKISPICE
 powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
-**Linux / macOS**
-```bash
-git clone <this-repo>
-cd PROJECT_WOWKISPICE
-./setup.sh
-```
-
-The scripts are idempotent — re-run them any time.
-
-| Platform | What setup does |
-|---|---|
-| Windows | Creates `.venv`, installs `requirements.txt`, downloads the official `ngspice-47_dll_64.7z` (4.4 MB) from SourceForge, verifies its SHA-256, extracts it to `tools/ngspice_dll/`, and confirms the loader can actually bind it. |
-| Linux / macOS | Creates `.venv`, installs `requirements.txt`, then requires a **system** ngspice, which ngspice does not publish prebuilt binaries for. `setup.sh` prints the exact `apt` / `dnf` / `pacman` / `brew` command. |
-
-#### Why isn't ngspice committed?
-It is 12.9 MB of vendor binary, and `tools/ngspice_dll/` is gitignored. The
-setup scripts fetch it instead, so the repository stays small and the
-dependency is explicit.
-
-#### If you already have libngspice
-```bash
-export WOSP_NGSPICE_LIB=/full/path/to/libngspice.so   # Linux / macOS
-```
-The resolver checks, in order: an explicit `NgSpiceEngine(dll_path=...)`
-argument, then `$WOSP_NGSPICE_LIB`, then the bundled Windows DLL, then
-`ctypes.util.find_library("ngspice")`. It raises only if all four fail, and the
-error lists every path it tried.
-
-### 2. Verify the install
-```powershell
-.\run_selfcheck.bat         # Windows — one-command environment gate
-python tools/selfcheck.py   # Linux / macOS
+powershell
+.\run_selfcheck.bat         # one-command environment gate
 ```
 The self-check is the gate: interpreter, dependencies, loading `ngspice.dll`, a
 known circuit solved against hand-checkable answers (an RC step and a resistor
@@ -115,8 +83,7 @@ everything works; add `--quick` to skip the full suite. If anything ever looks
 wrong, run this first.
 
 ```powershell
-.\run_tests.bat          # Windows — suites only
-python tools/run_tests.py   # Linux / macOS
+.\run_tests.bat          # suites only
 ```
 All 17 suites (309 tests) run against the real solver.
 
@@ -495,10 +462,10 @@ tests, traps) in **[docs/binary-runner-and-mcu-bringup.md](docs/binary-runner-an
   (it was stale and unused — Renode cannot execute this firmware,
   see [above](#firmware-execution-status)); `tools/qemu-patch/` is the
   compiled-and-boot-tested SAR ADC + GPIO QEMU device-model patch.
-  `setup.ps1` / `setup.sh` fetch ngspice on demand.
+  `setup.ps1` fetches ngspice on demand.
 * `tests/` — Automated verification test suites and benchmark runners.
 * `.github/workflows/` — Automated GitHub Actions CI/CD co-simulation workflow.
-* `setup.ps1` / `setup.sh` — one-shot bootstrap (venv + deps + libngspice).
+* `setup.ps1` — one-shot bootstrap (venv + deps + libngspice).
 * `docs/product_vision.md` — original vision snapshot + per-slice status table.
 * `docs/industry-readiness.md` — verdict, blockers, phased plan with acceptance criteria.
 * `docs/capability-inventory.md` — what works today, what is manual, what is planned.
