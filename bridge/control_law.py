@@ -284,6 +284,11 @@ class HystereticLaw(ControlLaw):
         self.high_counts = int(self.spec["high_counts"])
 
     def decide(self, counts: int) -> bool:
+        # Hysteretic bang-bang, in ADC counts.  The firmware's own branch
+        # order is:  counts < low  ->  drive HIGH;  counts > high  ->  drive
+        # LOW;  otherwise  ->  hold the previous state.  Thresholds are
+        # inclusive: a sample sitting exactly on low_counts or high_counts
+        # holds, which is what stops the regulator chattering on the boundary.
         if counts < self.low_counts:
             return True
         if counts > self.high_counts:

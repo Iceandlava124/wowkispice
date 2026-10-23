@@ -234,7 +234,16 @@ def _check_laws_against_netlist(model, laws: Dict[str, ControlLaw], run: CosimRu
         return
     for pin in laws:
         designator = designator_for_pin(model, pin)
-        if designator and designator.upper() not in external_cards:
+        # A pin may be part of a joint wire (e.g. "GPIO18,S1:CTRL"), in which
+        # case the netlister emits the joint label as the source designator
+        # ("VU1_GPIO18_S1_CTRL") while designator_for_pin returns only the
+        # individual pin ("VU1_GPIO18"). Match a declared law against the
+        # designator when it is a strict prefix of an external card.
+        matched = any(
+            designator.upper() == card or card.startswith(designator.upper() + "_")
+            for card in external_cards
+        )
+        if designator and not matched:
             run.warnings.append(
                 f"{pin}: netlist has no `external` source for {designator}; "
                 f"the pin is probably unwired")

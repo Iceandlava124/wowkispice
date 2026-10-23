@@ -1,0 +1,10 @@
+# Pinned requirements for a deterministic fresh-clone install.
+# Generated from requirements.txt with `pip freeze`. Version ranges are
+# intentionally materialized; update by running the generator in tools/.
+numpy==1.26.4
+matplotlib==3.8.2
+pypdf==4.0.0
+pytest==8.2.2
+PyQt5==5.15.9
+pyqtgraph==0.13.3
+scipy==1.11.4
