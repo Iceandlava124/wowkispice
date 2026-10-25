@@ -29,11 +29,12 @@ dependencies = [
     "PyQt5>=5.15.0",
     "pyqtgraph>=0.13.0",
     "scipy>=1.11.0",
+    "pytest-timeout>=2.3.0",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0.0"]
-dev = ["pytest>=8.0.0"]
+test = ["pytest>=8.0.0", "pytest-timeout>=2.3.0"]
+dev = ["pytest>=8.0.0", "pytest-timeout>=2.3.0"]
 
 [project.scripts]
 wosp-check = "bridge.selfcheck:main"
@@ -43,3 +44,7 @@ include = ["bridge*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+timeout = 30
+markers = [
+    "qemu: real-QEMU contract tests (qemu-system-xtensa required)",
+]

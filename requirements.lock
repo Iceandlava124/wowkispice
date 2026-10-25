@@ -5,6 +5,11 @@ numpy==1.26.4
 matplotlib==3.8.2
 pypdf==4.0.0
 pytest==8.2.2
-PyQt5==5.15.9
-pyqtgraph==0.13.3
+# PyQt5 5.15.9 segfaults at import time on Python 3.12/Windows (see
+# docs/KNOWN_ISSUES.md); 5.15.11 is the verified pin that fixes it.
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.2
+PyQt5-sip==12.20.0
+pyqtgraph==0.14.0
+pytest-timeout==2.3.1
 scipy==1.11.4

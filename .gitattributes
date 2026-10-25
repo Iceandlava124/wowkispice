@@ -1,0 +1,28 @@
+# Normalize: store LF in the repo; check out per the type rules below.
+*.py    text=auto eol=lf
+*.md    text=auto eol=lf
+*.toml  text=auto eol=lf
+*.txt   text=auto eol=lf
+*.lock  text=auto eol=lf
+*.yml   text=auto eol=lf
+*.json  text=auto eol=lf
+*.sh    text=auto eol=lf
+
+# Windows scripting hosts (PowerShell 5.1, cmd.exe) read CRLF
+*.ps1   text=auto eol=crlf
+*.bat   text=auto eol=crlf
+*.cmd   text=auto eol=crlf
+
+# Images and archives are binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.zip   binary
+*.7z    binary
+*.gz    binary
+*.bz2   binary
+*.tar   binary

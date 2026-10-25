@@ -1,68 +1,109 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.pyc
-.venv/
-env/
-venv/
-ENV/
-
-# Distribution / Packaging
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+.venv/
+venv/
+env/
+.venv2/
+.pytest_cache/
 
-# Simulator Binaries & Large Tools
+# Build / artifacts
+build/
+dist/
+*.egg
+*.so
+*.pyd
+*.dll
+
+# ESP32 firmware binaries (pinned in docs/toolchain.md)
+firmware/esp32_buck_controller/.pio/build/
+firmware/esp32_buck_controller/*.bin
+firmware/esp32_buck_controller/*.elf
+
+# QEMU (patched)
+tools/build/
+
+# ngspice
+ngspice-44.tar.bz2
+ngspice-46b.tar.gz
+ngspice-47-gh.tar.gz
+tools/ngspice-47_dll_64.7z
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS / environment
+.DS_Store
+Thumbs.db
+
+# Secrets / credentials
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account.json
+.env
+.env.*
+!.env.example
+
+# Logs (keep the last few only via diagnostics; never commit logs)
+*.log
+logs/
+var/log/
+
+# Temporary / cache
+*.tmp
+*.bak
+tmp/
+.cache/
+
+# pytest
+.pytest_cache/
+
+# Editor
+.vim/
+```
+
+# ---------------------------------------------------------------------------
+# PROJECT_WOWKISPICE - specific notes
+# ---------------------------------------------------------------------------
+# The ngspice science proofs are distributed as source + a 7z that holds the
+# Windows DLLs. The 7z is committed because it is only 4.4 MB, but it is
+# encrypted; the real ngspice.dll must be decrypted by the owner and placed at
+# tools/ngspice_dll/Spice64_dll/dll-vs/ngspice.dll at build time. No key is
+# stored in the repo.
+# ---------------------------------------------------------------------------
+
+# Freebuff / CI internal
+.freebuff/
+
+# ---------------------------------------------------------------------------
+# Checkpoint 2026-10-25: never-commit coverage restored
+# ---------------------------------------------------------------------------
+# The worktree rewrite dropped patterns HEAD relied on; restored here, plus
+# local-only artifacts that must never enter history.
+data.dat
+config-temp/
+
+# Vendor trees and archives (57 MB + 21 MB + 106 MB locally)
 tools/ngspice/
 tools/ngspice_dll/
-tools/renode/
 tools/*.zip
-tools/*.7z
-tools/*.tar.gz
 
-# Temporary / IDE / PlatformIO
-.pio/
-.vscode/
-*.log
-*.tmp
-output/
-
-# PlatformIO's generated sdkconfig. It *overrides* sdkconfig.defaults, so
-# committing it silently defeats the checked-in defaults on a fresh clone.
+# PlatformIO-generated config (overrides sdkconfig.defaults on a fresh clone)
 firmware/*/sdkconfig.*
 !firmware/*/sdkconfig.defaults
 
-# Editor / agent workspace metadata (not project content)
-.freebuff/
-
 # Third-party reference material (NOT project content).
-# docs/ltspice-reference/ holds screenshots of another vendor's application, kept
-# locally as a private layout reference only. They are ADI/LTspice's copyrighted
-# images, so they must never be committed and redistributed in this repo. The UI
-# is built from interaction patterns (toolbar placement, hotkeys, pane layout),
-# which are not copyrightable expression; the original artwork is ours, drawn as
-# QPainterPath at runtime. See docs/systems-map.md "Third-party material".
+# docs/ltspice-reference/ holds screenshots of another vendor's application,
+# kept locally as a private layout reference only. They are ADI/LTspice's
+# copyrighted images and must never be committed or redistributed.
 docs/ltspice-reference/
 docs/qucs-reference/
-# Old icon-sheet / editor screenshot artifacts from earlier publication drafts.
-# The editor toolbar is now generated at runtime from tools/icon_sheet.py, so
-# these PNGs are not project content and should stay untracked.
-docs/editor-dark.png
-docs/editor-demo.png
-docs/editor-light.png
-docs/icon-sheet.png
-tests/buck_converter_response.png
-.worktrees/

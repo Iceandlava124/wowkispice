@@ -2,5 +2,8 @@ numpy>=1.26.0
 matplotlib>=3.8.0
 pypdf>=4.0.0
 pytest>=8.0.0
-PyQt5>=5.15.0
+# PyQt5 5.15.9 and older crash the interpreter (Windows access violation at
+# sip multiple-inheritance class creation, e.g. pyqtgraph GraphicsWidget) on
+# Python 3.12; 5.15.11 is the verified floor. See docs/KNOWN_ISSUES.md.
+PyQt5>=5.15.11
 pyqtgraph>=0.13.0
