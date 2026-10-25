@@ -47,11 +47,55 @@ if (-not $SkipPython) {
     }
     else {
         Write-Step "Creating virtualenv"
-        $python = (Get-Command python -ErrorAction SilentlyContinue)
-        if (-not $python) {
-            throw "python not found on PATH. Install Python 3.10+ from https://python.org and re-run."
+        # Pick a WINDOWS-native interpreter. The first `python` on PATH may be
+        # MSYS2/Cygwin (sys.platform 'msys'/'cygwin'), and `venv` from such an
+        # interpreter creates a POSIX-layout env (bin/ instead of Scripts/),
+        # which every Windows entry point then fails to find. Prefer the
+        # verified 3.12 via the py launcher, then any py-launcher Python,
+        # then a Windows-native `python`.
+        function Select-WindowsPython {
+            $candidates = @()
+            $launcher = Get-Command py -ErrorAction SilentlyContinue
+            if ($launcher) {
+                $candidates += @{ Exe = $launcher.Source; Args = @("-3.12") }
+                $candidates += @{ Exe = $launcher.Source; Args = @("-3") }
+            }
+            $python = Get-Command python -ErrorAction SilentlyContinue
+            if ($python) { $candidates += @{ Exe = $python.Source; Args = @() } }
+            foreach ($c in $candidates) {
+                # NOTE: native stdout arrives as an ARRAY of lines; stringifying
+                # it ("$out") joins with spaces and collapses the two lines into
+                # one, which silently rejected every candidate. Keep the array.
+                try {
+                    $out = @(& $c["Exe"] @($c["Args"]) -c "import sys, sysconfig; print(sys.platform); print('%d.%d.%d' % sys.version_info[:3]); print(sysconfig.get_platform())" 2>$null)
+                }
+                catch { continue }
+                $lines = @($out | ForEach-Object { "$_" } | Where-Object { $_.Trim() -ne "" })
+                if ($lines.Count -lt 3) { continue }
+                if ($lines[0].Trim() -ne "win32") { continue }  # rejects MSYS/Cygwin python
+                # MSYS2 ucrt64 python ALSO reports sys.platform 'win32' but
+                # builds a bin/-layout venv instead of Scripts\, which every
+                # Windows entry point then fails to find. Its distutils
+                # platform is 'mingw_*'; a real CPython says 'win-*'.
+                if ($lines[2].Trim() -notlike "win-*") { continue }
+                $verText = $lines[1].Trim()
+                $parts = $verText.Split(".")
+                if ([int]$parts[0] -lt 3 -or ([int]$parts[0] -eq 3 -and [int]$parts[1] -lt 10)) {
+                    continue  # selfcheck needs Python >= 3.10; verified target is 3.12
+                }
+                Write-Ok "interpreter: $verText at $($c['Exe']) $($c['Args'] -join ' ')"
+                return $c
+            }
+            return $null
         }
-        & $python.Source -m venv (Join-Path $Root ".venv")
+        $selected = Select-WindowsPython
+        if (-not $selected) {
+            throw "No Windows-native Python 3.10+ found (checked py launcher -3.12, -3, and python on PATH). An MSYS2/Cygwin python cannot create a Windows venv. Install Python 3.12 from https://python.org and re-run."
+        }
+        & $selected["Exe"] @($selected["Args"] + @("-m", "venv", (Join-Path $Root ".venv")))
+        if (-not (Test-Path $VenvPy)) {
+            throw "venv creation failed: $VenvPy was not produced. The interpreter ($($selected['Exe'])) may have failed; run it manually with '-m venv .venv' to see why."
+        }
         & $VenvPy -m pip install --upgrade pip
     }
     Write-Step "Installing Python dependencies"
@@ -70,6 +114,15 @@ $DllDir  = Join-Path $Root "tools\ngspice_dll\Spice64_dll\dll-vs"
 $DllPath = Join-Path $DllDir "ngspice.dll"
 
 Write-Step "Checking for libngspice"
+
+# A probe that never runs must never read as success: if the venv is absent
+# (or the interpreter crashed), $LASTEXITCODE is stale from whatever ran
+# before, and a stale 0 used to report "libngspice is already present" on a
+# machine that had just failed to create its venv. Fail loudly instead.
+if (-not (Test-Path $VenvPy)) {
+    throw "No venv interpreter at $VenvPy - the setup cannot probe libngspice. Re-run after fixing the Python step above."
+}
+$global:LASTEXITCODE = 1  # default to failure; the probe overwrites it
 
 $probe = @'
 import sys
@@ -221,6 +274,10 @@ if ($missing) {
 # 4. Verify the loader can actually bind it
 # ---------------------------------------------------------------------------
 Write-Step "Verifying the loader binds libngspice"
+if (-not (Test-Path $VenvPy)) {
+    throw "No venv interpreter at $VenvPy - cannot verify the libngspice bind."
+}
+$global:LASTEXITCODE = 1  # a verification that never runs must not read as success
 $probe2 = @'
 from bridge.ngspice_wrapper import resolve_ngspice_library, NgSpiceEngine
 path, tried = resolve_ngspice_library()
@@ -240,5 +297,5 @@ Write-Step "Setup complete."
 Write-Host ""
 Write-Host "Next:" -ForegroundColor Cyan
 Write-Host "  .\run_selfcheck.bat  # verify this machine end to end"
-Write-Host "  .\run_tests.bat      # run all 17 suites"
+Write-Host "  .\run_tests.bat      # run the full test suite"
 Write-Host "  .\run_editor.bat     # launch the PyQt5 schematic editor"

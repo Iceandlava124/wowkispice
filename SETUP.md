@@ -17,6 +17,13 @@ order. Every command here was run and verified on the pilot machine
 | Espressif QEMU + the WOSP patch | The emulator that runs the firmware | WSL (Ubuntu) |
 | Qucs-S *(optional)* | Schematic tool we studied for UI ideas — **not needed to run WOSP** | Windows |
 
+**Supported emulator: exactly one.** Anything that runs the firmware runs it
+inside Espressif's patched QEMU, built in WSL2 (Part E below) — no other
+emulator is supported. There is no native Windows emulator and no Rust
+emulator in this repo: `bridge/emulator_orchestrator.py` is an unused stub
+with no binary behind it (banner in its docstring, facts and the open owner
+decision in `docs/KNOWN_ISSUES.md`).
+
 **Prerequisites:** Windows 10 (21H2 or newer) or Windows 11, x64, admin
 rights for the WSL install, internet, ~20 GB free disk.
 
@@ -85,9 +92,27 @@ Python can bind it. It is idempotent — rerun it any time.
 python tools\run_tests.py            # suites only
 ```
 
-Expect `SELF-CHECK: PASS` and `309 tests passed, all suites green`, both with
+Expect `SELF-CHECK: PASS` and `363 tests passed, 2 skipped (the UNEXECUTED
+QEMU contract tests)`, both with
 exit code 0. If it is not green, stop and fix that before continuing —
 everything later assumes this line.
+
+### Two test tracks — which command covers what
+
+| Track | Command | Covers |
+|---|---|---|
+| **A — product suite, no WSL** | `python tools\run_tests.py` | everything native Windows; the 2 qemu-marker contract tests skip as UNEXECUTED, each reason naming the exact missing item (unset `WOSP_QEMU` / bad path / Linux ELF on Windows) |
+| **A — strict variant** | `python tools\run_tests.py --require-emulator` | same run, but a skipped or absent contract test fails the run (exit 3) |
+| **B — emulator contract** (needs the Part E build) | `powershell -ExecutionPolicy Bypass -File tools\run_emulator_tests.ps1` | runs `tests/test_qemu_monitor_qemu.py` inside WSL; non-zero if WSL is missing, the binary is missing, or **any test is skipped or fails** |
+
+Verified 2026-10-24 on this box: Track A default (363 passed, 2 UNEXECUTED
+skips with exact-item reasons), Track A `--require-emulator` with no binary
+configured (fails, as designed), Track B against the built
+`qemu-system-xtensa` (2 passed, 0 skips).
+
+UNVERIFIED steps: Track A via the `run_tests.bat` cmd wrapper (not re-run in
+this pass); Track B on a machine without the Part E build (expected: exit 2
+with the missing path printed — not executed here).
 
 ## Part D — Build the ESP32 firmware (Windows, first run ~15-30 min)
 
@@ -175,8 +200,8 @@ Keep the source in your WSL home (`~/qemu-esp`) — building on `/mnt/c`
 
 ```powershell
 cd $env:USERPROFILE\PROJECT_WOWKISPICE
-.\run_selfcheck.bat                  # -> SELF-CHECK: PASS, 309 tests green
-python tools\run_tests.py            # -> 309 tests passed, all suites green
+.\run_selfcheck.bat                  # -> SELF-CHECK: PASS
+python tools\run_tests.py            # -> 363 tests passed, 2 skipped (UNEXECUTED QEMU contract tests)
 python tools\demo_closed_loop.py     # -> PASS in ~40 seconds
 ```
 
