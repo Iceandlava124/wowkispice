@@ -101,6 +101,45 @@ Current verified state on the dev box (Windows + WSL Ubuntu, Python 3.12.10):
    (c) **supply the binary** together with its source and licence, add a
    working test, and only then remove the banner.
 
+## 2026-10-25 — patched-QEMU provenance (reproducibility pass)
+
+1. **Provenance of the running binary: a local source tree, not this
+   repo.** The `qemu-system-xtensa` used by Track B was built from
+   `C:\Users\gudae\Music\qemu-build\qemu-esp_develop_9.2.2_20260417`
+   (WSL `/mnt/c/...`): pinned tag `esp-develop-9.2.2-20260417` (commit
+   `40edcca`) + commit `478892a` (the 0001 model content as a commit) + one
+   working-tree edit (the immediate-conversion fix, now exported as 0002)
+   + an unrelated `scripts/symlink-install-tree.py` local hack that is
+   excluded from both patches.
+2. **Both patches now exist in the repo worktree (pending commit).**
+   `tools/qemu-patch/0001-...` recovered byte-exactly from `60522dc^`
+   (sha256 `1b67e3ae...`, matches `Get-FileHash` to the git blob);
+   `0002-...` exported from the build tree's working diff of
+   `hw/misc/esp32_sens.c` (sha256 `d26ad451...`, pure LF).
+3. **Does the on-disk 0001 match what was actually built? — step 3 showed
+   YES for the source.** Two pieces of evidence: (a) `git show --format=
+   478892a` in the build tree is byte-identical to the recovered 0001;
+   (b) in a fresh scratch clone at the pinned tag, `git apply --check` +
+   `git apply` of 0001 then 0002 both exited 0, and the resulting six
+   patched files are byte-identical to the build tree (`diff` of
+   `hw/misc/esp32_sens.c` empty; the other five clean under `diff -q`).
+   **Still unresolved:** whether the binary in `qemu-build/.../build/` was
+   actually compiled from exactly that source state — no build log in this
+   repo links binary → source.
+4. **UNVERIFIED: "binary rebuilt from patches 0001+0002 from scratch."**
+   No from-scratch rebuild was run (not part of this pass). Proposed but
+   not executed: on the pinned tag with 0001 then 0002 applied, run
+   SETUP.md Part E's line — `./configure --target-list=xtensa-softmmu
+   --disable-docs --disable-gtk --disable-sdl --disable-vnc --disable-spice
+   --enable-slirp && ninja -C build` — then record
+   `./build/qemu-system-xtensa --version` and the binary's sha256 here.
+   **Owner decision:** run it once and close this item.
+5. **Leftover:** the untracked helper `tools/build_qemu.sh` still applies
+   only 0001; it needs the 0002 step (file was outside this pass's
+   allowlist). Likewise SETUP.md Part E's apply block still shows only
+   0001 — the exact two-patch command is documented in
+   `tools/qemu-patch/README.md`.
+
 ## End of Task 7 items
 
 1. **Firmware build is CPU-bound and hits the 2-minute timeout on this box.**
@@ -202,6 +241,78 @@ Current verified state on the dev box (Windows + WSL Ubuntu, Python 3.12.10):
    longer only the Task 7 set: `test_ngspice_dll_proof.py` and
    `test_ngspice_bridge.py` are now failing on this machine because the
    sanitiser in `3ed68a6` rejects the `.tran` card the tests require.
-   Task 8's value-add (docs, naming, formatting, messages, structure) must
-   not regress those tests; the sanitiser bug (issue 8) is a blocker for
+   Task 8's value-add (docs, naming, formatting, messages, structure)   must not regress those tests; the sanitiser bug (issue 8) is a blocker for
    that list, not part of it.
+
+## JOB 3 findings — QEMU monitor coupling (2026-10-25)
+
+Found while auditing and repairing `tests/test_qemu_monitor_unit.py` and
+`tests/test_firmware_gpio.py`. None of these are fixed here: `bridge/` was
+outside this job's allowlist. Each is a real defect a reviewer can check
+against the named lines.
+
+1. **Two classes are named `QemuMonitor`, and one of them is dead code.**
+   - `bridge/qemu_monitor.py:36` — stdio/HMP implementation: `start()` Popen's
+     `[qemu, -display none, -machine esp32, -monitor stdio, -serial none]`
+     (line 86), a reader thread fills a buffer, `_hmp()` (line 216) waits for
+     the `(qemu) ` prompt (line 128), strips ANSI (line 214) and the echo line
+     (line 239), and `read_gate()` parses `xp` as `addr: value` (lines
+     201-204). `cycle_adc_and_gate` is at line 245, `sweep_report` at 293.
+   - `bridge/qemu_orchestrator.py:49` — a session-based implementation with
+     its own `cycle_adc_and_gate` (line 90) and `sweep_report` (line 103),
+     written for the older TCP/`-monitor tcp:` launch style.
+   - **The orchestrator versions are unreachable:** line 116 of that same file
+     does `from bridge.qemu_monitor import QemuMonitor, cycle_adc_and_gate,
+     sweep_report`, which overwrites the module attributes defined at lines
+     49/90/103. Nothing outside the file references them.
+   - The dead variant is also wrong if ever revived: its `_hmp` uses
+     `stdout.readline()`, which cannot see a prompt that has no trailing
+     newline; `read_gate()` does `int(raw, 16)` on the whole reply, which
+     raises on real HMP output shaped `000000003ff44004: 0x00040000`; and its
+     success message calls `mon.read_gate()` a SECOND time (so `gate_high` and
+     the message can disagree, and each cycle costs two HMP round trips).
+   **OWNER DECISION — pick one:** (a) delete the shadowed local
+   `QemuMonitor`/`cycle_adc_and_gate`/`sweep_report` from
+   `bridge/qemu_orchestrator.py` and import from `bridge.qemu_monitor`
+   explicitly; (b) rename the session-based variant and keep both with a
+   documented split of responsibility; (c) declare `bridge/qemu_monitor.py`
+   the single canonical module and make everything else a re-export shim
+   (the pattern `bridge/firmware_runner.py` already follows).
+
+2. **Neither `QemuMonitor` is used by the live demo or the co-simulation
+   path.** `tools/demo_closed_loop.py` boots QEMU itself with
+   `-monitor tcp:127.0.0.1:<port>` (line 192) and speaks HMP inline through its
+   own `hmp_cmd()` (qom-set at line 233); it imports no `bridge` module at all.
+   `bridge/cosim_runner.py` imports only `control_law` and `ngspice_wrapper`.
+   The only production import surface for `bridge/qemu_monitor.py` is the
+   re-export shim `bridge/firmware_runner.py`, whose sole caller is
+   `tests/test_fault_injection.py`. So today the monitor client is exercised
+   by tests only, and the demo carries a second, independent copy of the HMP
+   protocol logic (different transport: TCP vs stdio) that can drift from it.
+   **OWNER DECISION:** wire the demo and/or co-sim loop through
+   `QemuMonitor`, or accept `qemu_monitor.py` as a test-supported library and
+   document that the demo is the only production user of HMP.
+
+3. **`sweep_report()` cannot complete a sweep on a real monitor.**
+   `cycle_adc_and_gate()` calls `qmp.stop()` in its `finally` block
+   (`bridge/qemu_monitor.py:282-283`), so after the first value the handle is
+   dead: with a real monitor, rows 2..n come back `ok=False, "QEMU process is
+   not running"`. The double in `tests/test_firmware_gpio.py` masks this
+   because its `stop()` only records a flag. Pinned but NOT hard-coded as a
+   contract by `test_sweep_report_one_row_per_value_over_a_single_monitor`,
+   which asserts one row per value, no exception, and exactly ONE `Popen` for
+   the whole sweep. **OWNER DECISION:** move the stop out of the per-cycle
+   `finally` into `sweep_report()`/the caller, or make `stop()` conditional on
+   who started the monitor.
+
+4. **Coverage split (stated so nobody over-reads the green run).** Protocol
+   behaviour — command bytes, `(qemu) ` prompt handling, echo stripping,
+   `Error:` raising, `xp` parsing, dropped pipe, silent-timeout, garbage
+   output, sweep launch count — is covered ONLY by the test double
+   `tests/fakes/fake_hmp_qemu.py`; it proves protocol handling and nothing
+   about firmware, ADC physics or the real emulator. Boot, the patched SENS
+   device, real `qom-set`/`xp` against the guest, and the error path on the
+   real binary are covered ONLY by `tests/test_qemu_monitor_qemu.py` under
+   the `qemu` marker (Track B, `tools/run_emulator_tests.ps1`, 2 passed under
+   WSL). The GPIO tests are wiring tests against a double and count as
+   neither.

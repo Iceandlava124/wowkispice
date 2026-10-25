@@ -1,0 +1,33 @@
+# EditorConfig
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 100
+
+[*.py]
+indent_size = 4
+# Black/ruff keep the same line length as the rest of the repo.
+# Type stubs are not treated as a separate style.
+
+[*.md]
+max_line_length = 80
+
+[*.yml]
+insert_final_newline = true
+
+[*.sh]
+end_of_line = lf
+charset = native
+insert_final_newline = true
+
+[*.toml]
+insert_final_newline = true
+
+[Makefile]
+indent_style = tab

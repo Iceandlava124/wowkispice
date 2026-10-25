@@ -377,15 +377,24 @@ class TestRealEsp32Firmware(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
+
 class QemuMonitorDouble:
     """Test double for QemuMonitor (tests/doubles-style).
 
-    cycle_adc_and_gate() drives the monitor through a three-method interface:
-    set_adc1_value(value), read_gate() -> bool, and stop(). This double
-    implements exactly that surface -- no process, no socket, no real QEMU --
-    so the coupling logic can be exercised without the binary. It is a DOUBLE,
-    not the real monitor; the real-QEMU path lives in
-    tests/test_qemu_monitor_qemu.py under the @qemu marker.
+cycle_adc_and_gate() drives the monitor through a three-method interface:
+set_adc1_value(value), read_gate() -> bool, and stop(). This double
+implements exactly that surface -- no process, no socket, no real QEMU --
+so the coupling logic can be exercised without the binary. It is a DOUBLE,
+not the real monitor; the real-QEMU path lives in
+tests/test_qemu_monitor_qemu.py under the @qemu marker.
+
+SCOPE: this double exists ONLY to check the wiring of cycle_adc_and_gate()
+and sweep_report() -- that they call set_adc1_value() then read_gate() then
+stop(), in that order, with the requested value. It deliberately verifies
+no protocol, no QOM path, no xp parsing and no timing, so a green run here
+is NOT emulator coverage and must not be counted as such. Protocol coverage
+lives in tests/test_qemu_monitor_unit.py (fake HMP emulator) and in
+tests/test_qemu_monitor_qemu.py (real QEMU, @qemu marker).
     """
 
     def __init__(self, gate_high=True, fail_on=None):
@@ -393,58 +402,87 @@ class QemuMonitorDouble:
         self.fail_on = fail_on          # method name that should raise
         self.injected = []              # every adc1-value written
         self.stopped = False            # stop() must be called exactly once
+        self.calls = []                 # call ORDER: the wiring under test
 
     def set_adc1_value(self, value):
+        self.calls.append("set_adc1_value")
         if self.fail_on == "set_adc1_value":
             raise QemuMonitorError("injected failure on set_adc1_value")
         self.injected.append(int(value))
 
     def read_gate(self):
+        self.calls.append("read_gate")
         if self.fail_on == "read_gate":
             raise QemuMonitorError("injected failure on read_gate")
         return self.gate_high
 
     def stop(self):
+        self.calls.append("stop")
         self.stopped = True
+
 
 
 class TestQemuGateBridge(unittest.TestCase):
     """The automatic ngspice <-> QEMU bridge: adc1-value injection and gate
-    readback through cycle_adc_and_gate() and sweep_report()."""
+    readback through cycle_adc_and_gate() and sweep_report().
+
+    ALL FOUR TESTS HERE USE QemuMonitorDouble AND ARE WIRING TESTS ONLY:
+    they prove the coupling functions call set_adc1_value -> read_gate ->
+    stop, in order, and never raise. They exercise no emulator, no HMP
+    protocol and no firmware, and must not be counted as emulator coverage.
+    Protocol behaviour is tested against the fake HMP emulator in
+tests/test_qemu_monitor_unit.py; the real-emulator contract is in
+tests/test_qemu_monitor_qemu.py under the @qemu marker.
+    """
 
     def test_cycle_adc_and_gate_returns_a_clean_cycle(self):
         # A monitor that fails mid-cycle must still yield a clean, non-raising
         # cycle: ok=False, gate_high=None, and a readable message. The docstring
         # on cycle_adc_and_gate() promises "every failure shape is returned as a
         # clean, non-raising FirmwareCouplingCycle", so this asserts that.
-        cycle = cycle_adc_and_gate(QemuMonitorDouble(fail_on="set_adc1_value"))
+        mon = QemuMonitorDouble(fail_on="set_adc1_value")
+        cycle = cycle_adc_and_gate(mon, stop=True)
         self.assertFalse(cycle.ok)
         self.assertIsNone(cycle.gate_high)
         self.assertTrue(cycle.message)
+        # A failed injection must not read the gate, but must still stop.
+        self.assertEqual(mon.calls, ["set_adc1_value", "stop"])
 
     def test_cycle_adc_and_gate_flow(self):
         # A healthy double: one cycle injects the ADC value, reads the gate back,
         # and returns ok=True with the gate decision and the value in the message.
         mon = QemuMonitorDouble(gate_high=True)
-        cycle = cycle_adc_and_gate(mon, adc_value=2012)
+        cycle = cycle_adc_and_gate(mon, adc_value=2012, stop=True)
         self.assertTrue(cycle.ok)
         self.assertTrue(cycle.gate_high)
         self.assertIn("2012", cycle.message)
-        # The value really reached the monitor, and the cycle stopped it.
+        # The value really reached the monitor, and this cycle stopped it.
         self.assertEqual(mon.injected, [2012])
         self.assertTrue(mon.stopped)
+        # WIRING, in order: inject first, read the gate back second, stop last.
+        self.assertEqual(mon.calls,
+                         ["set_adc1_value", "read_gate", "stop"])
 
     def test_sweep_report_returns_a_row_per_value(self):
         # sweep_report() must produce one row per requested ADC value, never
         # raising even when the monitor misbehaves on one of them.
-        rows = sweep_report(QemuMonitorDouble(gate_high=True), [1900, 2012, 3456])
+        # The caller owns the monitor lifecycle (stop=False default); cycle
+        # AdcAndGate does not stop the monitor.
+        mon = QemuMonitorDouble(gate_high=True)
+        rows = sweep_report(mon, [1900, 2012, 3456])
         self.assertEqual(len(rows), 3)
         for row in rows:
             self.assertTrue(row.ok)
+        # Each value goes through set -> read only (no stop called by cycle)
+        self.assertEqual(mon.calls,
+                         ["set_adc1_value", "read_gate"] * 3)
+        self.assertEqual(mon.injected, [1900, 2012, 3456])
 
     def test_sweep_report_never_raises_even_when_monitor_fails(self):
         # A monitor that throws on every cycle still yields three clean failure
         # rows rather than an exception escaping sweep_report().
+        # With the new contract, cycle_adc_and_gate does not stop the monitor
+        # (stop=False is default); the monitor lifecycle is the caller's responsibility.
         rows = sweep_report(QemuMonitorDouble(fail_on="set_adc1_value"),
                             [1900, 2012, 3456])
         self.assertEqual(len(rows), 3)

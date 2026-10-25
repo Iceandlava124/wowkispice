@@ -16,12 +16,25 @@ produced the value so the record is auditable rather than asserted.
 
 ## 1. QEMU: exact commit/tag the patch applies to
 
-The `tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch` and
-`tools/qemu-patch/README.md` were **not committed** to this repository
-(`git ls-files tools/qemu-patch` → empty). The pin therefore comes from the
-build handoff that shipped with the patch, not from a git object in this tree.
+The `tools/qemu-patch/` files were **not committed** for most of this
+repo's history (deleted by `60522dc`). On 2026-10-25 they were recovered
+into the worktree — `0001` byte-exactly from `60522dc^`, `0002` exported
+from the local build tree — and proven to reproduce that tree at the pin
+(see `tools/qemu-patch/README.md`). They are pending commit; until then
+`git ls-files tools/qemu-patch` still returns empty.
 
-**Pinned commit/tag: `esp-develop-9.2.2-20260417`**
+**Pinned commit/tag: `esp-develop-9.2.2-20260417`** (annotated tag object
+`6cdce334…` → commit `40edccac415693c5130f91c01d84176ae6008566`)
+
+**Apply order — 0001 first, then 0002** (both required; sha256 of each in
+`tools/qemu-patch/README.md`):
+
+```bash
+git apply --check tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch && \
+git apply      tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
+git apply --check tools/qemu-patch/0002-esp32-sens-immediate-conversion.patch && \
+git apply      tools/qemu-patch/0002-esp32-sens-immediate-conversion.patch
+```
 
 Evidence, in order of precedence:
 
@@ -54,7 +67,7 @@ tree before rebuilding.
 
 | Component | Version observed | Source |
 |---|---|---|
-| Espressif QEMU (to be built) | pinned `esp-develop-9.2.2-20260417` | `tools/qemu-patch/README.md` (not in git) |
+| Espressif QEMU (to be built) | pinned `esp-develop-9.2.2-20260417` | `tools/qemu-patch/README.md` (recovered 2026-10-25, pending commit) |
 | xtensa-esp32-elf toolchain | 15.2.0+20251204 | `pio run --verbose` compile line |
 | ESP-IDF | 6.1.0 (`IDF_VER=\\\"6.1.0\\\"`) | `pio run --verbose` CFLAGS |
 | PlatformIO | 6.2.0 | `pio --version` |
@@ -94,7 +107,9 @@ tree before rebuilding.
 `tools/build_qemu.sh` (Linux/macOS) and `tools/Dockerfile` (container). They:
 
 1. clone the pinned Espressif `esp-develop` commit `esp-develop-9.2.2-20260417`
-2. apply `tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch`
+2. apply `tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch`,
+   then `tools/qemu-patch/0002-esp32-sens-immediate-conversion.patch`
+   (order matters — 0002 depends on 0001's `esp32_sens_start()`)
 3. build `qemu-system-xtensa` (no system libao/sdl needed for the headless
    boot check; output goes to `./build/qemu-system-xtensa`)
 4. **verify** — the binary runs, `--version` prints a version that mentions
@@ -248,9 +263,12 @@ filled with the real SHA-256 of the freshly built flash image.
 
 ## 8. Notes and known limitations
 
-* `tools/qemu-patch/` is not in git. The pin is documented in §1 so a fresh
-  clone can still reproduce the build; the patch itself must be re-supplied
-  by the owner when they want a byte-exact rebuild.
+* `tools/qemu-patch/` (0001 + 0002 + README, recovered 2026-10-25, pending
+  commit) is proven to reproduce the local build tree's 6 patched files
+  byte-identically at the pinned tag. **UNVERIFIED: "binary rebuilt from
+  patches 0001+0002 from scratch"** — no from-scratch rebuild has been run;
+  proposed command in `tools/qemu-patch/README.md`. The untracked helper
+  `tools/build_qemu.sh` still applies only 0001 (needs the 0002 step).
 * `.gitignore` already excludes `.venv`, `build/`, `.pio/build/`, `*.bin`,
   `*.elf` and the *.pytest_cache*, so the firmware build artifacts and the
   QEMU build tree are never committed.

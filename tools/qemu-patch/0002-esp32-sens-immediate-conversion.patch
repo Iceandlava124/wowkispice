@@ -1,0 +1,18 @@
+diff --git a/hw/misc/esp32_sens.c b/hw/misc/esp32_sens.c
+index 179ec91..c4f5cdf 100644
+--- a/hw/misc/esp32_sens.c
++++ b/hw/misc/esp32_sens.c
+@@ -63,8 +63,11 @@ static void esp32_sens_start(Esp32SensState *s, bool unit2)
+         s->done1 = false;
+         s->conv1_pending = true;
+     }
+-    timer_mod(&s->conv_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+-                                s->conversion_ns);
++    /* Fire immediately: the firmware polls this in a tight while(1) with no
++     * blocking MMIO, which starves a QEMU_CLOCK_VIRTUAL timer (virtual time
++     * only advances when a vCPU blocks or under icount). Immediate completion
++     * always beats the 300 ms interrupt watchdog. */
++    esp32_sens_convert(s);
+ }
+ 
+ static uint64_t esp32_sens_read(void *opaque, hwaddr addr, unsigned int size)

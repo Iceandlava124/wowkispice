@@ -1,30 +1,39 @@
-"""bridge - WOSP core runtime: simulator wiring, firmware-in-the-loop path.
+"""PROJECT_WOWKISPICE - mixed-signal co-simulator (ngspice + ESP32 firmware/QEMU)."""
 
-The public surface of the package, so ``import bridge`` gets the pieces app and
-test layers actually use:
+__all__ = []
 
-- ``qemu_orchestrator`` - boot the real ESP32 firmware under patched Espressif QEMU
-  (TCG boot watch, qtest memory probe, console log). Execution layer.
-- ``qemu_monitor`` - M0 automation: QMP connect, programmatic ``qom-set`` ADC
-  injection, HMP ``xp`` gate readback, one-cycle coupling, sweep.
-- ``firmware_runner`` - thin, deliberate re-export shim so the long-settled
-  ``bridge.firmware_runner`` name keeps resolving for the test suite and any
-  legacy callers. The real driver is ``qemu_monitor``.
-- ``binary_runner`` - M1 wall-clock sampled-data hardware-in-the-loop runner.
-"""
 
-from __future__ import annotations
+def _discover_diagnostics():
+    from pathlib import Path
 
-from . import binary_runner as binary_runner
-from . import firmware_runner as firmware_runner
-from . import qemu_monitor as qemu_monitor
-from . import qemu_orchestrator as qemu_orchestrator
+    root = Path(__file__).resolve().parent.parent
+    return root / "tools" / "diagnostics.py"
 
-# The executor module comes first in __all__: it owns QEMU boot/watch and the
-# qtest memory probe, and tests import it directly.
-__all__ = [
-    "binary_runner",
-    "firmware_runner",
-    "qemu_monitor",
-    "qemu_orchestrator",
-]
+
+_diagnostics = _discover_diagnostics()
+
+
+def diagnostics():
+    """Run the diagnostics command and return its text (decorated for the log).
+
+    Prints OS, Python, ngspice and QEMU versions, binary checksums, and the
+    last log path, redacting home directories and usernames.
+    """
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, str(_diagnostics)],
+        cwd=str(_diagnostics.parent),
+        capture_output=True,
+        text=True,
+    )
+    out = proc.stdout or ""
+    err = proc.stderr or ""
+    if proc.returncode != 0:
+        return f"[diagnostics exited {proc.returncode}]\n{err}\n{out}"
+    return out
+
+
+if __name__ == "__main__":
+    raise SystemExit(diagnostics())

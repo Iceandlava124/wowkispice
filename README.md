@@ -111,9 +111,14 @@ Tracked in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md). The two that matter:
 
 1. **PyQt5 must be ≥ 5.15.11** — 5.15.9 segfaults at import on Windows/Python
    3.12 (pinned in `requirements.txt` / `requirements.lock`).
-2. **QEMU rebuild is unverified on this machine** — the patched source builds
-   in WSL (SETUP.md Part E) but has not been rebuilt here, so the 2 contract
-   tests remain UNEXECUTED.
+2. **Emulator contract green under WSL, but the binary is not yet reproducible
+   from tracked patches** — the contract tests pass under WSL via
+   `tools\run_emulator_tests.ps1` (2 passed, 0 skips: one exercises the real
+   emulator, one the missing-binary error path). The patched binary was built
+   from a local source tree and is NOT yet reproducible from tracked patches
+   (see [tools/qemu-patch/](tools/qemu-patch/) and
+   [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)); no from-scratch rebuild has
+   been verified.
 
 ## Docs
 

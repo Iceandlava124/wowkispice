@@ -1,0 +1,97 @@
+"""fake_hmp_qemu.py - TEST DOUBLE for `qemu-system-xtensa -monitor stdio`.
+
+THIS IS A TEST DOUBLE, NOT AN EMULATOR. It implements just enough of QEMU's
+human-monitor (HMP) stdio protocol to verify that bridge/qemu_monitor.py
+speaks that protocol correctly: banner, "(qemu) " prompt, command echo,
+reply lines, and the failure modes a real QEMU can exhibit (Error: replies,
+dropped pipes, silence, garbage). It executes no firmware, models no ESP32,
+knows nothing about ADC physics or GPIO hardware -- a green test here says
+NOTHING about real firmware or the real emulator. The real-emulator
+contract lives in tests/test_qemu_monitor_qemu.py under the `qemu` marker.
+
+Configuration (environment variables; the argv that QemuMonitor.start()
+builds -- `-display none -machine ... -monitor stdio -serial none` --
+is accepted and ignored):
+
+  FAKE_HMP_MODE          normal | error | drop | silent | garbage
+                         (default: normal)
+                           normal  - qom-set replies with silence (QEMU's
+                                     success behaviour), xp replies with a
+                                     realistic "000000003ff44004: 0xVALUE" line
+                           error   - qom-set replies with an HMP Error: line
+                           drop    - answers the first N commands, then
+                                     closes both pipes and exits (a crashed
+                                     QEMU); N = FAKE_HMP_DROP_AFTER
+                           silent  - prints not even the banner (a wedged QEMU)
+                           garbage - xp replies with text no parser can use
+  FAKE_HMP_RECORD        if set, every command received is appended to this
+                         file, one per line (tests assert on what arrived)
+  FAKE_HMP_XP_VALUE      0x-value in the xp reply; default 0x00040000
+                         (bit 18 set -> gate True), use 0x00000000 for False
+  FAKE_HMP_DROP_AFTER    commands answered before dropping in `drop` mode
+                         (default 1; 0 drops immediately after the banner)
+"""
+
+import os
+import sys
+import time
+
+PROMPT = "(qemu) "
+
+
+def _write(text):
+    """Write to stdout and flush: the client reads a pipe, not a terminal."""
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def main():
+    mode = os.environ.get("FAKE_HMP_MODE", "normal")
+    record = os.environ.get("FAKE_HMP_RECORD")
+    xp_value = os.environ.get("FAKE_HMP_XP_VALUE", "0x00040000")
+    drop_after = int(os.environ.get("FAKE_HMP_DROP_AFTER", "1"))
+
+    if mode == "silent":
+        # A wedged QEMU: no banner, no prompt, no replies, ever. The client's
+        # documented 10 s prompt timeout is what must fire here.
+        while True:
+            time.sleep(1)
+
+    # QEMU-style banner, then the first prompt (no trailing newline, like
+    # QEMU: the prompt is not a line, it is a marker).
+    _write("QEMU emulator version 9.2.2 (fake_hmp_qemu TEST DOUBLE - protocol only)\n")
+    _write("Copyright (c) 2003-2008 Fabrice Bellard (fake)\n")
+    _write(PROMPT)
+
+    commands = 0
+    while True:
+        if mode == "drop" and commands >= drop_after:
+            # Crash after N commands: both pipes close, process exits.
+            os._exit(0)
+        line = sys.stdin.readline()
+        if not line:
+            return 0                      # the client closed its end
+        cmd = line.strip()
+        if record:
+            with open(record, "a") as fh:  # exactly what the client sent
+                fh.write(cmd + "\n")
+        commands += 1
+
+        # QEMU's readline echoes the typed command back before replying;
+        # the client skips lines that contain the command text.
+        _write(cmd + "\n")
+
+        if mode == "error" and cmd.startswith("qom-set"):
+            _write("Error: property 'adc1-value' not found in instruction 'qom-set'\n")
+        elif mode == "garbage" and cmd.startswith("xp"):
+            _write("garbage that is neither address nor value: no hex token here\n")
+        elif cmd.startswith("xp"):
+            # Real HMP xp formatting: "<addr>: <value>".
+            _write("000000003ff44004: %s\n" % xp_value)
+        # qom-set's success reply is silence: only the echo precede the prompt.
+
+        _write(PROMPT)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

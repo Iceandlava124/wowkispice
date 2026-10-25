@@ -1,0 +1,88 @@
+name: Bug report
+description: File a reproducible bug against the co-sim / firmware bridge.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please report the defect with the evidence needed to reproduce it. Do not
+        file a bug against firmware behaviour unless the QEMU patch in
+        `tools/qemu-patch/` is applied and `WOSP_QEMU` points at the built
+        binary; otherwise you are reporting a missing-toolchain problem, which
+        belongs in the bug tracker the same way, but the "what is not
+        verified" column in `docs/platform-support.md` must be filled first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Steps to reproduce, exact error text, what you expected instead.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: os
+    attributes:
+      label: Operating system
+      description: Linux / macOS / Windows native / WSL2 + distro version.
+      placeholder: Ubuntu 24.04 (WSL2), Windows 11 native, macOS 14
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Python, numpy/pytest, ngspice, PlatformIO, ESP-IDF, QEMU commit or path.
+      placeholder: |
+        python --version
+        .venv/bin/pip freeze | grep -iE 'numpy|pytest|matplotlib|PyQt5|pyqtgraph|pypdf|ngspice'
+        pio --version
+        qemu-system-xtensa --version
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: Full output of `python -m bridge.diagnostics` (redacts home paths).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log files
+      description: Last log path printed by the diagnostics command, or `var/log/wosp-*.log`.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - bridge / ngspice wrapper
+        - QEMU patched build / monitor
+        - firmware (PlatformIO) build
+        - docs / toolchain
+        - CI / platform matrix
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmations
+      options:
+        - label: I have run `python tools/selfcheck.py` and it printed SELF-CHECK: PASS.
+          required: true
+        - label: I have attached the output of the diagnostics command.
+        - label: I have verified the command is not a duplicate of an open issue.
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "0 - blocks Phase 0/1 gate"
+        - "1 - reproducible build"
+        - "2 - cosmetic / process"

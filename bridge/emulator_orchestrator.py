@@ -1,4 +1,21 @@
-"""emulator_orchestrator.py - native Windows firmware-in-the-loop driver.
+"""UNVERIFIED / NOT IN USE: no esp-emu binary exists; see KNOWN_ISSUES.
+
+============================================================================
+BANNER - UNVERIFIED / NOT IN USE
+  No esp-emu binary exists on this machine or anywhere in this repo:
+  no Rust source (no Cargo.toml, no *.rs), no toolchain (cargo/rustc
+  not installed), no download link. This module is imported by nothing,
+  it targets a path that does not exist (`WOSP_EMU` / DEFAULT_EMU =
+  ~\\.local\\bin\\esp-emu.exe under the user profile), and
+  it references tests/test_wsl_qmp_cycle.py, which commit 60522dc
+  deleted. The only verified emulator is the patched Espressif QEMU
+  built in WSL2 (bridge/qemu_orchestrator.py).
+  Facts and the open owner decision: docs/KNOWN_ISSUES.md.
+  Code below is a stub kept for a possible future switch; it has never
+  run. Do not present it as working.
+============================================================================
+
+emulator_orchestrator.py - native Windows firmware-in-the-loop driver.
 
 Status: implementation for the emulator switch. Unverified until the
 RUST-based emulator binary can be produced locally for this repo, and the

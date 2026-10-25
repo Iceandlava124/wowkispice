@@ -242,13 +242,23 @@ class QemuMonitor:
         return ""
 
 
-def cycle_adc_and_gate(qmp=None, adc_value=2012, qemu=None):
+def cycle_adc_and_gate(qmp=None, adc_value=2012, qemu=None, stop=False):
     """One read-modify-write cycle: inject an ADC sample, read the gate back.
 
     ``qmp`` is the ``QemuMonitor`` handle. When it is None, the environment
     gate decides what the result says instead of raising, and no QEMU is
     started. Every failure shape is returned as a clean, non-raising
     ``FirmwareCouplingCycle`` so callers and tests can enumerate them.
+
+    ``stop`` selects who owns the QEMU life-cycle:
+      * False (default) - the caller owns it. A failed second cycle must not
+        kill the monitor, and sweep_report() over one running handle is the
+        supported shape. Only ``QemuMonitorError`` (the protocol surface a
+        handle exposes) is caught and reported as ok=False; other bugs
+        escape so they cannot be hidden.
+      * True          - the cycle itself owns the process (tests, one-shot
+        helpers). The handle is stopped in a finally block, so a failure just
+        below never leaves the monitor dead or running away.
     """
     if qmp is None:
         if qemu is None:
@@ -273,14 +283,14 @@ def cycle_adc_and_gate(qmp=None, adc_value=2012, qemu=None):
             ok=True, gate_high=gate,
             message="set adc1-value=%d, gate=%s" % (adc_value, gate),
         )
-    except Exception as exc:  # noqa: BLE001
-        # The docstring contract is "every failure shape is returned as a
-        # clean, non-raising FirmwareCouplingCycle", so a monitor that dies
-        # mid-cycle (process gone, pipe closed, unparsable readback) must come
-        # back as ok=False with the reason, never as an escaping exception.
+    except QemuMonitorError as exc:
+        # The protocol surface a handle exposes failed (process gone, pipe
+        # closed, unparsable readback). Return the clean, non-raising row so
+        # callers can enumerate the failure instead of watching the run die.
         return FirmwareCouplingCycle(ok=False, gate_high=None, message=str(exc))
     finally:
-        qmp.stop()
+        if stop:
+            qmp.stop()
 
 
 @dataclass
