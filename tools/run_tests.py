@@ -1,100 +1,167 @@
 """
-run_tests.py - Run every test suite and print one summary.
+run_tests.py - Honest test runner: runs pytest, exits non-zero on any failure.
 
-Each suite is a standalone unittest file, run in its own process so one suite's
-global ngspice state cannot leak into the next (sharedspice is a process-wide
-singleton, so that matters).
+Old behavior ran each test_*.py file in its own subprocess and interpreted
+`Ran N tests` from unittest output. Several test files in this repo are
+pytest-style and do not print that line, so the old runner reported them as
+`ok 0 tests` even when they collected real tests under `python -m pytest`.
+
+This version runs `python -m pytest tests -q` once (pytest also collects and
+runs unittest.TestCase classes), prints a summary with per-skip reasons via
+`-rs`, and exits non-zero if any test fails or if any test file collects zero
+tests. The old per-suite printout is not retained because it was misleading
+for pytest-style files.
+
+Opt-in second gate: `--require-emulator` additionally runs only the
+qemu-marker contract tests (`tests/test_qemu_monitor_qemu.py`) and exits
+non-zero when they are skipped or absent, so a run that demands the emulator
+contract can never report success while it was UNEXECUTED. Default behavior
+is unchanged (skips stay visible-but-allowed).
 """
 
+import argparse
 import os
-import re
-import subprocess
 import sys
-import tempfile
+import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PYTHON = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
-# The repo's primary .venv (Py 3.14) cannot install PyQt5/matplotlib from PyPI
-# on this machine, so the Qt/PDF editor suites are run through .venv2, which
-# already has the full stack (matplotlib 3.11.2, PyQt5, pyqtgraph, pytest).
-_ALTERNATE_VENV = os.path.join(ROOT, ".venv2", "Scripts", "python.exe")
-if os.path.exists(_ALTERNATE_VENV):
-    PYTHON = _ALTERNATE_VENV
-elif not os.path.exists(PYTHON):
-    PYTHON = sys.executable
-
-COUNT_RE = re.compile(r"Ran (\d+) test")
-PER_SUITE_TIMEOUT = 300
 
 
-def suite_env(name):
-    """A private settings profile per suite.
-
-    The editor remembers window state, simulation mode and the rest in
-    QSettings. A suite that closes a window therefore writes settings that the
-    next suite reads back - which is how a co-simulation test ended up running
-    with a saved 'Transient only' mode and reporting a pin that never switched.
-    Each suite gets its own throwaway directory instead.
-    """
+def pytest(cmd_extra=None):
     env = dict(os.environ)
-    env["WOSP_SETTINGS_DIR"] = os.path.join(tempfile.gettempdir(),
-                                            "wosp-test-settings",
-                                            re.sub(r"[^A-Za-z0-9_.-]", "_", name))
-    env.setdefault("QT_QPA_PLATFORM", "offscreen")
-    # Every suite imports bridge.* (and the parity tool wraps tools/imgdiff),
-    # so the repo root must be on sys.path for each suite process.
     env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
-    return env
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # Use the current interpreter (sys.executable), not a bare "python". A bare
+    # name resolves to whatever is on PATH -- on this box that is MSYS2's
+    # CPython 3.14, which has no PyQt5, so every UI test file died at import and
+    # pytest reported "5 errors during collection" while this runner still
+    # printed a passing gate. sys.executable is the interpreter actually running
+    # this script (.venv), so the suite sees the dependencies that are installed.
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "--tb=short",
+        "-rs",
+        "-p",
+        "no:randomly",
+    ]
+    if cmd_extra:
+        cmd.extend(cmd_extra)
+    return subprocess.run(
+        cmd,
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
 
 
-def run_suite(path):
-    """(name, passed_count, failure_text) for one suite."""
-    name = os.path.basename(path)
-    try:
-        proc = subprocess.run([PYTHON, path], cwd=ROOT, timeout=PER_SUITE_TIMEOUT,
-                              capture_output=True, text=True,
-                              env=suite_env(name))
-    except subprocess.TimeoutExpired:
-        return name, 0, "TIMEOUT after %ds" % PER_SUITE_TIMEOUT
-    out = proc.stdout + proc.stderr
-    match = COUNT_RE.search(out)
-    count = int(match.group(1)) if match else 0
+def require_emulator_gate():
+    """Second gate (--require-emulator): the qemu-marker tests must RUN.
+
+    Re-runs only `-m qemu` tests through the same runner. Any skip, any
+    failure, or an empty collection exits non-zero -- a skipped contract test
+    is never reported as success.
+    """
+    print()
+    print("[ .. ] --require-emulator: running only the qemu-marker contract tests")
+    proc = pytest(["-m", "qemu"])
+    lines = proc.stdout.splitlines()
+    skip_lines = [
+        line.strip() for line in lines
+        if line.strip().lower().startswith("skipped")
+    ]
+    zero_collected = any(
+        "collected 0" in line or "no tests ran" in line.lower()
+        for line in lines
+    )
+    print("\n".join(lines[-25:]))
+    if zero_collected:
+        print()
+        print("GATE(--require-emulator): no qemu-marker tests collected - "
+              "the contract tests are missing")
+        return 3
+    if skip_lines:
+        print()
+        print("GATE(--require-emulator): contract tests were SKIPPED, not run:")
+        for line in skip_lines:
+            print("        " + line)
+        return 3
     if proc.returncode != 0:
-        return name, 0, out.strip()
-    return name, count, None
+        print()
+        print("GATE(--require-emulator): contract tests failed "
+              "(pytest exit %d)" % proc.returncode)
+        return 3
+    print()
+    print("GATE(--require-emulator): contract tests ran and passed")
+    return 0
 
 
-def main():
-    tests_dir = os.path.join(ROOT, "tests")
-    suites = sorted(f for f in os.listdir(tests_dir)
-                    if f.startswith("test_") and f.endswith(".py"))
-    if not suites:
-        print("no test_*.py files found in", tests_dir)
-        return 1
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Run the honest test gate. --require-emulator also fails "
+                    "the run when the qemu-marker contract tests are skipped.")
+    parser.add_argument(
+        "--require-emulator", action="store_true",
+        help="exit non-zero if the qemu-marker contract tests "
+             "(tests/test_qemu_monitor_qemu.py) are skipped or absent; "
+             "default keeps them as UNEXECUTED skips")
+    args = parser.parse_args(argv)
+    proc = pytest()
+    lines = proc.stdout.splitlines()
 
-    print("Running %d suite(s) with %s\n" % (len(suites), PYTHON))
-    total = 0
-    failures = []
-    for suite in suites:
-        name, count, error = run_suite(os.path.join(tests_dir, suite))
-        if error:
-            failures.append((name, error))
-            print("  FAIL  %-28s %s" % (name, error.splitlines()[-1][:60]))
-        else:
-            total += count
-            print("  ok    %-28s %d tests" % (name, count))
+    summary = {}
+    for line in lines:
+        low = line.strip().lower()
+        if low.startswith("passed"):
+            summary["passed"] = line.strip()
+        elif low.startswith("failed"):
+            summary["failed"] = line.strip()
+        elif low.startswith("error"):
+            summary["error"] = line.strip()
+        elif low.startswith("skipped"):
+            summary["skipped"] = line.strip()
 
-    print("\n" + "=" * 52)
-    if failures:
-        print("%d test(s) passed, %d suite(s) FAILED" % (total, len(failures)))
-        for name, error in failures:
-            print("\n--- %s ---\n%s" % (name, error))
-        print("=" * 52)
-        return 1
-    print("%d tests passed, all suites green" % total)
-    print("=" * 52)
+    print("\n".join(lines[-25:]))
+    print()
+    for key in ("passed", "failed", "error", "skipped"):
+        if key in summary:
+            print(summary[key])
+
+    has_failure = any(
+        summary.get(k) and ("fail" in str(summary[k]).lower() or "error" in str(summary[k]).lower())
+        for k in ("failed", "error")
+    )
+    has_zero_collected = any(
+        "collected 0" in line or "no tests ran" in line.lower()
+        for line in lines
+    )
+    # A collection error ("N errors during collection", "Interrupted:") makes
+    # pytest exit non-zero even when no test "failed" in the summary. Trust the
+    # process exit code, not just the parsed summary lines.
+    has_collection_error = proc.returncode != 0
+
+    if has_zero_collected:
+        print()
+        print("GATE: a test file collected 0 tests")
+        sys.exit(2)
+    if has_failure or has_collection_error:
+        print()
+        print("GATE: one or more tests failed or errored")
+        sys.exit(1)
+    print()
+    print("GATE: all collected tests passed")
+    if args.require_emulator:
+        emu_rc = require_emulator_gate()
+        if emu_rc:
+            sys.exit(emu_rc)
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
