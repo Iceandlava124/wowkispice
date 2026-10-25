@@ -25,6 +25,8 @@ REAL_ELF = os.path.join(REPO, "firmware", "esp32_buck_controller", ".pio",
 from bridge import firmware, gpio_model
 from bridge.cad_engine import SchematicComponent, SchematicNetlistEngine
 from bridge.ngspice_wrapper import NgSpiceEngine
+import types
+from bridge.qemu_monitor import QemuMonitor, QemuMonitorError, cycle_adc_and_gate, sweep_report
 
 def _hex_record(rectype, address, data):
     """Build a valid Intel HEX record (checksum computed, not hand-written)."""
@@ -375,37 +377,77 @@ class TestRealEsp32Firmware(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
+class QemuMonitorDouble:
+    """Test double for QemuMonitor (tests/doubles-style).
+
+    cycle_adc_and_gate() drives the monitor through a three-method interface:
+    set_adc1_value(value), read_gate() -> bool, and stop(). This double
+    implements exactly that surface -- no process, no socket, no real QEMU --
+    so the coupling logic can be exercised without the binary. It is a DOUBLE,
+    not the real monitor; the real-QEMU path lives in
+    tests/test_qemu_monitor_qemu.py under the @qemu marker.
+    """
+
+    def __init__(self, gate_high=True, fail_on=None):
+        self.gate_high = gate_high
+        self.fail_on = fail_on          # method name that should raise
+        self.injected = []              # every adc1-value written
+        self.stopped = False            # stop() must be called exactly once
+
+    def set_adc1_value(self, value):
+        if self.fail_on == "set_adc1_value":
+            raise QemuMonitorError("injected failure on set_adc1_value")
+        self.injected.append(int(value))
+
+    def read_gate(self):
+        if self.fail_on == "read_gate":
+            raise QemuMonitorError("injected failure on read_gate")
+        return self.gate_high
+
+    def stop(self):
+        self.stopped = True
+
+
 class TestQemuGateBridge(unittest.TestCase):
     """The automatic ngspice <-> QEMU bridge: adc1-value injection and gate
-    readback through the orchestrator session."""
+    readback through cycle_adc_and_gate() and sweep_report()."""
 
     def test_cycle_adc_and_gate_returns_a_clean_cycle(self):
-        # A non-existent session must still yield a clean, non-raising cycle
-        # with ok=False and a readable message.
-        cycle = cycle_adc_and_gate(QemuMonitor.__new__(QemuMonitor))
+        # A monitor that fails mid-cycle must still yield a clean, non-raising
+        # cycle: ok=False, gate_high=None, and a readable message. The docstring
+        # on cycle_adc_and_gate() promises "every failure shape is returned as a
+        # clean, non-raising FirmwareCouplingCycle", so this asserts that.
+        cycle = cycle_adc_and_gate(QemuMonitorDouble(fail_on="set_adc1_value"))
         self.assertFalse(cycle.ok)
         self.assertIsNone(cycle.gate_high)
         self.assertTrue(cycle.message)
 
     def test_cycle_adc_and_gate_flow(self):
-        # With a minimal fake session, a single cycle returns ok=True and a
-        # gate decision derived from the injected ADC value.
-        mon = QemuMonitor.__new__(QemuMonitor)
-        mon.session = types.SimpleNamespace(
-            proc=types.SimpleNamespace(
-                stdin=None,
-                stdout=types.SimpleNamespace(readline=lambda: b"OK gate=ON"),
-            )
-        )
+        # A healthy double: one cycle injects the ADC value, reads the gate back,
+        # and returns ok=True with the gate decision and the value in the message.
+        mon = QemuMonitorDouble(gate_high=True)
         cycle = cycle_adc_and_gate(mon, adc_value=2012)
         self.assertTrue(cycle.ok)
         self.assertTrue(cycle.gate_high)
         self.assertIn("2012", cycle.message)
+        # The value really reached the monitor, and the cycle stopped it.
+        self.assertEqual(mon.injected, [2012])
+        self.assertTrue(mon.stopped)
 
     def test_sweep_report_returns_a_row_per_value(self):
-        sessions = [types.SimpleNamespace(proc=types.SimpleNamespace(
-            stdin=None, stdout=types.SimpleNamespace(readline=lambda: b"OK ON")))]
-        rows = sweep_report(sessions[0], [1900, 2012, 3456])
+        # sweep_report() must produce one row per requested ADC value, never
+        # raising even when the monitor misbehaves on one of them.
+        rows = sweep_report(QemuMonitorDouble(gate_high=True), [1900, 2012, 3456])
         self.assertEqual(len(rows), 3)
         for row in rows:
             self.assertTrue(row.ok)
+
+    def test_sweep_report_never_raises_even_when_monitor_fails(self):
+        # A monitor that throws on every cycle still yields three clean failure
+        # rows rather than an exception escaping sweep_report().
+        rows = sweep_report(QemuMonitorDouble(fail_on="set_adc1_value"),
+                            [1900, 2012, 3456])
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertFalse(row.ok)
+            self.assertTrue(row.message)
