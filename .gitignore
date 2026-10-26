@@ -101,6 +101,9 @@ tools/*.zip
 firmware/*/sdkconfig.*
 !firmware/*/sdkconfig.defaults
 
+# Third-party downloaded/build artifacts
+third_party/
+
 # Third-party reference material (NOT project content).
 # docs/ltspice-reference/ holds screenshots of another vendor's application,
 # kept locally as a private layout reference only. They are ADI/LTspice's

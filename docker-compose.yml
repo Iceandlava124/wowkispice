@@ -1,17 +1,46 @@
 version: '3.8'
 
 services:
-  cosim-runner:
+  wosp:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: wowkispice-cosim-runner
     volumes:
-      - ./output:/app/output
+      - .:/app
+      - wosp-third-party:/app/third_party
     environment:
-      - SIM_DURATION_MS=10.0
-      - SIM_TSTEP_US=0.5
-    # Pure-Python mock closed loop (bridge/mock_controller). The abandoned
-    # Renode wrapper was deleted 2026-10-09; this runs the module directly.
-    # See docs/legacy-module-audit.md.
-    command: python3 bridge/mock_controller.py --time 10.0 --plot output/waveform.png
+      - PYTHONUNBUFFERED=1
+      - WOSP_DOCKER=1
+    working_dir: /app
+    command: .venv/bin/python -m pytest tests/test_adversarial_stress.py tests/test_load_step_injection.py tests/test_binary_runner.py tests/test_qemu_monitor_unit.py -v
+  
+  wosp-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - wosp-third-party:/app/third_party
+    environment:
+      - PYTHONUNBUFFERED=1
+      - WOSP_DOCKER=1
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+  
+  wosp-doctor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - wosp-third-party:/app/third_party
+    environment:
+      - PYTHONUNBUFFERED=1
+      - WOSP_DOCKER=1
+    working_dir: /app
+    command: .venv/bin/python tools/doctor.py
+
+volumes:
+  wosp-third-party:

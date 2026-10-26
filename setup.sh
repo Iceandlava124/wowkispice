@@ -80,8 +80,15 @@ PY
   fi
   rm -f "$BIND"
   ok "libngspice loads."
-  step "Setup complete."
-  printf '\nNext:\n  ./run_tests.py  # or: python tools/run_tests.py\n  python ui/schematic_editor.py\n'
+  step "Cleaning up orphaned processes"
+  "$VENV_PY" tools/cleanup_qemu.py 2>&1 | tail -2 || true
+  step "Checking for prebuilt patched QEMU"
+  "$VENV_PY" tools/fetch_qemu.py 2>&1 | tail -3 || true
+  step "Running environment doctor"
+  "$VENV_PY" tools/doctor.py 2>&1 | tail -20 || true
+  "$VENV_PY" -c "from bridge.toolchain_resolver import ToolchainResolver; r=ToolchainResolver(); print(r.write_env_local())" 2>&1 | tail -1 || true
+  ok "Setup complete."
+  printf '\nNext:\n  python tools/doctor.py  # check environment health\n  ./run_tests.py  # or: python tools/run_tests.py\n  python ui/schematic_editor.py\n'
   exit 0
 fi
 

@@ -1,36 +1,53 @@
-# PROJECT_WOWKISPICE Cloud Co-Simulation Runner
-# Automated headless mixed-signal simulator container
-
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV WOSP_DOCKER=1
 
-# Install system dependencies & ngspice shared libraries
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    wget \
+    curl \
+    ca-certificates \
     python3 \
     python3-pip \
-    python3-dev \
-    ngspice \
-    libngspice0 \
+    python3-venv \
     libngspice0-dev \
-    git \
-    curl \
-    wget \
-    build-essential \
+    libusb-1.0-0-dev \
+    pkg-config \
+    bison \
+    flex \
+    texinfo \
+    libglib2.0-dev \
+    libpixman-1-dev \
+    ninja-build \
+    libfdt-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy dependency requirements
-COPY requirements.txt /app/
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Copy repo
+COPY . /app
 
-# Copy simulation engine, circuits, and tests
-COPY bridge/ /app/bridge/
-COPY circuits/ /app/circuits/
-COPY firmware/ /app/firmware/
-COPY tests/ /app/tests/
+# Create venv and install dependencies
+RUN python3 -m venv .venv && \
+    .venv/bin/pip install --upgrade pip && \
+    .venv/bin/pip install -r requirements.txt
 
-# Default entrypoint runs automated co-simulation verification suite
-CMD ["python3", "tests/test_closed_loop_buck.py"]
+# Create necessary directories
+RUN mkdir -p third_party/qemu logs
+
+# Try to fetch prebuilt QEMU or run setup
+RUN .venv/bin/python tools/fetch_qemu.py || true
+
+# Run environment doctor
+RUN .venv/bin/python tools/doctor.py || true
+
+# Write .env.local
+RUN .venv/bin/python -c "from bridge.toolchain_resolver import ToolchainResolver; r=ToolchainResolver(); print(r.write_env_local())" || true
+
+# Default command - run core unit tests
+CMD [".venv/bin/python", "-m", "pytest", "tests/test_adversarial_stress.py", "tests/test_load_step_injection.py", "tests/test_binary_runner.py", "tests/test_qemu_monitor_unit.py", "tests/test_adc_conversion.py", "tests/test_control_law_unit.py", "-v"]

@@ -293,9 +293,41 @@ Remove-Item (Join-Path $Root ".wosp_probe.py") -ErrorAction SilentlyContinue
 
 if ($rc -ne 0) { throw "libngspice was placed but could not be loaded." }
 
+# ---------------------------------------------------------------------------
+# 5. Cleanup orphaned processes, fetch prebuilt patched QEMU, and run doctor
+# ---------------------------------------------------------------------------
+Write-Step "Cleaning up orphaned QEMU processes"
+try {
+    & $VenvPy (Join-Path $Root "tools\cleanup_qemu.py") 2>&1 | Out-Host
+} catch {
+    Write-Warn "Cleanup skipped: $_"
+}
+
+Write-Step "Checking for prebuilt patched QEMU"
+try {
+    & $VenvPy (Join-Path $Root "tools\fetch_qemu.py") 2>&1 | Out-Host
+} catch {
+    Write-Warn "QEMU fetch skipped: $_"
+}
+
+Write-Step "Running environment doctor"
+try {
+    & $VenvPy (Join-Path $Root "tools\doctor.py") 2>&1 | Out-Host
+} catch {
+    Write-Warn "Doctor check skipped: $_"
+}
+
+# Write .env.local if toolchain resolver can find things
+try {
+    & $VenvPy -c "from bridge.toolchain_resolver import ToolchainResolver; r=ToolchainResolver(); print(r.write_env_local())" 2>&1 | Out-Null
+} catch {
+    # ignore
+}
+
 Write-Step "Setup complete."
 Write-Host ""
 Write-Host "Next:" -ForegroundColor Cyan
-Write-Host "  .\run_selfcheck.bat  # verify this machine end to end"
-Write-Host "  .\run_tests.bat      # run the full test suite"
-Write-Host "  .\run_editor.bat     # launch the PyQt5 schematic editor"
+Write-Host "  python tools\doctor.py  # check environment health"
+Write-Host "  .\run_selfcheck.bat    # verify this machine end to end"
+Write-Host "  .\run_tests.bat        # run the full test suite"
+Write-Host "  .\run_editor.bat       # launch the PyQt5 schematic editor"
