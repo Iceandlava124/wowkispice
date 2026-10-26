@@ -34,14 +34,14 @@ place instead of asking the repo.
 |---|---|---|---|---|---|
 | B1 | Inject analog values into the emulated firmware's ADC | `tools/qemu-patch/`, `bridge/qemu_orchestrator.py` | Human opens the QEMU monitor and runs `qom-set /machine/peripheral/sens adc1-value N` | No host-side automation exists; the patch exposes a QOM property but nobody reads/writes it from Python | New `bridge/qemu_monitor.py` (QMP/HMP): scripted injection + gate readback (this is M0 of `docs/binary-runner-and-mcu-bringup.md`) |
 | B2 | Read the latched gate level out of QEMU into ngspice | `bridge/esp32_regs.py` | Physical read `xp /1wx 0x3FF44004` via HMP console | No QEMU harness reads it back | Add a read-only QOM property (preferred path in M0) |
-| B3 | Run the real firmware as the closed-loop controller | `bridge/binary_runner.py` (planned), `bridge/cosim_runner.py` | Declared-law runs only; firmware runs isolated | Binary runner not implemented | M1: wall-clock sampled-data HIL contract, `external` sources from the firmware's own decisions |
+| B3 | Run the real firmware as the closed-loop controller | `bridge/binary_runner.py`, `bridge/cosim_runner.py` | Automatic coupling via QEMU monitor - ADC injection from ngspice, gate readback to drive solver | Implemented | M1 complete |
 | B4 | Add a new MCU and test it beside the others | `bridge/gpio_model.py`, `bridge/control_law.py`, `tools/qemu-patch/` | One-off manual port | No checklist + no per-MCU test row | M2 bring-up checklist + profile table (binary-runner doc §6) |
 
 ## Band C — Planned / not started (no code path to execution)
 
 | # | Capability | Files | Contract / source |
 |---|---|---|---|
-| C1 | Binary runner closed loop (M1) — firmware drives the solver | `bridge/binary_runner.py` (planned), `docs/binary-runner-and-mcu-bringup.md` | `run_binary_cosim(model, pin_specs, *, firmware_image, qemu, machine="esp32", tstep_us=0.5, duration_ms=5.0, progress_callback=None, stop_flag=None)` |
+| C1 | Binary runner closed loop (M1) — firmware drives the solver | `bridge/binary_runner.py` | Implemented - `run_binary_cosim(model, pin_specs, *, firmware_image, qemu, machine="esp32", tstep_us=0.5, duration_ms=5.0, progress_callback=None, stop_flag=None)` |
 | C2 | GUI integration of B1/B2/B3 (auto-bridge, real HIL) | `ui/schematic_editor.py` handlers (`run_simulation`, `run_closed_loop`, …) | M2 wiring in binary-runner doc; currently only declared-law F2 exists |
 | C3 | New-MCU bring-up harness (one checklist row + one test row) | `bridge/gpio_model.py`, `bridge/control_law.py`, `tools/qemu-patch/`, `docs/binary-runner-and-mcu-bringup.md` §6 | Register map → regs module → QEMU device patch → firmware project → pin/law wiring → tests |
 | C4 | Auto-sync netlist with schematic (live, not Reset/Import buttons) | `ui/schematic_editor.py` (Netlist dock) | Named open; current sync is manual Reset/Import |

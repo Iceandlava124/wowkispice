@@ -48,16 +48,11 @@ same numbers:
    `probe_memory()` helpers document the gap. It is a *verification* of the
    firmware, not the co-simulation loop.
 
-The dashed arrows are the three things that exist but are not yet wired
-into an automatic loop:
+The coupling is now automatic via `bridge/binary_runner.py`:
 
-* the controller's `decide()` output (raw counts) has no written-out path
-  into the QEMU-injected ADC value;
-* the firmware's gate state has no read-out path into ngspice's vector
-  stream;
-* the golden-trace mechanism (save/restore of a timed sequence of ADC
-  samples) is documented in `docs/time-sync.md` but not implemented in a
-  versioned format.
+* ngspice solver results drive ADC injection into the firmware running in QEMU via `QemuMonitor`;
+* firmware gate state (read from GPIO registers) drives the ngspice external voltage source each timestep;
+* the loop runs in lockstep with the solver callbacks.
 
 ---
 
