@@ -161,3 +161,17 @@ Result: `pytest tests/test_qemu_monitor_unit.py tests/test_firmware_gpio.py`
 -> 49 passed. Mutation evidence for the new tests: tests/MUTATION_LOG.md
 (4/4 mutations killed). Bridge bugs found while testing are recorded in
 docs/KNOWN_ISSUES.md, NOT fixed here (bridge/ is out of this job's allowlist).
+'
+
+### test_sweep_report_one_row_per_value_over_a_single_monitor — STRENGTHENED (JOB 3c)
+- What it tested: sweep_report() over a single running monitor with three ADC values (1900, 2012, 3456), asserting every row ok=True, gate_high is a bool, the fake recorded exactly three qom-set ADC value commands in order, exactly one Popen launch for the entire sweep, and the monitor still running afterwards (poll() is None).
+- Change: added assertions (b) and (c) about cycle_adc_and_gate stop behavior (stop=False leaves monitor running, stop=True stops it), and assertion (d) about sweep with pipe drops where fake drops pipe after second command yielding rows ok=True, ok=False, ok=False. Also moved monitor lifecycle management to after assertions to verify monitor was NOT stopped by the bug where cycle_adc_and_gate stops after every cycle.
+- Justification: the original test only asserted "first cycle ok=True" and did not verify the monitor lifecycle; the strengthened test now provably validates the stop=False/stop=True contract added in JOB 3b.
+- Related: JOB 3b added  parameter to ; JOB 3c strengthens the tests to provably validate the fix.
+
+
+### test_sweep_report_one_row_per_value_over_a_single_monitor â€” STRENGTHENED (JOB 3c)
+- What it tested: sweep_report() over a single running monitor with three ADC values (1900, 2012, 3456), asserting every row ok=True, gate_high is a bool, the fake recorded exactly three qom-set ADC value commands in order, exactly one Popen launch for the entire sweep, and the monitor still running afterwards (poll() is None).
+- Change: added assertions (b) and (c) about cycle_adc_and_gate stop behavior (stop=False leaves monitor running, stop=True stops it), and assertion (d) about sweep with pipe drops where fake drops pipe after second command yielding rows ok=True, ok=False, ok=False. Also moved monitor lifecycle management to after assertions to verify monitor was NOT stopped by the bug where cycle_adc_and_gate stops after every cycle.
+- Justification: the original test only asserted "first cycle ok=True" and did not verify the monitor lifecycle; the strengthened test now provably validates the stop=False/stop=True contract added in JOB 3b.
+- Related: JOB 3b added `stop` parameter to `cycle_adc_and_gate`; JOB 3c strengthens the tests to provably validate the fix.

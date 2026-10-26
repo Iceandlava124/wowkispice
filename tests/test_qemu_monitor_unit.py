@@ -333,6 +333,28 @@ def test_sweep_report_one_row_per_value_over_a_single_monitor(
     # the monitor is still alive after the sweep (only the caller stops it)
     assert mon._proc.poll() is None, "cycle_adc_and_gate() stopped the monitor"
 
+    # Assertion (b): one cycle_adc_and_gate call with default stop=False
+    # leaves the monitor running
+    mon2 = QemuMonitor(qemu=launcher)
+    mon2.start()
+    before2 = mon2._proc.poll()
+    assert before2 is None, "monitor must be running before cycle"
+    cycle = cycle_adc_and_gate(qmp=mon2, adc_value=2012)  # stop=False default
+    assert cycle.ok is True, cycle.message
+    # Monitor should still be running after a single cycle with stop=False
+    assert mon2._proc.poll() is None, "cycle_adc_and_gate() with stop=False stopped the monitor"
+    mon2.stop()
+
+    # Assertion (c): the same call with stop=True leaves it stopped
+    mon3 = QemuMonitor(qemu=launcher)
+    mon3.start()
+    before3 = mon3._proc.poll()
+    assert before3 is None, "monitor must be running before cycle"
+    cycle = cycle_adc_and_gate(qmp=mon3, adc_value=2012, stop=True)  # stop=True
+    assert cycle.ok is True, cycle.message
+    # Monitor should be stopped after cycle with stop=True
+    assert mon3._proc is None, "cycle_adc_and_gate() with stop=True did not stop the monitor"
+    # No need to call mon3.stop() - it was already stopped by cycle with stop=True
 
 def test_cycle_adc_and_gate_error_shapes():
     """Every failure shape is returned as a clean, non-raising cycle.

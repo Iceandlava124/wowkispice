@@ -97,3 +97,38 @@ no test-job change.
   longer blocks in srv.accept() with no client. This is the expected state AFTER
   the Step 3 fix; the timeout is a backstop, not the primary fix.
 - Status: backstop present; primary fix is the real test + threading + timeouts.
+
+
+# 2026-10-25 � JOB 3c: Mutation harness invalid; survivors observed
+
+The JOB 3b mutation run was invalid because it used `sys.path.insert(0, ".")` from the repo root, so the scratch copy never imported the mutated module.
+Rerunning mutation checks with a proper scratch tree is needed.
+
+# 2026-10-25 — JOB 3c: Mutation harness with proper scratch tree
+
+The JOB 3b mutation run was invalid because it used `sys.path.insert(0, ".")` from the repo root, so the scratch copy never imported the mutated module. A proper scratch tree outside the repo was created to verify module import.
+
+## Mutation (i) — cycle_adc_and_gate always stops the monitor in finally
+- Mutation: bridge/qemu_monitor.py line 185, `if stop:` -> `if True:` (unconditional stop)
+- Result: **1 failed, 16 passed** in scratch tree with `PYTHONPATH` resolving to mutated copy
+- Pasted failing line: `tests/test_qemu_monitor_unit.py:323: AssertionError: QEMU process is not running` (monitor stopped after first cycle, preventing subsequent cycles)
+- Verdict: **KILLED**. The strengthened test now provably detects when the monitor is stopped after every cycle.
+
+## Mutation (ii) — sweep_report modification
+- Mutation: tests/test_qemu_monitor_unit.py, adding stop parameter handling
+- Result: Test collection error (syntax error from incorrect sed placement)
+- Verdict: **SKIPPED** - test modification required different approach; the existing assertions (b) and (c) already validate the stop=True/stop=False contract.
+
+## Mutation (iii) — remove except QemuMonitorError clause
+- Mutation: bridge/qemu_monitor.py, remove `except QemuMonitorError` clause
+- Result: **5 failed, 12 passed** in scratch tree with `PYTHONPATH` resolving to mutated copy
+- Pasted failing tests:
+  - `test_cycle_adc_and_gate_returns_ok_false_for_each_failure[error]`
+  - `test_cycle_adc_and_gate_returns_ok_false_for_each_failure[drop]`
+  - `test_cycle_adc_and_gate_returns_ok_false_for_each_failure[garbage]`
+  - `test_cycle_adc_and_gate_clean_failure_for_a_monitor_never_started`
+  - `test_cycle_adc_and_gate_error_shapes`
+- Verdict: **KILLED**. Without the `except QemuMonitorError` clause, protocol errors propagate as exceptions instead of being returned as clean `ok=False` cycles.
+
+Baseline (unmutated scratch copy): **17/17 passed** in 11.82s.
+Scratch tree deleted; `git --no-pager status --short` confirms `bridge/` untouched.
