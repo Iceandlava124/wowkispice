@@ -175,3 +175,111 @@ docs/KNOWN_ISSUES.md, NOT fixed here (bridge/ is out of this job's allowlist).
 - Change: added assertions (b) and (c) about cycle_adc_and_gate stop behavior (stop=False leaves monitor running, stop=True stops it), and assertion (d) about sweep with pipe drops where fake drops pipe after second command yielding rows ok=True, ok=False, ok=False. Also moved monitor lifecycle management to after assertions to verify monitor was NOT stopped by the bug where cycle_adc_and_gate stops after every cycle.
 - Justification: the original test only asserted "first cycle ok=True" and did not verify the monitor lifecycle; the strengthened test now provably validates the stop=False/stop=True contract added in JOB 3b.
 - Related: JOB 3b added `stop` parameter to `cycle_adc_and_gate`; JOB 3c strengthens the tests to provably validate the fix.
+
+
+### tests/test_ngspice_sanitiser.py - NEW - sanitiser validation
+- What it tests: 17 tests validating the ngspice input sanitiser.
+- Why changed: New test file for JOB 4 ngspice sanitiser.
+- New assertions: .control and .endc banned, run/alter/bg_run/destroy allowed,
+  .tran/.ac/.dc/.op/.model/.measure allowed, unknown directives pass through.
+
+### tests/test_closed_loop_buck.py - NEW class TestGetSyncDataArityMatchesHeader (JOB 1: hang regression)
+
+- What it tests: that `GetSyncData_t` in bridge/ngspice_wrapper.py matches the C
+  typedef shipped in `tools/ngspice_dll/Spice64_dll/include/ngspice/sharedspice.h:319`
+  (`typedef int (GetSyncData)(double, double*, double, int, int, int, void*);`) -
+  the return type, all seven parameter types, and an actual call with all seven
+  arguments.
+- Why added: the JOB 1 hang was a CFUNCTYPE declaration missing one parameter, so
+  ctypes read the wrong stack frame inside ngspice and `ngSpice_Command("run")`
+  never returned. Nothing guarded that declaration. Reintroducing the defect in a
+  scratch copy reproduces the hang 3/3 times at the reported stack
+  (`mock_controller.py:156` -> `ngspice_wrapper.py:328`).
+- New assertions (all `@pytest.mark.timeout(30)`):
+  (a) `len(GetSyncData_t._argtypes_) == 7` and `GetSyncData_t._restype_ is ctypes.c_int`;
+  (b) each `_argtypes_` entry equals the ctypes type for the header's C type at that
+      position (double, double*, double, int, int, int, void*);
+  (c) invoking the callback with all seven arguments reaches the Python handler and
+      returns 0.
+- Two assumptions in the FIRST draft were wrong and are corrected here, both after
+  measuring rather than guessing:
+  * old assertion: `len(_argtypes_) == len(header params) + 1`, treating the return
+    type as `_argtypes_[0]` - WHY WRONG: `ctypes.CFUNCTYPE` stores the return type in
+    `_restype_`, not `_argtypes_` (measured: `logs/cmd/probe_cfuntyp.py` printed
+    `_argtypes_ len = 7` and `_restype_ = c_long` for a declaration built from the
+    header signature). NEW assertion: `len(_argtypes_) == len(header params)` plus a
+    separate `_restype_ is ctypes.c_int` check.
+  * old assertion: `declared[0] is ctypes.c_int` as the return type - WHY WRONG:
+    `declared[0]` is the first parameter, not the return type, so it compared
+    `c_double` against `c_int` and also sliced `[1:]` off a list that never contained
+    a return type. NEW assertion: no slice; compare all seven entries positionally.
+  * also measured: on this Windows build `ctypes.c_int is ctypes.c_long` (identical
+    ids), so the header's `int` maps to the object printed as `ctypes.c_long`. The
+    mapping in the test therefore uses `ctypes.c_int`, which is the same object.
+- Not weakened: no existing assertion in this file was changed or removed; the
+  original `TestThresholdsMatchFirmware` and `TestClosedLoopBuck` tests are untouched
+  and still pass.
+
+### tests/test_ngspice_sanitiser.py - NEW TESTS (JOB 4)
+- Why: the sanitiser draft rejected `.meas` (ngspice's alias of `.measure`) and
+  blanket-banned `.include`, which broke 4 real tests:
+  tests/test_components_library.py::test_dc_motor_model,
+  tests/test_components_library.py::test_opamp_model (both use
+  `.include "<abs path>/circuits/components/models.lib"`), and
+  tests/test_ui_polish.py::TestMeasEquivalentDiscoverability::test_meas_results_include_the_value_and_the_time
+  and ::test_run_edited_netlist_executes_meas_and_prints_results
+  (netlist uses `.meas tran ...` at tests/test_ui_polish.py:1346-1350).
+  Exact failure before the fix: `RuntimeError: ngSpice_Circ rejected the
+  untrusted netlist: banned directive @line: .include` / `... @line: .meas`.
+- Old assertion: none existed - these are new tests; the old suite had no
+  coverage for the .meas alias or the .include directory policy.
+- New assertions: .meas/.MEAS pass through unchanged; .include/.lib are
+  accepted only for the allowlisted circuits/components directory (relative
+  and absolute forms); an outside path, a `..` traversal, and a bare
+  `.include` with no argument each raise RuntimeError naming the reason;
+  ALLOWED_INCLUDE_DIRS contains exactly one directory and the listed library
+  file really exists on disk.
+- Every new test carries @pytest.mark.timeout(30). No existing test was
+  weakened, skipped or deleted.
+- Mutation evidence: tests/MUTATION_LOG.md (2026-10-27 JOB 4, 4/4 killed).
+
+### tests/test_tool_fixes.py - NEW TESTS (J7 + J9 queued fixes)
+- Why: tools/doctor.py crashed on a cp1252 console (non-ASCII glyphs) and
+  discovered ngspice through a dead glob list instead of the bridge's
+  resolve_ngspice_library(); tools/check_traceability.py exited 0 while
+  parsing 0 requirements and 0 marked tests (false green, recorded in J11).
+- Old assertion: none existed - these are new tests; no existing test changed.
+- New assertions: doctor runs under PYTHONIOENCODING=ascii with no
+  UnicodeEncodeError and prints the ASCII "[OK]" tag; doctor.py source is
+  pure ASCII; ToolchainResolver().find_ngspice() equals
+  resolve_ngspice_library() under WOSP_NGSPICE_LIB and flows into get_status();
+  check_traceability exits non-zero with "parsed 0 requirements" on an empty
+  table, non-zero with "cannot read" on a missing file, non-zero with
+  "0 tests carrying" when no marked test ran, and still exits 0 for a complete
+  mapping (control).
+- Mutation evidence: tests/MUTATION_LOG.md (2026-10-27 J7/J9, 2/2 killed after
+  strengthening the doctor test, survivor recorded honestly).
+
+### tests/test_ngspice_sanitiser.py - TEST CHANGED + NEW TESTS (JOB 4 3b/3c)
+- Changed: `test_include_relative_to_repo_root_is_allowed` (this job's own
+  test from the allowlist pass). Old assertion: `_sanitise_line` returns the
+  line unchanged. Why wrong: leaving the relative string intact lets ngspice
+  resolve the same text against ITS own working directory instead of the file
+  that was validated. New assertion: the line is rewritten to
+  `.include <absolute realpath of circuits/components/models.lib>`, i.e. the
+  validated path.
+- New tests (all @pytest.mark.timeout(30)/timeout(60)):
+  TestIncludedFileContent - a .control block inside an allowed included file
+  is rejected by _sanitise_line AND by the full engine.load_circuit path, with
+  the offending file named in the error, and the marker payload never runs;
+  a nested include inside the allowlist is allowed; a self-including file
+  fails with the 'nesting exceeds' depth message; a missing file inside the
+  allowed directory is rejected as 'not found'. Temp libs are written under
+  circuits/components with a __tmp_s3b_scan_ prefix and removed in tearDown,
+  which also fails if any prefix-matching file survives.
+  TestIncludeCwdIndependence - a subprocess started in a foreign temp cwd runs
+  the same accept/rewrite/reject checks and prints cwd/root proofs.
+- Evidence for WHY: logs/job S3B-INCLUDE - before the fix, the temp library's
+  .control block EXECUTED on both HEAD and the draft (marker file created,
+  `PWNED` printed); temp lib cleaned up: True.
+- Mutation evidence: tests/MUTATION_LOG.md (2026-10-27 3b/3c, 7/7 killed).

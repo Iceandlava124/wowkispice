@@ -38,11 +38,12 @@ happens when **a local socket is reachable from a hostile origin**.
 
 * **`ngspice` is a full SPICE simulator, not a sandbox.** Its netlist
   language includes directives that can source files, run shell commands,
-  and write output files from *within* a netlist. The loader in this
-  project does not canonicalise a netlist before handing it to ngspice,
-  so this is a genuine risk with an untrusted file. The fix is in
-  `bridge/ngspice_wrapper.py` (sanitiser added in this phase) and the
-  companion test `tests/test_ngspice_dll_proof.py`.
+  and write output files from *within* a netlist. Since JOB 4 the loader
+  in `bridge/ngspice_wrapper.py` runs every netlist line through an
+  allowlist sanitiser before `ngSpice_Circ`, and scans the contents of
+  allowlisted `.include` files with the same rules (recursive, depth
+  capped). What was actually observed per vector is recorded under
+  "Tested vectors" below; anything not listed there was not tested.
 * **A hostile process that already controls the local user account is
   outside the threat model.** The sockets protect the *local* loop from
   *other local users*; a user who can already launch QEMU and write to
@@ -57,12 +58,16 @@ happens when **a local socket is reachable from a hostile origin**.
   tested. ngspice itself has more; anything we did not enumerate stays
   allowed by the sanitizer and is documented as a residual risk. Do not
   trust a netlist that was never passed through the sanitizer.
-* **File interpretation is not authenticated.** A netlist that embeds a
-  `.include` pointing at a file the user did not author is *not* blocked
-  by this sanitizer — the sanitizer rejects directives on *load*, not
-  sources that come from inside a `*.lib` model. Whether a project file
-  reaching the loader is malicious is a policy decision for the app layer;
-  the loader's job is to make that policy enforceable and auditable.
+* **File interpretation is not authenticated.** Since JOB 4 the loader
+  rejects `.include`/`.lib`/`.inc` targets outside `ALLOWED_INCLUDE_DIRS`
+  (default: `circuits/components` only, resolved against the repo root,
+  never against a guess from the caller's cwd) and scans the included
+  file's own lines with the same directive allowlist, recursively up to
+  `INCLUDE_SCAN_DEPTH_LIMIT` (5). The include line is rewritten to the
+  validated absolute path so ngspice reads exactly the file that was
+  checked. This behaviour was tested (see below); it does not
+  authenticate *authorship* — a malicious file placed inside
+  `circuits/components` is still inside the trust boundary.
 
 ## Reporting issues
 
@@ -104,3 +109,59 @@ python tools/run_tests.py
 The GPL obligations for QEMU and ngspice are restated in
 `THIRD_PARTY_NOTICES.md`; redistribution is not part of the pilot and the
 project is distributed as source + a build procedure.
+
+
+---
+
+## Tested vectors (JOB 4, 2026-10-27)
+
+These are the exploit vectors actually executed against the real ngspice
+library (ngspice-47 shared library, Creation Date Aug 11 2026, loaded from
+`tools/ngspice_dll/.../ngspice.dll`). Each vector ran in its own child
+process with a working directory under `%TEMP%`, so any marker file or file
+read is provable on disk outside the repository. Two targets: **HEAD**
+(`git show HEAD:bridge/ngspice_wrapper.py`, 16720 bytes, extracted to
+`%TEMP%\wosp_exp_head_pkg`, every child printing `module.__file__` to prove
+which copy imported) and the **current working-tree draft**. Commands and
+full output: `logs/activity.jsonl` jobs `S3A-EXPLOIT` and `S3B-INCLUDE`
+(`logs/out/*.txt`).
+
+| # | Vector | HEAD result | Draft result |
+|---|--------|-------------|--------------|
+| 1 | `.control` block in a netlist containing `shell echo PWNED> <marker>` | **marker created** (block executed on `run`) | `RuntimeError: banned directive @line: .control` at load; no marker |
+| 2 | `cmd("shell echo PWNED> <marker>")` | **marker created** | **marker created** — `cmd()` is NOT filtered (see residual) |
+| 3 | `cmd("source <file>")` where the file holds a sentinel line | rc 1; file **NOT read**: ngspice printed `"C:Users...source_sentinel.cir": No such file or directory` (it stripped the backslashes) and the DLL entered `cannot recover and awaits to be reset or detached` | same |
+| 4 | `.include` of an existing file **outside** `circuits/components` | **file READ**: log contains `sentinel_outside_xyz` + `Error: circuit not parsed` — although `cmd("run")` still returned 0 | `RuntimeError: .include outside allowed directories`; sentinel absent, file never read |
+| 5 | `cmd("write <path> v(out)")` after a run | rc 0, **no file found** anywhere in `%TEMP%` or the repo (not observed) | same |
+| 6 | `cmd("wrdata <path> v(out)")` | rc 0, **no file found** (not observed) | same |
+| 7 | `cmd("hardcopy <path> v(out)")` | rc 0, log `Can't open viewport for graphics.`, **no file found** (not observed) | same |
+| 8 | bare `shell ... > <marker>` line in a netlist (element position) | parsed as an element: `Error on line 2 ... Unable to find definition of model`, **no marker** (not executed) | same |
+| 9 | `.control` + `shell` **inside** an allowed `.include`d file (vector placed in `circuits/components/`) | **marker created** (included `.control` executed) | **before the content scan: marker created; after: rejected at load, marker never created** (tests `TestIncludedFileContent`, mutant M5) |
+
+### Residual findings (tested, NOT blocked — stated plainly)
+
+* `NgSpiceEngine.cmd()` passes any string straight to `ngSpice_Command`.
+  Vector 2 executed `shell` through it on the draft as well as on HEAD. The
+  netlist paths tested above (1, 4, 8, 9) cannot reach `cmd()` in this code
+  base, but the Python method itself is unfiltered: anything that lets
+  untrusted text reach `cmd()` inherits ngspice's full command language.
+  This is the known gap behind the readiness item "cmd() guarded".
+* Vector 3 did not prove an arbitrary-file read (the path was mangled
+  before ngspice opened it), and it wedges the shared DLL into an
+  unrecoverable error state until reset/detach.
+* Vectors 5-7 returned rc 0 without producing a file in this environment.
+  That is an observation, not a guarantee: neither "safe" nor "exploitable"
+  is claimed for file-output commands issued through `cmd()`.
+* Vectors are run against the shipped Windows DLL only. No claim is made
+  about other ngspice builds, other platforms, or about behaviour that was
+  not listed in the table.
+
+### Verification commands
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests\test_ngspice_sanitiser.py -q --timeout=60
+# includes: .meas alias, include allowlist, included-content scan,
+#           depth limit, missing-file rejection, foreign-cwd equivalence
+powershell -NoProfile -File tools\agentlog.ps1 -Job VERIFY -ScriptFile logs\cmd\j4_mutate.ps1
+# mutation check: 7/7 mutants killed (MUTATION_LOG.md, 2026-10-27 entries)
+```

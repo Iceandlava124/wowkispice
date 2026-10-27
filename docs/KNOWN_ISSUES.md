@@ -316,3 +316,25 @@ against the named lines.
    the `qemu` marker (Track B, `tools/run_emulator_tests.ps1`, 2 passed under
    WSL). The GPIO tests are wiring tests against a double and count as
    neither.
+
+
+## 2026-10-27 - Intermittent native access violation in the editor worker (found by the J4 gate)
+
+- Symptom: a full-suite run crashed with `Windows fatal exception: access
+  violation` in `ui/schematic_editor.py:688 _run_in_worker` <-
+  `:3027 run_simulation` during
+  `tests/test_editor_workflow.py::test_progress_reaches_complete_after_a_run`,
+  at 16% of the run (logs/job S3B-INCLUDE, first gate attempt; Python 3.12
+  thread dump printed with the faulting frames).
+- Isolated rerun: `pytest tests/test_editor_workflow.py` -> **36 passed in
+  13.75s** (logs/job S3B-INCLUDE).
+- Second full-suite attempt: **437 passed, 3 skipped, 0 failed in 259.49s**.
+- Not attributable to the JOB 4 include scan/rewrite: the crashing deck
+  (`arduino_circuit()`) contains no `.include` line, and the new sanitiser
+  tests collect *after* `test_editor_workflow` alphabetically (the crash
+  happened at 16%, before they would run).
+- Status: **INTERMITTENT, cause unknown, outside J4's allowlist.** To
+  triage: re-run `tools/run_tests.py` a few times and, if it recurs,
+  investigate the Qt worker thread / in-process ngspice interaction in
+  `ui/schematic_editor.py`. Owner decision needed on whether to chase this
+  before the pilot.

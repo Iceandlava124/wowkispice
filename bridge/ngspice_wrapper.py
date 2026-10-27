@@ -1,5 +1,5 @@
-"""
-ngspice ctypes wrapper for PROJECT_WOWKISPICE
+"""ngspice ctypes wrapper for PROJECT_WOWKISPICE
+
 Provides high-level Python interface to libngspice / ngspice.dll with native
 high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
 """
@@ -7,6 +7,7 @@ high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
 import ctypes
 import ctypes.util
 import os
+import re
 import threading
 from typing import Callable, Optional, Dict, Any, List, Tuple
 
@@ -74,6 +75,7 @@ _MISSING_DLL_HELP = (
     "      export WOSP_NGSPICE_LIB=/full/path/to/libngspice.so\n"
 )
 
+
 # Struct definitions from sharedspice.h
 class VectorInfo(ctypes.Structure):
     _fields_ = [
@@ -85,6 +87,7 @@ class VectorInfo(ctypes.Structure):
         ("v_length", ctypes.c_int)
     ]
 
+
 class VecValues(ctypes.Structure):
     _fields_ = [
         ("name", ctypes.c_char_p),
@@ -94,12 +97,14 @@ class VecValues(ctypes.Structure):
         ("is_complex", ctypes.c_bool)
     ]
 
+
 class VecValuesAll(ctypes.Structure):
     _fields_ = [
         ("veccount", ctypes.c_int),
         ("vecindex", ctypes.c_int),
         ("vecsa", ctypes.POINTER(ctypes.POINTER(VecValues)))
     ]
+
 
 # Function callback prototypes matching sharedspice.h
 SendChar_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p)
@@ -108,6 +113,7 @@ ControlledExit_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_bool, c
 SendData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(VecValuesAll), ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
 SendInitData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)
 BGThreadRunning_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_bool, ctypes.c_int, ctypes.c_void_p)
+
 
 GetVSRCData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p)
 GetISRCData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p)
@@ -129,12 +135,12 @@ class NgSpiceEngine:
         self.progress_callback: Optional[Callable[[float, int], None]] = None
         self.timestep_count = 0
         self._stop_requested = False
-        
+
         resolved, tried = resolve_ngspice_library(dll_path)
         if resolved is None:
             raise FileNotFoundError(
-                "ngspice library not found. Tried:\n  "
-                + "\n  ".join(tried) + _MISSING_DLL_HELP)
+                "ngspice library not found. Tried:\n  " +
+                "\n  ".join(tried) + _MISSING_DLL_HELP)
 
         self.dll_path = resolved
         self._load_dll()
@@ -230,8 +236,7 @@ class NgSpiceEngine:
 
     def _cb_sync(self, actual_time: float, p_delta_t: Any, old_delta_t: float,
                  redostep: int, ident: int, location: int, user_data: Any) -> int:
-        """
-        Per-timestep hook (ngspice's GetSyncData): drives the progress bar and
+        """Per-timestep hook (ngspice's GetSyncData): drives the progress bar and
         the abort check.
 
         Returning 1 from a sync callback is what makes ngspice abort the run,
@@ -283,8 +288,7 @@ class NgSpiceEngine:
         )
 
     def request_stop(self):
-        """
-        Interrupt a running simulation.
+        """Interrupt a running simulation.
 
         Issues ngspice's `stop` command from a short-lived thread. It has to be
         another thread: the solver is inside ngSpice_Command("run"), so the
@@ -322,24 +326,302 @@ class NgSpiceEngine:
     def cmd(self, command: str) -> int:
         return self.lib.ngSpice_Command(command.encode('utf-8'))
 
-    def load_circuit(self, netlist_lines: List[str]):
-        lines = [line.strip() for line in netlist_lines if line.strip()]
-        # ngspice treats the FIRST line of a deck as its title and drops it
-        # from the circuit. A netlist that starts with a device line ("V1 in 0
-        # ...") therefore loses its source: the remaining nodes float, the DC
-        # operating point reports "singular matrix", and ngSpice_Command("run")
-        # wedges forever inside gmin/source stepping. Every netlist this app
-        # generates already begins with a `*` comment; hand-typed ones (Netlist
-        # Editor, tests) may not, so guarantee a title line here.
-        if not lines or not lines[0].startswith("*"):
-            lines.insert(0, "* WOWKISPICE circuit")
-        if not any(l.lower() == ".end" for l in lines):
-            lines.append(".end")
+    # ------------------------------------------------------------------
+    # JOB 4: ngspice input sanitiser — single choke point
+    # ------------------------------------------------------------------
 
-        c_array = (ctypes.c_char_p * (len(lines) + 1))()
-        for idx, line in enumerate(lines):
+    # Directive allowlist (case-insensitive, default: no path traversal)
+    # These dot-directives are allowed in untrusted netlists:
+    ALLOWED_DIRECTIVES = frozenset({
+        'tran', 'ac', 'dc', 'op', 'ic', 'nodeset',
+        'step', 'options', 'param', 'model', 'subckt',
+        'ends', 'measure', 'meas', 'print', 'save', 'temp', 'end',
+        # Analysis cards real callers send: .noise (thermal-noise yield),
+        # .disto (harmonic distortion). Both are pure analysis directives -
+        # no file access, no command execution - so they are safe to allow.
+        'noise', 'disto',
+        # .include/.lib/.inc are listed here only so the blanket ban does not
+        # fire: _sanitise_line then checks the target path against
+        # ALLOWED_INCLUDE_DIRS and rejects anything outside it.
+        'include', 'lib', 'inc',
+    })
+
+    # J4: directory allowlist for .include / .lib / .inc targets.
+    # Policy default: nothing outside these directories is ever allowed.
+    # The entries below are exactly the library paths the real tests load
+    # (tests/test_components_library.py:16 and :34 -> circuits/components/models.lib).
+    # PROJECT_ROOT is anchored at THIS FILE's location (bridge/.. = repo root),
+    # never at the process working directory, so decisions do not move with cwd.
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ALLOWED_INCLUDE_DIRS = frozenset({
+        os.path.join(PROJECT_ROOT, 'circuits', 'components'),
+    })
+
+    # Maximum nesting depth when scanning included files (3b finding: a
+    # .control block inside an allowed included file executed for real, so the
+    # scan is recursive with this cap; a self-including cycle trips it).
+    INCLUDE_SCAN_DEPTH_LIMIT = 5
+
+    # Matches an include-family directive plus its file argument, quoted or bare.
+    # The argument is optional in the pattern so that a bare `.include` still
+    # matches and can be rejected for having no file argument.
+    INCLUDE_ARG_RE = re.compile(
+        r'^[ \t]*\.([a-zA-Z]+)(?:[ \t]+(?:"([^"]*)"|\'([^\']*)\'|(\S+)))?',
+        re.IGNORECASE)
+
+    # Legitimate cmd() commands that the code sends through ngSpice_Command
+    Cmd_ALLOWED = frozenset({'run', 'bg_run', 'reset', 'destroy', 'alter'})
+
+    # Regex: match a dot-directive at line-start (case-insensitive, optional
+    # leading whitespace/tabs, CRLF-safe after normalisation)
+    DOT_DIR_RE = re.compile(r'^[ \t]*\.([a-zA-Z]+)\s', re.IGNORECASE)
+
+    # --------------------------------------------------------------
+    # Internal helpers
+    # --------------------------------------------------------------
+
+    @staticmethod
+    def _strip_normalize(line: str) -> str:
+        """Remove leading whitespace/tabs, normalise CRLF, handle '+' continuations."""
+        # Normalise CRLF → LF
+        line = line.replace('\r\n', '\n').replace('\r', '\n')
+        # Strip leading whitespace and tabs
+        line = line.lstrip(' \t')
+        # '+' continuation: if the remaining text starts with '+', strip it
+        if line.startswith('+'):
+            line = line[1:].lstrip(' \t')
+        return line
+
+    @staticmethod
+    def _is_banned_directive(norm: str) -> Tuple[bool, Optional[str]]:
+        """Return (banned, directive_name) after checking norm against allowlist."""
+        # First, check for explicitly banned directives that might have no trailing whitespace
+        norm_lower = norm.lower().strip()
+        if norm_lower in {'.control', '.endc'}:
+            name = norm_lower.lstrip('.').strip()
+            return True, name
+        # Then, regex-based check for dot-directives with trailing whitespace
+        m = NgSpiceEngine.DOT_DIR_RE.match(norm)
+        if m:
+            directive = m.group(1).lower()
+            if directive in NgSpiceEngine.ALLOWED_DIRECTIVES:
+                return False, None
+            return True, directive
+        # Not a dot-directive, not banned
+        return False, None
+
+    @staticmethod
+    def _is_banned_cmd(norm: str) -> Tuple[bool, Optional[str]]:
+        """Return (banned, cmd_name) after checking norm against cmd allowlist."""
+        # norm is already stripped and lowercased by the caller
+        if norm not in NgSpiceEngine.Cmd_ALLOWED:
+            parts = norm.split()
+            cmd_name = parts[0] if parts else ''
+            return True, cmd_name
+        return False, None
+
+    @staticmethod
+    def _check_include_path(raw: str, directive: str, depth: int = 0
+                            ) -> str:
+        """Validate a .include/.lib/.inc target and scan its content.
+
+        A relative argument is tried both against the process cwd and against
+        the repo root; a candidate INSIDE the allowlist is preferred over one
+        outside it, so a foreign cwd with a look-alike path cannot win. The
+        matched candidate is realpath'd before the comparison, so '..' and
+        symlinks collapse first and cannot escape the allowlist.
+
+        Returns the validated absolute path, which _sanitise_line rewrites
+        into the netlist line: ngspice then reads exactly the file that was
+        validated, regardless of where the process was started (3c).
+
+        The file's OWN lines are scanned with the same sanitiser rules,
+        recursively up to INCLUDE_SCAN_DEPTH_LIMIT - a .control block inside
+        an allowed library executed for real (3b), so checking only the
+        top-level netlist was not enough. Depth >= limit raises (cycle cap).
+        """
+        if not raw:
+            raise RuntimeError(
+                f"ngSpice_Circ rejected the untrusted netlist: "
+                f".{directive} with no file argument @line"
+            )
+        if depth >= NgSpiceEngine.INCLUDE_SCAN_DEPTH_LIMIT:
+            raise RuntimeError(
+                f"ngSpice_Circ rejected the untrusted netlist: "
+                f".{directive} nesting exceeds depth "
+                f"{NgSpiceEngine.INCLUDE_SCAN_DEPTH_LIMIT} @line: {raw}"
+            )
+        candidates = []
+        if os.path.isabs(raw):
+            candidates.append(raw)
+        else:
+            candidates.append(os.path.join(os.getcwd(), raw))
+            candidates.append(os.path.join(NgSpiceEngine.PROJECT_ROOT, raw))
+        allowed = [os.path.realpath(d) for d in NgSpiceEngine.ALLOWED_INCLUDE_DIRS]
+        inside: List[str] = []
+        for cand in candidates:
+            resolved = os.path.realpath(cand)
+            for d in allowed:
+                if resolved == d or resolved.startswith(d + os.sep):
+                    inside.append(resolved)
+                    break
+        # Prefer an allowlisted candidate that exists as a file; if one
+        # resolved inside the allowlist but cannot be read, say so rather
+        # than falling through to the outside error (clearer and fail-closed).
+        for resolved in inside:
+            if os.path.isfile(resolved):
+                NgSpiceEngine._scan_included_file(resolved, depth + 1)
+                return resolved
+        if inside:
+            raise RuntimeError(
+                f"ngSpice_Circ rejected the untrusted netlist: "
+                f".{directive} file not found or unreadable @line: {inside[0]}"
+            )
+        raise RuntimeError(
+            f"ngSpice_Circ rejected the untrusted netlist: "
+            f".{directive} outside allowed directories @line: {raw}"
+        )
+
+    @staticmethod
+    def _scan_included_file(path: str, depth: int) -> None:
+        """Apply the same line rules to every line of an included file.
+
+        Reads the file (already validated as inside ALLOWED_INCLUDE_DIRS),
+        runs _sanitise_line over each line with the recursion depth for any
+        nested include, and re-raises rejections with the file path so the
+        error names where the banned content lives.
+        """
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+                content = fh.read()
+        except OSError as exc:
+            raise RuntimeError(
+                f"ngSpice_Circ rejected the untrusted netlist: "
+                f"included file unreadable: {path} ({exc})"
+            ) from exc
+        for line in content.splitlines():
+            if not line.strip():
+                continue
+            try:
+                NgSpiceEngine._sanitise_line(line, depth=depth)
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"ngSpice_Circ rejected the untrusted netlist: "
+                    f"{path}: {exc}"
+                ) from exc
+
+    @staticmethod
+    def _sanitise_line(line: str, depth: int = 0) -> str:
+        """Process a single netlist line through the sanitiser.
+
+        Raises RuntimeError with a specific message if the line contains a
+        banned directive or command. Returns the normalised line if safe.
+        """
+        norm = NgSpiceEngine._strip_normalize(line)
+
+        # Skip blank lines and comment lines (starting with *); they pass through
+        if not norm or norm.startswith('*'):
+            return norm
+
+        # Check for banned dot-directives
+        banned, directive = NgSpiceEngine._is_banned_directive(norm)
+        if banned:
+            raise RuntimeError(
+                f"ngSpice_Circ rejected the untrusted netlist: "
+                f"banned directive @line: .{directive}"
+            )
+
+        # .include / .lib / .inc: pass the allowlist only after the file
+        # argument resolves inside ALLOWED_INCLUDE_DIRS (default: nowhere else),
+        # its content passes the same rules (recursive, depth-capped), and the
+        # line is rewritten to the validated absolute path (3c: ngspice then
+        # reads exactly what was checked, whatever the cwd).
+        inc_m = NgSpiceEngine.INCLUDE_ARG_RE.match(norm)
+        if inc_m and inc_m.group(1).lower() in ('include', 'lib', 'inc'):
+            raw = inc_m.group(2) or inc_m.group(3) or inc_m.group(4) or ''
+            resolved = NgSpiceEngine._check_include_path(
+                raw, inc_m.group(1).lower(), depth=depth)
+            grp = (2 if inc_m.group(2) is not None else
+                   3 if inc_m.group(3) is not None else 4)
+            gs, ge = inc_m.span(grp)
+            replacement = resolved if grp != 4 or ' ' not in resolved \
+                else f'"{resolved}"'
+            norm = norm[:gs] + replacement + norm[ge:]
+
+        # Check for banned cmd() references in netlist content.
+        # Legitimate code sends: run, bg_run, reset, destroy, alter.
+        # Look for 'cmd(' pattern (case-insensitive) in the normalised line.
+        if 'cmd(' in norm.lower() or 'Cmd(' in norm:
+            # Extract potential command name
+            banned_cmd, cmd_name = NgSpiceEngine._is_banned_cmd(norm)
+            if banned_cmd:
+                raise RuntimeError(
+                    f"ngSpice_Circ rejected the untrusted netlist: "
+                    f"banned command in netlist @line"
+                )
+
+        # Re-check after normalization (in case '+' continuation changed things)
+        norm = NgSpiceEngine._strip_normalize(norm)
+        banned, directive = NgSpiceEngine._is_banned_directive(norm)
+        if banned:
+            raise RuntimeError(
+                f"ngSpice_Circ rejected the untrusted netlist: "
+                f"banned directive @line: .{directive}"
+            )
+
+        return norm
+
+    def load_circuit(self, netlist_lines: List[str]):
+        """Load a netlist into ngspice with input sanitisation.
+
+        Sanitises the netlist before passing it to ngSpice_Circ, rejecting
+        untrusted directives, file-output commands, and shell commands.
+
+        Only element lines, comments, blank lines, and the dot-directives
+        .tran .ac .dc .op .ic .nodeset .step .options .param .model .subckt .ends
+        .measure (.meas alias) .print .save(memory only) .temp .end are allowed,
+        plus .include/.lib/.inc only when the file argument resolves inside
+        ALLOWED_INCLUDE_DIRS (default: no directory outside that set), the
+        included file's own lines pass these same rules (recursive scan,
+        depth limit INCLUDE_SCAN_DEPTH_LIMIT), and the line is rewritten to
+        the validated absolute path.
+
+        cmd() allowlist: run, bg_run, reset, destroy, alter (the commands the legitimate
+        code sends). Reject with a clear, specific error naming the directive
+        and line: .control/.endc, any shell/system/exec-style command,
+        write/wrdata/hardcopy/any file-output command, .include/.lib/.inc/source
+        outside an allowed directory (default: none), and any unknown
+        dot-directive.
+
+        Citations: ngspice manual section for the installed version (UNVERIFIED)
+        if no manual available.
+        """
+        # Strip, normalise, and validate every line before passing to ngspice
+        sanitised: List[str] = []
+        for idx, line in enumerate(netlist_lines):
+            # Skip completely empty lines (they are implicit)
+            if not line.strip():
+                continue
+            try:
+                sline = NgSpiceEngine._sanitise_line(line)
+            except RuntimeError as exc:
+                # Re-raise with line context
+                raise RuntimeError(
+                    f"ngSpice_Circ rejected the untrusted netlist: "
+                    f"{exc}"
+                ) from exc
+            sanitised.append(sline)
+
+        # Ensure the netlist has a title comment and .end marker
+        if not sanitised or not sanitised[0].startswith("*"):
+            sanitised.insert(0, "* WOWKISPICE circuit")
+        if not any(l.lower() == ".end" for l in sanitised):
+            sanitised.append(".end")
+
+        c_array = (ctypes.c_char_p * (len(sanitised) + 1))()
+        for idx, line in enumerate(sanitised):
             c_array[idx] = line.encode('utf-8')
-        c_array[len(lines)] = None
+        c_array[len(sanitised)] = None
 
         ret = self.lib.ngSpice_Circ(c_array)
         if ret != 0:
@@ -357,18 +639,17 @@ class NgSpiceEngine:
         vec_ptr = self.lib.ngGet_Vec_Info(node_name.encode('utf-8'))
         if not vec_ptr:
             vec_ptr = self.lib.ngGet_Vec_Info(f"v({node_name})".encode('utf-8'))
-            
+
         if not vec_ptr:
             raise ValueError(f"Vector '{node_name}' not found in current ngspice plot.")
-        
+
         vec = vec_ptr.contents
         if vec.v_length <= 0 or not vec.v_realdata:
             return 0.0
         return float(vec.v_realdata[vec.v_length - 1])
 
     def get_vector_complex(self, vec_name: str) -> Tuple[List[float], List[float]]:
-        """
-        (real, imaginary) parts of a vector.
+        """(real, imaginary) parts of a vector.
 
         An .ac sweep produces complex phasors; taking only the real part - as
         get_vector_array() does - would quietly discard the phase information a

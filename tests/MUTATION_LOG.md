@@ -132,3 +132,112 @@ The JOB 3b mutation run was invalid because it used `sys.path.insert(0, ".")` fr
 
 Baseline (unmutated scratch copy): **17/17 passed** in 11.82s.
 Scratch tree deleted; `git --no-pager status --short` confirms `bridge/` untouched.
+
+# 2026-10-27 - JOB 4: allowlist fix (.meas alias, .include directory policy)
+
+Scratch copy outside the repo: %TEMP%\wosp_mut_j4 (bridge/, tests/, circuits/ copied).
+Driver: logs/cmd/j4_mutate.py. Proof printed by every run:
+MODULE C:\Users\gudae\AppData\Local\Temp\wosp_mut_j4\bridge\ngspice_wrapper.py
+INTERP C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+Unmutated scratch first: **28 passed** (pytest exit 0).
+
+## M1 - skip the .include path check
+- Mutation: `NgSpiceEngine._check_include_path(raw, ...)` -> `pass  # MUTANT M1`
+- Result: **4 failed, 24 passed** - test_include_outside_allowed_dirs_is_rejected,
+  test_include_traversal_out_of_allowed_dir_is_rejected,
+  test_include_without_argument_is_rejected, test_lib_outside_allowed_dirs_is_rejected
+- Verdict: **KILLED**.
+
+## M2 - drop the `meas` alias from ALLOWED_DIRECTIVES
+- Mutation: `'ends', 'measure', 'meas', 'print'` -> `'ends', 'measure', 'print'`
+- Result: **2 failed, 26 passed** - TestMeasAlias::test_meas_alias_is_allowed,
+  test_meas_alias_is_allowed_case_insensitive (RuntimeError: banned directive @line: .meas)
+- Verdict: **KILLED**.
+
+## M3 - disable path normalisation in _check_include_path
+- Mutation: `resolved = os.path.realpath(cand)` -> `resolved = cand`
+- Result: **1 failed, 27 passed** - test_include_relative_to_repo_root_is_allowed
+  (the un-normalised relative string no longer matches the allowlist prefix)
+- Verdict: **KILLED**.
+
+## M4 - empty ALLOWED_INCLUDE_DIRS
+- Mutation: remove `os.path.join(PROJECT_ROOT, 'circuits', 'components')`
+- Result: **4 failed, 24 passed** - test_allowlist_is_exactly_the_known_library_directory,
+  test_include_of_the_listed_library_is_allowed,
+  test_include_relative_to_repo_root_is_allowed, test_lib_inside_allowed_dir_is_allowed
+- Verdict: **KILLED**.
+
+4/4 mutants killed. Scratch tree removed after the run.
+
+# 2026-10-27 - J7/J9 queued fixes: doctor.py cp1252 + check_traceability false green
+
+Scratch copy outside the repo: %TEMP%\wosp_mut_tools (bridge/, tools/doctor.py,
+tools/check_traceability.py, tests/test_tool_fixes.py copied).
+Driver: logs/cmd/toolfix_mutate.py. Proof every run:
+INTERP C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+MODULE ...\wosp_mut_tools\tools\doctor.py
+Unmutated scratch first: **7 passed**.
+
+## T1 - reintroduce the check/cross glyphs in doctor.py
+- Mutation: `tag = "[OK]" if ok else "[X] "` -> `tag = "\u2713" if ok else "\u2717"`
+- First run: **SURVIVED** - `errors="replace"` on stdout degraded the glyph to
+  '?' instead of raising, so "no crash" alone did not prove the ASCII policy.
+  Recorded here as a survivor, not absorbed.
+- Fix: strengthened test_doctor_runs_on_an_ascii_console to assert `"[OK]"` is
+  present in the report output (tests/test_tool_fixes.py; entry in CHANGES.md).
+- Rerun: **1 failed, 6 passed** - test_doctor_runs_on_an_ascii_console failed
+  with `assert '[OK]' in ...`
+- Verdict: **KILLED after strengthening**.
+
+## T2 - remove both zero-guards in check_traceability.py
+- Mutation: delete the `if not reqs:` and `if not junit:` problem blocks
+- Result: **2 failed, 5 passed** - test_zero_requirements_parsed_is_a_failure
+  and test_zero_marked_tests_is_a_failure (the tool printed "TRACEABILITY OK"
+  / exited 0 paths again)
+- Verdict: **KILLED**.
+
+2/2 mutants killed after one strengthening pass. Scratch tree removed.
+
+# 2026-10-27 - JOB 4 3b/3c: include-content scan, depth limit, validated-path rewrite
+
+Scratch copy outside the repo: %TEMP%\wosp_mut_j4 (bridge/, tests/, circuits/
+copied). Driver: logs/cmd/j4_mutate.py. Proof printed by every run:
+MODULE ...\wosp_mut_j4\bridge\ngspice_wrapper.py
+INTERP C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+Unmutated scratch first: **34 passed**.
+
+## M1 - skip the .include path check entirely
+- Mutation: replace the `_check_include_path(...)` call with a blind abs-path join
+- Result: **10 failed, 24 passed** (outside/traversal/no-arg/lib-outside,
+  included-content x3, cycle, missing-file, foreign-cwd)
+- Verdict: **KILLED**.
+
+## M2 - drop the `meas` alias
+- Result: **2 failed, 32 passed** (both TestMeasAlias tests)
+- Verdict: **KILLED** (carried over from the earlier allowlist pass).
+
+## M3 - no path normalisation (realpath -> raw)
+- Result: **2 failed, 32 passed** (relative-include roundtrip, foreign-cwd)
+- Verdict: **KILLED**.
+
+## M4 - empty ALLOWED_INCLUDE_DIRS
+- Result: **9 failed, 25 passed**
+- Verdict: **KILLED**.
+
+## M5 - drop the include-content scan (`_scan_included_file` call)
+- Result: **3 failed, 31 passed** - control-block-in-include,
+  engine-load-rejects (both would let the .control payload through), cycle test
+- Verdict: **KILLED**.
+
+## M6 - remove the include depth limit
+- Result: **1 failed, 33 passed** - test_self_including_file_hits_the_depth_limit
+  failed with 'nesting exceeds' not found in a 'maximum recursion depth exceeded'
+  message (the cycle recursed to Python's limit instead of the policy limit)
+- Verdict: **KILLED**.
+
+## M7 - drop the validated-path rewrite
+- Result: **2 failed, 32 passed** (relative roundtrip returned the raw relative
+  string; foreign-cwd subprocess asserted absolute and failed)
+- Verdict: **KILLED**.
+
+7/7 mutants killed on this pass. Scratch tree removed after the run.
