@@ -339,11 +339,13 @@ class TestLocalSocketBinding(unittest.TestCase):
 class TestTrackedFileHygiene(unittest.TestCase):
     """No absolute user paths and no credential-shaped strings in git."""
 
-    # Requires a real user/account segment, so bare prefixes and the
-    # redaction helpers in tools/diagnostics.py do not false-positive.
+    # Requires a real user/account segment that starts like a name, so bare
+    # prefixes (tools/diagnostics.py's redaction list) and prose that merely
+    # names the prefixes (docs/SCORECARD.md quoting this very grep) do not
+    # false-positive. test_the_pattern_is_not_vacuous keeps this honest.
     USER_PATH_RE = re.compile(
-        r"[A-Za-z]:[\\/]+Users[\\/]+([^\\/\s\"'`)]+)"
-        r"|/(?:home|Users)/([^/\s\"'`)]+)")
+        r"[A-Za-z]:[\\/]+Users[\\/]+[A-Za-z0-9_.-][^\\/\s\"'`)]*"
+        r"|/(?:home|Users)/[A-Za-z0-9_.-][^/\s\"'`)]*")
     SECRET_RES = (
         re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
         re.compile(r"AKIA[0-9A-Z]{16}"),
@@ -358,6 +360,32 @@ class TestTrackedFileHygiene(unittest.TestCase):
                              text=True)
         self.assertEqual(out.returncode, 0, out.stdout)
         return [line for line in out.stdout.splitlines() if line.strip()]
+
+    @pytest.mark.timeout(30)
+    def test_the_pattern_is_not_vacuous(self):
+        """A pattern that matches nothing would make the scan below a lie.
+
+        Samples are assembled at runtime so this file does not match itself.
+        """
+        sep = chr(92)
+        must_match = [
+            "C:" + sep + "Users" + sep + "alice" + sep + "repo",
+            "/home/" + "alice/repro",
+            "/Users/" + "alice/repo",
+        ]
+        must_not_match = [
+            "<home>/repro",
+            "<home>" + sep + "repro",
+            "/home/|/Users/",
+            "/(home|Users)/<name>",
+            "C:" + sep + "Users" + sep,
+        ]
+        for sample in must_match:
+            self.assertRegex(sample, self.USER_PATH_RE,
+                             "the pattern must catch %r" % sample)
+        for sample in must_not_match:
+            self.assertNotRegex(sample, self.USER_PATH_RE,
+                                "the pattern must not catch %r" % sample)
 
     @pytest.mark.timeout(60)
     def test_no_absolute_user_paths_in_tracked_files(self):
