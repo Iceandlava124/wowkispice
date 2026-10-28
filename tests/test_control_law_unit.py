@@ -197,6 +197,36 @@ class TestFidelityGap:
         assert "RAW counts" in self.source()
 
 
+class TestAdcFrontEndAndThresholds:
+    """Row R3 gaps: two mutants survived before these existed - `to_counts`
+    ignoring the sense divider, and `normalize_law` accepting low == high.
+    """
+
+    def test_to_counts_applies_the_sense_divider(self):
+        spec = control_law.normalize_law({
+            "kind": "hysteretic", "pin": "GPIO18", "sense_net": "vout",
+            "target_v": 3.3, "hysteresis_v": 0.165, "divider": 0.5,
+            "vref": 3.3, "adc_bits": 12,
+        })
+        law = control_law.HystereticLaw(spec)
+        # 2.4 V at the sense node is 1.2 V at the ADC once the 0.5 divider
+        # has done its work; dropping the divider reports counts for double
+        # the voltage the firmware actually samples.
+        assert law.to_counts(2.4) == control_law._to_counts(1.2, 3.3, 12)
+        assert law.to_counts(2.4) != control_law._to_counts(2.4, 3.3, 12)
+
+    def test_equal_threshold_counts_are_rejected(self):
+        # low == high leaves no band to hold a state in, so a law built from
+        # it would decide purely on which side of one number the sample sits.
+        with pytest.raises(control_law.ControlLawError):
+            control_law.normalize_law({
+                "kind": "hysteretic", "pin": "GPIO18", "sense_net": "vout",
+                "target_v": 3.3, "hysteresis_v": 0.165, "divider": 0.5,
+                "vref": 3.3, "adc_bits": 12,
+                "low_counts": 2000, "high_counts": 2000,
+            })
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()
