@@ -100,7 +100,7 @@ a skip. Verified on this box: **2 passed, 0 skips**.
 The exact command it runs (kept identical here so doc and script agree):
 
 ```bash
-wsl -- bash -lc "cd '/mnt/c/Users/gudae/Music/PROJECT_WOWKISPICE' && WOSP_QEMU='/mnt/c/Users/gudae/Music/qemu-build/qemu-esp_develop_9.2.2_20260417/build/qemu-system-xtensa' python3 -m pytest tests/test_qemu_monitor_qemu.py -v"
+wsl -- bash -lc "cd '/mnt/c/<home>/Music/PROJECT_WOWKISPICE' && WOSP_QEMU='/mnt/c/<home>/Music/qemu-build/qemu-esp_develop_9.2.2_20260417/build/qemu-system-xtensa' python3 -m pytest tests/test_qemu_monitor_qemu.py -v"
 ```
 
 UI tests run headless via `QT_QPA_PLATFORM=offscreen`.

@@ -65,10 +65,10 @@ pass, since SETUP.md is outside this job's allowlist):
 
 ```bash
 cd ~/qemu-esp
-git apply --check /mnt/c/Users/<you>/PROJECT_WOWKISPICE/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
-git apply           /mnt/c/Users/<you>/PROJECT_WOWKISPICE/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
-git apply --check /mnt/c/Users/<you>/PROJECT_WOWKISPICE/tools/qemu-patch/0002-esp32-sens-immediate-conversion.patch
-git apply           /mnt/c/Users/<you>/PROJECT_WOWKISPICE/tools/qemu-patch/0002-esp32-sens-immediate-conversion.patch
+git apply --check /mnt/c<home>/PROJECT_WOWKISPICE/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
+git apply           /mnt/c<home>/PROJECT_WOWKISPICE/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
+git apply --check /mnt/c<home>/PROJECT_WOWKISPICE/tools/qemu-patch/0002-esp32-sens-immediate-conversion.patch
+git apply           /mnt/c<home>/PROJECT_WOWKISPICE/tools/qemu-patch/0002-esp32-sens-immediate-conversion.patch
 ```
 
 (`patch -p1 < …` works too — keep the order: 0001 first, 0002 second.)
@@ -90,7 +90,7 @@ WSL):
 1. `git apply --check` + `git apply` of **0001**: exit 0.
 2. `git apply --check` + `git apply` of **0002**: exit 0.
 3. The 6 patched files are **byte-identical** to the local build tree
-   `C:\Users\gudae\Music\qemu-build\qemu-esp_develop_9.2.2_20260417`
+   `<home>\Music\qemu-build\qemu-esp_develop_9.2.2_20260417`
    (`diff hw/misc/esp32_sens.c <build-tree>/hw/misc/esp32_sens.c` empty;
    the other five clean under `diff -q`).
 4. The build tree's own commit of the model (`478892a`) is byte-identical

@@ -36,7 +36,7 @@ ARTIFACT_CHAIN = [
 
 
 def _redact(p: str) -> str:
-    """Turn /home/edward/... or C:\Users\edward\... into /REDACTED/... ."""
+    """Turn a home-prefixed path into /REDACTED/... ."""
     for home in ("/home/", "/Users/", "/root/", "C:\\Users\\"):
         if p.startswith(home):
             return p.replace(home, "/REDACTED/", 1)

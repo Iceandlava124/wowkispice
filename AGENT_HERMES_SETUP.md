@@ -19,7 +19,7 @@ Docker Desktop + local Ollama are up. No cloud providers needed.
 Ollama must be serving locally before the agent can talk to it.
 
     export OLLAMA_ORIGIN=nohost
-    nohup /c/Users/gudae/AppData/Local/Programs/Ollama/ollama serve > /tmp/ollama-serve.log 2>&1 &
+    nohup <home>/AppData/Local/Programs/Ollama/ollama serve > /tmp/ollama-serve.log 2>&1 &
     # wait for port 11434:
     for i in $(seq 1 90); do
       code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:11434/api/tags 2>/dev/null || echo 000)
@@ -84,7 +84,7 @@ is the live QEMU Phase A deliverable:
     (i.e. /qemu-build/... from the container's /app? No — repo is mounted at /app,
     so the QEMU tree is at /app/../../Music/qemu-build/... — tell the agent the
     absolute Windows-path mount is /app and the QEMU source is one level up from
-    the repo root on the host: /c/Users/gudae/Music/qemu-build/qemu-esp_develop_9.2.2_20260417.
+    the repo root on the host: <home>/Music/qemu-build/qemu-esp_develop_9.2.2_20260417.
     Task:
       1. Apply tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch into
          that QEMU source tree.

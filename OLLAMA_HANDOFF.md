@@ -1,7 +1,7 @@
 # Ollama local-agents handoff (network-independent once serve is up)
 
 ## Status (as of this handoff)
-- Ollama binary: C:\Users\gudae\AppData\Local\Programs\Ollama\ollama.exe
+- Ollama binary: <home>\AppData\Local\Programs\Ollama\ollama.exe
 - Models already pulled (local, no download needed):
   - qwen2.5-coder:7b-64k      4.7 GB  (good coding agent)
   - hermes3:8b                4.7 GB  (good general agent)
@@ -17,7 +17,7 @@
 From WSL or Git Bash prompt at the repo root:
 
     export OLLAMA_ORIGIN=nohost
-    nohup /mnt/c/Users/gudae/AppData/Local/Programs/Ollama/ollama serve > /tmp/ollama-serve.log 2>&1 &
+    nohup /mnt<home>/AppData/Local/Programs/Ollama/ollama serve > /tmp/ollama-serve.log 2>&1 &
     # wait for port 11434:
     for i in $(seq 1 90); do
       code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:11434/api/tags 2>/dev/null || echo 000)

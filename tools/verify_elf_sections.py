@@ -6,11 +6,11 @@ import re
 import subprocess
 import sys
 
-sys.path.insert(0, r"C:\Users\gudae\Music\PROJECT_WOWKISPICE")
+sys.path.insert(0, r"<home>\Music\PROJECT_WOWKISPICE")
 from bridge import firmware
 
-ELF = r"C:\Users\gudae\Music\PROJECT_WOWKISPICE\firmware\esp32_buck_controller\.pio\build\esp32dev\firmware.elf"
-READELF = r"C:\Users\gudae\.platformio\packages\toolchain-xtensa-esp-elf\bin\xtensa-esp32-elf-readelf.exe"
+ELF = r"<home>\Music\PROJECT_WOWKISPICE\firmware\esp32_buck_controller\.pio\build\esp32dev\firmware.elf"
+READELF = r"<home>\.platformio\packages\toolchain-xtensa-esp-elf\bin\xtensa-esp32-elf-readelf.exe"
 
 out = subprocess.run([READELF, "-S", ELF], capture_output=True, text=True).stdout
 ref = {}

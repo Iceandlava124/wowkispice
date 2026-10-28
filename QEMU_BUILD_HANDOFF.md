@@ -13,7 +13,7 @@
 
 ## The binary
 
-- Path: `/mnt/c/Users/gudae/Music/qemu-build/qemu-esp_develop_9.2.2_20260417/build/qemu-system-xtensa`
+- Path: `/mnt<home>/Music/qemu-build/qemu-esp_develop_9.2.2_20260417/build/qemu-system-xtensa`
 - QEMU 9.2.2, x86_64 native, TCG, `--target-list=xtensa-softmmu`
 - Rebuild after editing a model file: `ninja -C build` in the source tree (incremental, ~1 min)
 
@@ -58,7 +58,7 @@ exited 0).
 ### Reproducibility test (the real one — PASSED)
 
 1. `git archive HEAD` of the pinned repo (`40edcca`, pristine) → fresh dir
-   `/home/user/repro/src`
+   `<home>/repro/src`
 2. `patch -p1 --batch < new patch` → all 6 files, exit 0, no fuzz, no rejects
 3. `./configure <flags above>` → exit 0, `slirp: enabled`
 4. `ninja -C build` → exit 0 (2493 targets)
@@ -102,7 +102,7 @@ To open the monitor in a manual run, add:
 - Serial/console logs should go to WSL-local paths (`/tmp/...`), not `/mnt/c`.
 - Firmware flash image (4 MB): `firmware/esp32_buck_controller/.pio/build/esp32dev/qemu_flash.bin`
 - Boot to `app_main` takes ~10.3 s guest time.
-- Fresh-copy repro lives at `/home/user/repro/src` (WSL ext4; build is fast there).
+- Fresh-copy repro lives at `<home>/repro/src` (WSL ext4; build is fast there).
 
 ## Left as-is / known noise
 

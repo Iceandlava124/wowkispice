@@ -1,7 +1,7 @@
 # INVENTORY - Dirty Tree Analysis for baseline-fix Branch
 
 **Generated**: 2026-10-26
-**Repository**: C:\Users\gudae\Music\PROJECT_WOWKISPICE
+**Repository**: <home>\Music\PROJECT_WOWKISPICE
 **Branch**: baseline-fix
 
 ---
@@ -458,7 +458,7 @@
 - **write_env_local**: Writes .env.local with discovered paths via toolchain_resolver.get_status()
 
 ### bridge/toolchain_resolver.py
-- **find_qemu()**: Checks in order: env:WOSP_QEMU, third_party/qemu/, repo rglob, PATH, common WSL/Windows locations (including C:\Users\gudae\Music\qemu-build\qemu-esp_develop_9.2.2_20260417\build\qemu-system-xtensa.exe)
+- **find_qemu()**: Checks in order: env:WOSP_QEMU, third_party/qemu/, repo rglob, PATH, common WSL/Windows locations (including <home>\Music\qemu-build\qemu-esp_develop_9.2.2_20260417\build\qemu-system-xtensa.exe)
 - **find_ngspice()**: Checks common locations via glob patterns; returns None if not found (common - not typically in repo)
 - **is_patched_qemu()**: Quick check - runs qemu -machine help and looks for "esp32" in output
 - **get_status()**: Returns dict with qemu found/patched status, ngspice found/path, third_party dir, manifest exists

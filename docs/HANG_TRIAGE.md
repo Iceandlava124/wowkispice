@@ -130,15 +130,15 @@ What *does* vary with the defect is the symptom's duration: a hang until the
 
 ## 5. Mutation check (rule 5)
 
-Scratch copy outside the repo: `C:\Users\gudae\AppData\Local\Temp\wosp_mut`
+Scratch copy outside the repo: `<home>\AppData\Local\Temp\wosp_mut`
 (containing `bridge/`, `tests/`, `circuits/`, `tools/ngspice_dll`).
 
 ### 5.1 Baseline of the scratch copy
 
 ```
-SCRATCH PROBE module.__file__ = C:\Users\gudae\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py
-SCRATCH PROBE sys.executable  = C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
-SCRATCH PROBE cwd             = C:\Users\gudae\AppData\Local\Temp\wosp_mut
+SCRATCH PROBE module.__file__ = <home>\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py
+SCRATCH PROBE sys.executable  = <home>\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+SCRATCH PROBE cwd             = <home>\AppData\Local\Temp\wosp_mut
 --- BASELINE (unmutated scratch) ---
 6 passed, 13 warnings in 1.89s
 baseline exit=0
@@ -158,9 +158,9 @@ print('MUTANT-MARKER GetSyncData_t mutated in', __file__, flush=True)
 ### 5.3 Proof the mutant is the code under test
 
 ```
-MUTANT-MARKER GetSyncData_t mutated in C:\Users\gudae\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py
-module.__file__ = C:\Users\gudae\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py
-sys.executable  = C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+MUTANT-MARKER GetSyncData_t mutated in <home>\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py
+module.__file__ = <home>\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py
+sys.executable  = <home>\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
 ```
 
 ### 5.4 Mutant outcome — the original hang, reproduced
@@ -168,9 +168,9 @@ sys.executable  = C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.e
 ```
 ..+++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++
 ...
-  File "C:\Users\gudae\AppData\Local\Temp\wosp_mut\bridge\mock_controller.py", line 156, in run_closed_loop_simulation
+  File "<home>\AppData\Local\Temp\wosp_mut\bridge\mock_controller.py", line 156, in run_closed_loop_simulation
     engine.cmd(tran_cmd)
-  File "C:\Users\gudae\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py", line 328, in cmd
+  File "<home>\AppData\Local\Temp\wosp_mut\bridge\ngspice_wrapper.py", line 328, in cmd
     return self.lib.ngSpice_Command(command.encode('utf-8'))
 +++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++
 mutant pytest exit=1

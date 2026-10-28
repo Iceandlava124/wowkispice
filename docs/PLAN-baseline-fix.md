@@ -46,7 +46,7 @@ $ ls firmware/esp32_buck_controller/.pio/build/esp32dev/CMakeFiles/*.dir/*.o
 (no output — zero application objects)
 
 $ command -v pio platformio
-/c/Users/gudae/.platformio/penv/Scripts/pio
+<home>/.platformio/penv/Scripts/pio
 ```
 
 Three facts follow, and they set the whole plan's shape:

@@ -165,10 +165,10 @@ cd qemu-esp
 git rev-parse --short HEAD        # expect: 40edcca
 ```
 
-Apply the WOSP patch (adjust `/mnt/c/Users/<you>/` to your Windows username):
+Apply the WOSP patch (adjust `/mnt/c<home>/` to your Windows username):
 
 ```bash
-patch -p1 < /mnt/c/Users/<you>/PROJECT_WOWKISPICE/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
+patch -p1 < /mnt/c<home>/PROJECT_WOWKISPICE/tools/qemu-patch/0001-esp32-model-sar-adc-and-gpio-output.patch
 ```
 
 - `patching file ...` for **6 files** = good.
@@ -219,7 +219,7 @@ PASS: the install boots the firmware, takes injected analog values and reacts.
 Exit code 0 = your install works. It finds QEMU automatically (a sibling
 `qemu-build` checkout or `~/qemu-esp`); if yours lives elsewhere, pass
 `--qemu` or set `WOSP_QEMU` — both Windows-style (`C:\...\qemu-system-xtensa`)
-and WSL-style (`/home/you/...`) paths work; a Linux QEMU on Windows is
+and WSL-style (`<home>/...`) paths work; a Linux QEMU on Windows is
 launched through WSL automatically. The `task_wdt` warnings you may see in
 longer runs are expected and harmless.
 
@@ -254,14 +254,14 @@ gitignored on purpose.
 ## Where everything lives (default paths)
 
 ```
-C:\Users\<you>\PROJECT_WOWKISPICE\        this repo (Windows)
+<home>\PROJECT_WOWKISPICE\                this repo (Windows)
   .venv\                                   Python env (setup.ps1)
   tools\ngspice_dll\                       ngspice DLL (setup.ps1)
   firmware\esp32_buck_controller\.pio\     firmware build + qemu_flash.bin
   tools\demo_closed_loop.py                install sanity check
 \\wsl$\<distro>\home\<you>\qemu-esp\       QEMU source (WSL)
   build\qemu-system-xtensa                 the emulator binary
-C:\Users\<you>\AppData\Local\Temp\         demo serial logs (wosp-demo-*.log)
+<home>\AppData\Local\Temp\             demo serial logs (wosp-demo-*.log)
 ```
 
 When all five checkpoints pass — tests green, firmware merged, QEMU
