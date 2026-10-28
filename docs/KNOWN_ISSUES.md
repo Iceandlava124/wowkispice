@@ -431,3 +431,41 @@ Isolation, this session:
 Status unchanged: INTERMITTENT, needs full-suite context, R2 remains FAIL.
 `ui/schematic_editor.py` still carries uncommitted work from an earlier job,
 so a fix there needs the owner's agreement before it can be committed alone.
+
+## 2026-10-28 (job R2-03) - editor-worker access violation: measured, one fix tried and reverted
+
+Reproduction matrix (full detail in `docs/SCORECARD.md`, job R2-03):
+
+```
+8 prefix files, 118 tests                  11 runs   0 crashes
+prefix + half the other modules             1 run    0 crashes
+prefix + the other half                     1 run    0 crashes
+all 31 modules imported, prefix tests only 11 runs   1 crash
+full suite (pytest)                         4 runs   4 crashes
+tools/run_tests.py                          2 runs   2 crashes
+```
+
+Always the same two frames: `ui/schematic_editor.py:686` (the in-loop
+`QApplication.processEvents()`) from `run_simulation`, reached from
+`tests/test_editor_workflow.py:284` or `tests/test_ui_polish.py:573`. The
+earlier session faulted on line 688, the post-loop `processEvents()`.
+
+Fix attempted: keep the `_SimWorker` reference alive, disconnect `progress`
+from the window, `worker.wait()` to completion and drain the queue before
+returning (instead of `self._worker = None` immediately after the loop).
+Result: 36 passed alone, 5/5 import-context runs clean, then the full suite
+and `tools/run_tests.py` both crashed at the same line. The hunk was
+reverted; `git diff ui/schematic_editor.py` shows only the earlier job's
+42/17 lines again.
+
+Consequence: row **R2 is BLOCKED**, not FAIL. Three attempts have not
+identified the freed object; the manifestation depends on heap layout (the
+same 103 executed tests are clean without the other modules' imports).
+
+Owner questions added (see SCORECARD):
+
+1. Approve running the suite under a memory debugger (Application Verifier /
+   Dr. Memory / an address sanitizer) to name the object being freed -
+   installing one needs approval.
+2. Approve staging a fix to `ui/schematic_editor.py` hunk-by-hunk so the
+   earlier job's uncommitted 42/17 lines are not swept into it.

@@ -471,3 +471,84 @@ job, and no row that was PASS regressed (there were none).
 Jobs this session: `S2-INIT` (status recompute) and `R5-01` (the row above);
 activity log entries 104-140, chain head recorded by `agentlog_verify` at the
 end of this job. Commits: `6a3098d` (the fix + its tests), this docs commit.
+
+---
+
+# Session 2026-10-28 — job R2-03, the editor-worker crash (row now BLOCKED)
+
+## Reproduction matrix (every number from this session's log)
+
+| context | command / job | runs | crashes |
+|---|---|---|---|
+| 8 prefix files, 118 tests | `R2-03-REPRO1`, `R2-03-LOOP` (x10) | 11 | **0** |
+| prefix + half of the other modules (tests 9-20) | `R2-03-BISECT` | 1 | 0 |
+| prefix + the other half (tests 21-31) | `R2-03-BISECT` | 1 | 0 |
+| all 31 modules imported, prefix tests only (`-k`) | `R2-03-REPRO2`, `R2-03-BASELINE` (x5), `R2-03-BASELINE2` (x5) | 11 | **1** |
+| full suite (pytest) | `R2-03-FULL1`, `-FULL2`, earlier `GATEFULL`, `GATE2` | 4 | **4** |
+| official runner `tools\run_tests.py` | `R2-03-RUN1`, earlier `R5-01-RUNNER` | 2 | **2** |
+
+The crash site never moved:
+
+```
+Windows fatal exception: access violation
+Current thread:
+  File "ui\schematic_editor.py", line 686 in _run_in_worker   <- QApplication.processEvents()
+  File "ui\schematic_editor.py", line 3043 in run_simulation
+  File "tests\test_editor_workflow.py", line 284 in test_progress_reaches_complete_after_a_run
+```
+
+Line 686 is the in-loop `app.processEvents()`; the earlier session faulted on
+line 688, the post-loop `processEvents()`. `tests/test_ui_polish.py:573`
+reaches the same frames when `test_editor_workflow.py` is deselected, and
+both files pass alone (36 and 76 tests), so the victim object is not created
+by the faulting test.
+
+## Fix attempted, measured, and reverted
+
+Hypothesis: dropping `self._worker = None` right after the loop freed the
+C++ QThread while Qt still held queued deliveries for it, so a later
+`processEvents()` walked into freed memory.
+
+Change: disconnect `progress` from the window, `worker.wait()` to full
+completion, drain the queue with the worker still alive, and keep the
+reference until the next run replaces it.
+
+```
+tests/test_editor_workflow.py            36 passed in 7.15s      (job R2-03-FIXCHECK1)
+import context, 5 runs, stdout piped     0 crashing              (job R2-03-FIXRUN1)
+tools\run_tests.py, run 1 of 3           CRASH, same frames      (job R2-03-RUN1)
+pytest full suite                        CRASH at line 686       (job R2-03-FULL2)
+```
+
+The hypothesis did not survive its own test, so the hunk was reverted and
+`git diff --stat ui/schematic_editor.py` is back to the earlier job's
+`42 insertions(+), 17 deletions(-)` with no `_run_in_worker` hunk in it.
+
+## Why the row is BLOCKED rather than FAIL
+
+The defect is a use-after-free in Qt event dispatch whose *manifestation*
+depends on heap layout: importing 23 extra test modules moves it (1/11 in
+that context, 4/4 and 2/2 in the full suite), and the same 103 executed tests
+are clean 11/11 without those imports. Three attempts have not identified the
+freed object, and the row's threshold - three consecutive clean
+`tools\run_tests.py` runs - is unreachable until then.
+
+Smallest remaining owner questions:
+
+1. **May the code be run under a memory debugger** (Application Verifier,
+   Dr. Memory, or Visual Studio's address sanitizer) to name the object being
+   freed? That requires installing a tool, which I may not do unilaterally.
+2. **May a fix to `ui/schematic_editor.py` be staged hunk-by-hunk**, so only
+   the fix is committed and the earlier job's uncommitted 42/17 lines stay
+   out of it?
+
+## Tally after this job
+
+| Status | Rows |
+|---|---|
+| PASS | R5 |
+| BLOCKED (owner action) | R1, R2, R4, R6, R7, R8 |
+| FAIL (still actionable) | R3, R9, R10, R11 |
+| OWNER-SET, unset | R12 |
+
+Jobs this session: `S2-INIT`, `R5-01`, `R2-03`. Log entries 104-160.
