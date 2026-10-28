@@ -120,6 +120,24 @@ GetISRCData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_double), 
 GetSyncData_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_double, ctypes.POINTER(ctypes.c_double), ctypes.c_double, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
 
 
+# SPICE scale suffixes on a numeric card. 'm' is milli, so 'meg' is the only
+# spelling that means mega (matched first in SPICE_NUMBER_RE below).
+SPICE_SCALE = {"t": 1e12, "g": 1e9, "meg": 1e6, "k": 1e3,
+               "m": 1e-3, "u": 1e-6, "n": 1e-9, "p": 1e-12, "f": 1e-15}
+SPICE_NUMBER_RE = re.compile(
+    r"^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)(meg|[tgkmunpf])?$",
+    re.IGNORECASE)
+
+
+def _spice_seconds(token: str) -> Optional[float]:
+    """One .tran argument in seconds, or None if it is not a SPICE number."""
+    match = SPICE_NUMBER_RE.match(token.strip())
+    if not match:
+        return None
+    scale = SPICE_SCALE.get((match.group(2) or "").lower(), 1.0)
+    return float(match.group(1)) * scale
+
+
 class NgSpiceEngine:
     def __init__(
         self,
@@ -135,6 +153,11 @@ class NgSpiceEngine:
         self.progress_callback: Optional[Callable[[float, int], None]] = None
         self.timestep_count = 0
         self._stop_requested = False
+        # R5: stop time of the loaded deck's .tran card, set by load_circuit.
+        # cmd() needs it to tell a complaint AT tstop (the transient had
+        # already produced everything it was asked for) from one before it
+        # (the run died). None means "no transient known" - fail closed.
+        self._tstop: Optional[float] = None
 
         resolved, tried = resolve_ngspice_library(dll_path)
         if resolved is None:
@@ -324,8 +347,120 @@ class NgSpiceEngine:
         self.user_data_callback = callback
 
     def cmd(self, command: str) -> int:
-        return self.lib.ngSpice_Command(
-            self.validate_cmd(command).encode('utf-8'))
+        text = self.validate_cmd(command)
+        # R5: a failed analysis is only visible in the output stream.
+        # Measured (logs/cmd/r5_probe4.py): two conflicting voltage sources
+        # under .op returned rc 0 while ngspice printed `DC solution failed`
+        # and `run simulation(s) aborted`, so the caller was handed success
+        # for a deck that has no solution. Only verbs that execute an
+        # analysis can carry that failure; the bookkeeping verbs cannot.
+        # Whether a marker is a real failure is then decided by
+        # _failure_report(), which also knows the deck's stop time.
+        analyse = text.split()[0].lower() in NgSpiceEngine.ANALYSING_VERBS
+        before = len(self.output_logs)
+        rc = self.lib.ngSpice_Command(text.encode('utf-8'))
+        if analyse:
+            report = self._failure_report(self.output_logs[before:], self._tstop)
+            if report:
+                raise RuntimeError(
+                    f"ngSpice_Command reported a failed analysis: {report}"
+                )
+        return rc
+
+    # Verbs that hand work to the solver, and so can fail inside ngspice.
+    ANALYSING_VERBS = frozenset({'run', 'bg_run', 'tran'})
+
+    # Signatures ngspice writes when it gave up. Chosen from measured output,
+    # not guessed: a healthy deck prints only the banner, 'Doing analysis',
+    # 'Using SPARSE' and 'No. of Data Rows' (r5_probe4.py healthy_control),
+    # while the failing decks printed exactly the lines below.
+    FAILURE_MARKERS = (
+        'error on line',                            # load path, a line ngspice
+        # could not parse: `Error on line 2 or its substitute:` is the first
+        # thing it prints for a malformed deck (r5_probe4.py); `circuit not
+        # parsed.` follows, sometimes only on the later run, so both are kept.
+        'circuit not parsed',
+        'run simulation(s) aborted',                # terminal line of a failed run
+        'timestep too small',                       # transient/op gave up
+        'could not be simulated successfully',      # operating point failure
+        'dc solution failed',                       # op failure, second form
+    )
+
+    @staticmethod
+    def _failure_report(lines, tstop: Optional[float] = None) -> Optional[str]:
+        """Return ngspice's own failure output, or None if it reported none.
+
+        `lines` must be only the output produced by the call being checked:
+        output_logs accumulates for the life of the engine, so an error from
+        an earlier deck must not fail a later, healthy one.
+
+        ngspice splits a parse error over two lines - the header
+        `Error on line 2 or its substitute:` and the offending text on the
+        next - so the line after a match is quoted as well; without it the
+        caller cannot see which line ngspice objected to. The line after a
+        SUPPRESSED match goes with it instead, because what follows a
+        trailing `Timestep too small` is its own `run simulation(s) aborted`.
+
+        A transient that already reached `tstop` is not a failure even when
+        ngspice says so afterwards. Measured (logs/cmd/r5_probe5.py,
+        r5_probe8.py) on the RC precision deck (5 ms, 565 rows, RMSE
+        0.544 mV), the DC motor deck (100 ms, 555 rows, final speed 194.81)
+        and the 1e9 V initial-condition deck (10 ns, 106 rows): each printed
+        `No. of Data Rows` FIRST and then `Timestep too small; time = <tstop>`,
+        and each held a complete, correct result - while a run that dies
+        early reports a time below tstop and a failed operating point reports
+        no time at all. So the marker is dropped only when the run produced
+        rows AND its reported time has reached tstop; everything else still
+        raises.
+        """
+        text_lines = [str(raw) for raw in lines]
+        produced_rows = any("no. of data rows" in line.lower()
+                            for line in text_lines)
+        matched: List[str] = []
+        skip_next = False
+        for idx, text in enumerate(text_lines):
+            if skip_next:
+                skip_next = False
+                continue
+            lowered = text.lower()
+            if not any(marker in lowered
+                       for marker in NgSpiceEngine.FAILURE_MARKERS):
+                continue
+            if (tstop is not None and produced_rows
+                    and "timestep too small" in lowered):
+                reported = re.search(r"time\s*=\s*([0-9.eE+-]+)", text)
+                at_or_past_end = False
+                if reported:
+                    try:
+                        at_or_past_end = (
+                            float(reported.group(1)) >= tstop * (1.0 - 1e-6))
+                    except ValueError:      # unparsable: keep it a failure
+                        at_or_past_end = False
+                if at_or_past_end:
+                    skip_next = True
+                    continue
+            matched.append(text.strip())
+            if idx + 1 < len(text_lines):
+                follower = text_lines[idx + 1].strip()
+                if follower and follower not in matched:
+                    matched.append(follower)
+        if not matched:
+            return None
+        return " | ".join(matched[:8])
+
+    @staticmethod
+    def _find_tstop(lines) -> Optional[float]:
+        """Stop time of the deck's .tran card, or None when it has none.
+
+        Parsed from the sanitised deck the caller just loaded, so cmd()'s
+        failure test compares against the transient the engine was actually
+        asked for. SPICE suffixes are converted (`.tran 10u 5m uic` -> 0.005).
+        """
+        for raw in lines:
+            parts = str(raw).split()
+            if parts and parts[0].lower() == ".tran" and len(parts) >= 3:
+                return _spice_seconds(parts[2])
+        return None
 
     # ------------------------------------------------------------------
     # JOB 4: ngspice input sanitiser — single choke point
@@ -674,14 +809,29 @@ class NgSpiceEngine:
         if not any(l.lower() == ".end" for l in sanitised):
             sanitised.append(".end")
 
+        # R5: remember the transient stop time (None when the deck has no
+        # .tran card) so cmd() can tell a complaint at tstop from one before
+        # it. Re-parsed on every load, so a previous deck's tstop never
+        # applies to the next one.
+        self._tstop = NgSpiceEngine._find_tstop(sanitised)
+
         c_array = (ctypes.c_char_p * (len(sanitised) + 1))()
         for idx, line in enumerate(sanitised):
             c_array[idx] = line.encode('utf-8')
         c_array[len(sanitised)] = None
 
+        # R5: ngSpice_Circ returns 0 even when it could not parse the deck
+        # (measured: malformed deck -> rc 0 + 'Error: circuit not parsed.'),
+        # so the captured output, not the return code, decides success here.
+        before = len(self.output_logs)
         ret = self.lib.ngSpice_Circ(c_array)
         if ret != 0:
             raise RuntimeError(f"ngSpice_Circ failed to load circuit (code {ret})")
+        report = self._failure_report(self.output_logs[before:])
+        if report:
+            raise RuntimeError(
+                f"ngSpice_Circ rejected the untrusted netlist: {report}"
+            )
 
     def load_circuit_file(self, filepath: str):
         with open(filepath, 'r', encoding='utf-8') as f:
