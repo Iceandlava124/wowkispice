@@ -8,12 +8,12 @@ observed (pasted), and that the original was restored afterward.
 # 2026-10-25 — JOB 3: four mutations against a SCRATCH COPY of bridge/qemu_monitor.py
 
 Method: the whole `bridge/` package was copied to
-`C:/Users/gudae/AppData/Local/Temp/job3_mut`, each mutation was applied to the
+`<home>/AppData/Local/Temp/job3_mut`, each mutation was applied to the
 COPY with `sed -i`, and pytest was run from inside the scratch dir with
 `PYTHONPATH=<scratch>` so `import bridge.qemu_monitor` resolved to the mutated
 copy. Proof of resolution printed before every run:
 `python -c "import bridge.qemu_monitor as m; print(m.__file__)"` ->
-`C:\Users\gudae\AppData\Local\Temp\job3_mut\bridge\qemu_monitor.py`.
+`<home>\AppData\Local\Temp\job3_mut\bridge\qemu_monitor.py`.
 The repo file was never edited; the scratch tree was deleted afterwards.
 Harness command per mutation:
 `python -m pytest <repo>/tests/test_qemu_monitor_unit.py -q -p no:randomly
@@ -137,8 +137,8 @@ Scratch tree deleted; `git --no-pager status --short` confirms `bridge/` untouch
 
 Scratch copy outside the repo: %TEMP%\wosp_mut_j4 (bridge/, tests/, circuits/ copied).
 Driver: logs/cmd/j4_mutate.py. Proof printed by every run:
-MODULE C:\Users\gudae\AppData\Local\Temp\wosp_mut_j4\bridge\ngspice_wrapper.py
-INTERP C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+MODULE <home>\AppData\Local\Temp\wosp_mut_j4\bridge\ngspice_wrapper.py
+INTERP <home>\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
 Unmutated scratch first: **28 passed** (pytest exit 0).
 
 ## M1 - skip the .include path check
@@ -174,7 +174,7 @@ Unmutated scratch first: **28 passed** (pytest exit 0).
 Scratch copy outside the repo: %TEMP%\wosp_mut_tools (bridge/, tools/doctor.py,
 tools/check_traceability.py, tests/test_tool_fixes.py copied).
 Driver: logs/cmd/toolfix_mutate.py. Proof every run:
-INTERP C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+INTERP <home>\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
 MODULE ...\wosp_mut_tools\tools\doctor.py
 Unmutated scratch first: **7 passed**.
 
@@ -203,7 +203,7 @@ Unmutated scratch first: **7 passed**.
 Scratch copy outside the repo: %TEMP%\wosp_mut_j4 (bridge/, tests/, circuits/
 copied). Driver: logs/cmd/j4_mutate.py. Proof printed by every run:
 MODULE ...\wosp_mut_j4\bridge\ngspice_wrapper.py
-INTERP C:\Users\gudae\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
+INTERP <home>\Music\PROJECT_WOWKISPICE\.venv\Scripts\python.exe
 Unmutated scratch first: **34 passed**.
 
 ## M1 - skip the .include path check entirely
@@ -241,3 +241,34 @@ Unmutated scratch first: **34 passed**.
 - Verdict: **KILLED**.
 
 7/7 mutants killed on this pass. Scratch tree removed after the run.
+
+
+## R4-01 - cmd() guard mutants (2026-10-28)
+Harness: logs/cmd/r4_mutate.py via tools/agentlog.ps1 -Job R4-01-MUTATE.
+Scope: tests/test_security_vectors.py + tests/test_ngspice_sanitiser.py
+(50 passed unmutated, 0.61 s). Target restored after each mutant and
+SHA256 re-checked (9f3f5a4b...fbc880 before and after).
+
+## M1 - drop the cmd() verb allowlist check
+- Result: **5 failed, 45 passed**
+- Verdict: **KILLED**.
+
+## M2 - drop the separator/redirection character check
+- Result: **1 failed, 49 passed** - test_command_separators_are_rejected
+- Verdict: **KILLED**.
+
+## M3 - add 'shell' to Cmd_ALLOWED
+- Result: **1 failed, 49 passed** - test_vector2_shell_command_is_rejected
+- Verdict: **KILLED**.
+
+## M4 - cmd() bypasses validate_cmd() entirely
+- Result: **6 failed, 44 passed** - all six command vectors
+- Verdict: **KILLED**.
+
+## M5 - swallow the missing-included-file rejection
+- Result: **1 failed, 49 passed** - the sanitiser suite covers this branch;
+  running only the new vector file left it SURVIVED, which is why both
+  suites are in scope for this harness.
+- Verdict: **KILLED**.
+
+5/5 mutants killed. Tree restored (SHA256 match printed by the harness).

@@ -38,7 +38,7 @@ Current verified state on the dev box (Windows + WSL Ubuntu, Python 3.12.10):
    <builddir>` + `ninja -C build qemu-system-xtensa` produced
    `qemu-system-xtensa` 9.2.2 with the esp32_sens patch and the
    immediate-conversion timer fix. Build output lives outside this repo at
-   `C:\Users\gudae\Music\qemu-build\qemu-esp_develop_9.2.2_20260417\build`.
+   `<home>\Music\qemu-build\qemu-esp_develop_9.2.2_20260417\build`.
 3. **`bridge/qemu_monitor.py`'s monitor path had never run (FIXED).**
    `start()` launched QEMU with `stdout=DEVNULL` and no stdin pipe, so
    `_hmp()` could not talk to it at all; the HMP protocol was also
@@ -105,7 +105,7 @@ Current verified state on the dev box (Windows + WSL Ubuntu, Python 3.12.10):
 
 1. **Provenance of the running binary: a local source tree, not this
    repo.** The `qemu-system-xtensa` used by Track B was built from
-   `C:\Users\gudae\Music\qemu-build\qemu-esp_develop_9.2.2_20260417`
+   `<home>\Music\qemu-build\qemu-esp_develop_9.2.2_20260417`
    (WSL `/mnt/c/...`): pinned tag `esp-develop-9.2.2-20260417` (commit
    `40edcca`) + commit `478892a` (the 0001 model content as a commit) + one
    working-tree edit (the immediate-conversion fix, now exported as 0002)
@@ -338,3 +338,34 @@ against the named lines.
   investigate the Qt worker thread / in-process ngspice interaction in
   `ui/schematic_editor.py`. Owner decision needed on whether to chase this
   before the pilot.
+
+## 2026-10-28 - R4-01 security and licence audit
+
+Open defects found while making the SECURITY.md vector table executable.
+
+1. **`LICENSE` and `pyproject.toml` disagree about the project licence.**
+   `LICENSE` contains the Apache License 2.0 text (`Apache License`,
+   `Version 2.0, January 2004`, read with `Get-Content LICENSE -TotalCount 3`)
+   while `pyproject.toml` declares `license = {text = "MIT"}`. One is wrong.
+   OWNER ACTION: decide which, then change the other.
+2. **No licence text for ngspice or QEMU exists in this checkout.** Searched
+   `tools/ngspice_dll` for `*COPYING*`, `*LICENSE*`, `*GPL*`: no match. The
+   shipped binary carries only its copyright banner
+   (`Copyright 1985-1994, Regents of the University of California` /
+   `Copyright 2001-2026, The ngspice team`) and no licence text.
+   `THIRD_PARTY_NOTICES.md` records this rather than guessing.
+   This contradicts item 9 above ("the component licenses were read from the
+   upstream LICENSE files only"): there is no such file here, and
+   `tools/ngspice-47_dll_64.7z` cannot be opened on this box (no 7-Zip
+   present), so that earlier statement is not reproducible from the tree.
+   OWNER ACTION: vendor the upstream `COPYING` beside the DLL.
+3. **PyQt5 declares GPL v3** (read from `.venv/Lib/site-packages/
+   PyQt5-5.15.11.dist-info/METADATA`, field `License: GPL v3`). Any
+   distributed build links GPL-3 code, whatever the project's own licence
+   says. Decision belongs to the owner, not to an agent edit.
+4. **Historical evidence logs were redacted, not rewritten.** The R4 path
+   scrub replaced the developer's home directory with `<home>` in
+   `tests/MUTATION_LOG.md`, `docs/HANG_TRIAGE.md`, `docs/INVENTORY.md` and
+   other tracked files. Measurements, counts and hashes in those logs are
+   untouched; only the path prefix changed, so no file-location evidence can
+   be checked against it again.

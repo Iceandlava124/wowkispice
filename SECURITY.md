@@ -138,23 +138,78 @@ full output: `logs/activity.jsonl` jobs `S3A-EXPLOIT` and `S3B-INCLUDE`
 | 8 | bare `shell ... > <marker>` line in a netlist (element position) | parsed as an element: `Error on line 2 ... Unable to find definition of model`, **no marker** (not executed) | same |
 | 9 | `.control` + `shell` **inside** an allowed `.include`d file (vector placed in `circuits/components/`) | **marker created** (included `.control` executed) | **before the content scan: marker created; after: rejected at load, marker never created** (tests `TestIncludedFileContent`, mutant M5) |
 
-### Residual findings (tested, NOT blocked — stated plainly)
+> **The table above records the state before job R4-01 (2026-10-28).** It is
+> kept as history. The current state, with the `cmd()` gap closed and every
+> row re-run as a pytest case, is in "After R4-01" below.
 
-* `NgSpiceEngine.cmd()` passes any string straight to `ngSpice_Command`.
-  Vector 2 executed `shell` through it on the draft as well as on HEAD. The
-  netlist paths tested above (1, 4, 8, 9) cannot reach `cmd()` in this code
-  base, but the Python method itself is unfiltered: anything that lets
-  untrusted text reach `cmd()` inherits ngspice's full command language.
-  This is the known gap behind the readiness item "cmd() guarded".
+### Residual findings at that time (tested, NOT blocked — stated plainly)
+
+* `NgSpiceEngine.cmd()` passed any string straight to `ngSpice_Command`.
+  Vector 2 executed `shell` through it on the draft as well as on HEAD. That
+  gap is closed by job R4-01 below.
 * Vector 3 did not prove an arbitrary-file read (the path was mangled
   before ngspice opened it), and it wedges the shared DLL into an
   unrecoverable error state until reset/detach.
 * Vectors 5-7 returned rc 0 without producing a file in this environment.
-  That is an observation, not a guarantee: neither "safe" nor "exploitable"
-  is claimed for file-output commands issued through `cmd()`.
+  That was an observation, not a guarantee; after R4-01 they are refused
+  before ngspice is entered, which is a guarantee about this loader rather
+  than about ngspice.
 * Vectors are run against the shipped Windows DLL only. No claim is made
   about other ngspice builds, other platforms, or about behaviour that was
   not listed in the table.
+
+### After R4-01: `cmd()` guarded (2026-10-28)
+
+`NgSpiceEngine.cmd()` now passes its string through `validate_cmd()` first:
+
+* the verb (first whitespace-delimited token, lowercased) must be in
+  `Cmd_ALLOWED` — `run`, `bg_run`, `reset`, `destroy`, `alter`, `stop`,
+  `setplot`, `tran`. That set is the complete vocabulary of every `.cmd(`
+  call site under `bridge/`, `ui/`, `tests/` and `tools/` (grep: run x36,
+  setplot x6, stop x1, alter x1, plus `tran ...` from
+  `bridge/mock_controller.py:156`);
+* the string must contain no `\r`, `\n`, `;`, `|`, `&`, backtick, `$`, `<`
+  or `>` — the characters that let one string carry a second command or a
+  redirection;
+* a refusal is a `RuntimeError` naming the verb, so a policy refusal is
+  distinguishable from a simulator error.
+
+Measured after the guard (every one of these is now a pytest case in
+`tests/test_security_vectors.py`, run against the real library):
+
+| # | Vector | Now |
+|---|--------|-----|
+| 1 | `.control` + `shell` in a netlist | rejected at load, deck never reaches `ngSpice_Circ`, no marker |
+| 2 | `cmd("shell echo PWNED> <marker>")` | `RuntimeError: not on allowlist: 'shell'`, command never reaches `ngSpice_Command`, no marker |
+| 3 | `cmd('source "<file>"')` | `RuntimeError: not on allowlist: 'source'`, ngspice never asked to read the file |
+| 4 | `.include` of a file outside `circuits/components` | `RuntimeError: outside allowed directories`, deck never reaches `ngSpice_Circ`, no marker |
+| 5 | `cmd('write "<path>" v(out)')` | `RuntimeError: not on allowlist: 'write'`, no file created |
+| 6 | `cmd('wrdata "<path>" v(out)')` | `RuntimeError: not on allowlist: 'wrdata'`, no file created |
+| 7 | `cmd('hardcopy "<path>" v(out)')` | `RuntimeError: not on allowlist: 'hardcopy'`, no file created |
+| 8 | bare `shell ... > <marker>` in element position | still parsed as an element; run attempted; no marker |
+| 9 | `.control` + `shell` inside an allowed include | rejected at load, error names the included file, no marker |
+
+"Never reaches ngspice" is not inferred from captured output: the tests shadow
+`ngSpice_Command` and `ngSpice_Circ` with recorders and assert the recorder was
+never called.
+
+Mutation evidence (`logs/cmd/r4_mutate.py`, agentlog job `R4-01-MUTATE`):
+5 mutants, **5 killed**, tree restored and SHA256 re-checked.
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests\test_security_vectors.py -q --timeout=60
+```
+
+Residual after R4-01, stated plainly:
+
+* The allowlist stops what this loader can be asked to do; it is not a sandbox
+  for `ngspice` itself, and a caller that constructs a command from untrusted
+  text can still choose among the allowed verbs.
+* Vector 8's outcome (element-position `shell`) depends on ngspice's parser,
+  not on this loader; the test asserts only that no marker appears.
+* The vectors were run against the shipped Windows DLL only.
+* Third-party license texts for ngspice and QEMU are not present in this
+  checkout; `THIRD_PARTY_NOTICES.md` records that rather than guessing.
 
 ### Verification commands
 

@@ -324,7 +324,8 @@ class NgSpiceEngine:
         self.user_data_callback = callback
 
     def cmd(self, command: str) -> int:
-        return self.lib.ngSpice_Command(command.encode('utf-8'))
+        return self.lib.ngSpice_Command(
+            self.validate_cmd(command).encode('utf-8'))
 
     # ------------------------------------------------------------------
     # JOB 4: ngspice input sanitiser — single choke point
@@ -369,8 +370,20 @@ class NgSpiceEngine:
         r'^[ \t]*\.([a-zA-Z]+)(?:[ \t]+(?:"([^"]*)"|\'([^\']*)\'|(\S+)))?',
         re.IGNORECASE)
 
-    # Legitimate cmd() commands that the code sends through ngSpice_Command
-    Cmd_ALLOWED = frozenset({'run', 'bg_run', 'reset', 'destroy', 'alter'})
+    # Legitimate cmd() commands that the code sends through ngSpice_Command.
+    # Enumerated by grepping every `.cmd(` call site under bridge/, ui/, tests/
+    # and tools/ (job R4-01): run x36, setplot x6, stop x1, alter x1, plus the
+    # transient-card form `tran ...` (bridge/mock_controller.py:156) and the
+    # alter form built in bridge/load_stepper.py:31. Nothing else is sent.
+    Cmd_ALLOWED = frozenset({
+        'run', 'bg_run', 'reset', 'destroy',
+        'alter', 'stop', 'setplot', 'tran',
+    })
+
+    # Characters that let one string carry a second command or a redirection.
+    # `cmd("shell echo PWNED> <marker>")` (SECURITY.md vector 2) is exactly
+    # this shape, so the guard rejects them before ngspice ever parses.
+    CMD_FORBIDDEN_CHARS = re.compile(r'[\r\n;|&`$<>]')
 
     # Regex: match a dot-directive at line-start (case-insensitive, optional
     # leading whitespace/tabs, CRLF-safe after normalisation)
@@ -419,6 +432,47 @@ class NgSpiceEngine:
             cmd_name = parts[0] if parts else ''
             return True, cmd_name
         return False, None
+
+    @staticmethod
+    def validate_cmd(command: str) -> str:
+        """Return `command` if it is an allowed ngspice command, else raise.
+
+        `cmd()` is the second path into ngspice's command language: it hands
+        its string straight to `ngSpice_Command`, so the netlist sanitiser
+        does not protect it. Measured before this guard existed (SECURITY.md
+        vector 2, logs/activity.jsonl job S3A-EXPLOIT):
+        `cmd("shell echo PWNED> <marker>")` created the marker file on both
+        HEAD and the sanitiser draft.
+
+        Rules, in order: the verb (first token) must be in Cmd_ALLOWED; the
+        whole string must then be free of control and redirection characters.
+        Rejection is a RuntimeError naming the verb so the caller can tell a
+        policy refusal from a simulator error.
+        """
+        if not isinstance(command, str):
+            raise TypeError(
+                "ngSpice_Command rejected: command must be str, got %r"
+                % (type(command).__name__,)
+            )
+        text = command.strip()
+        if not text:
+            raise RuntimeError("ngSpice_Command rejected: empty command")
+        # Verb first: for `shell ...` the actionable reason is the verb, not
+        # the redirection character that happens to follow it.
+        verb = text.split()[0].lower()
+        if verb not in NgSpiceEngine.Cmd_ALLOWED:
+            raise RuntimeError(
+                "ngSpice_Command rejected the command "
+                "(not on allowlist: %r) @cmd: %s" % (verb, text)
+            )
+        offending = NgSpiceEngine.CMD_FORBIDDEN_CHARS.search(text)
+        if offending:
+            raise RuntimeError(
+                "ngSpice_Command rejected the command "
+                "(character %r not permitted) @cmd: %s"
+                % (offending.group(0), text)
+            )
+        return text
 
     @staticmethod
     def _check_include_path(raw: str, directive: str, depth: int = 0
@@ -586,8 +640,10 @@ class NgSpiceEngine:
         depth limit INCLUDE_SCAN_DEPTH_LIMIT), and the line is rewritten to
         the validated absolute path.
 
-        cmd() allowlist: run, bg_run, reset, destroy, alter (the commands the legitimate
-        code sends). Reject with a clear, specific error naming the directive
+        cmd() allowlist: run, bg_run, reset, destroy, alter, stop, setplot, tran
+        (the commands the legitimate code sends), enforced by validate_cmd()
+        inside cmd() itself - not only by this netlist path. Reject with a
+        clear, specific error naming the directive
         and line: .control/.endc, any shell/system/exec-style command,
         write/wrdata/hardcopy/any file-output command, .include/.lib/.inc/source
         outside an allowed directory (default: none), and any unknown
