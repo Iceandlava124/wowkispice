@@ -552,3 +552,98 @@ Smallest remaining owner questions:
 | OWNER-SET, unset | R12 |
 
 Jobs this session: `S2-INIT`, `R5-01`, `R2-03`. Log entries 104-160.
+
+---
+
+# Session 2026-10-28 — job R3-01, mutation strength and coverage
+
+## The harness and its two passes
+
+`logs/cmd/r3_mutate.py` mutates the real source one mutant at a time, runs
+the suites that cover the module, and restores each file with a SHA256 check
+at the end (baseline digests are printed first). Test set: `test_adc_
+conversion`, `test_control_law_unit`, `test_binary_runner`,
+`test_adversarial_stress`, `test_qemu_monitor_unit`, `test_closed_loop_buck`,
+`test_solver_error_handling`, `test_ngspice_sanitiser`,
+`test_security_vectors`.
+
+First pass (`R3-01-MUTATE1`): **13 of 16 killed**, baseline `87 passed`,
+tree restored:
+
+```
+survivors:
+  - control_law: to_counts ignores the sense divider
+  - control_law: equal threshold counts accepted
+  - binary_runner: callback always reports the gate low
+```
+
+The first two were genuine test gaps and were closed by tests written
+against them (commit `93d5c94`). The third lives inside `run_binary_cosim()`,
+which returns before reaching it unless a firmware image AND a QEMU binary
+both exist - neither does on this machine (the R6/R7/R8 blocker), so it is
+listed under `BLOCKED_MUTANTS` in the harness rather than claimed.
+
+Second pass (`R3-01-MUTATE2`): **19 of 19 killed**, baseline `92 passed`,
+`restored sha256 matches: True`:
+
+```
+control_law    6 killed  (clipping, rounding, divider, both hysteresis
+                          branches, low>=high rejection)
+binary_runner  8 killed  (ADC divider, rounding, full scale, clipping,
+                          gate-poll settle rule, flip-as-stability,
+                          missing timeout, read failure re-raised)
+qemu_monitor   5 killed  (error reply swallowed, wrong ADC value, wrong
+                          GPIO bit, echo returned as reply, dead QEMU)
+```
+
+`bridge/ngspice_wrapper.py` already carries 10 killed mutants from job
+R5-01, so every module the row names has at least 5, all killed.
+
+Regression gate for the job (`R3-01-GATE`, full suite minus the two files
+that reach the blocked R2 crash):
+
+```
+371 passed, 3 skipped, 112 deselected, 33 warnings in 74.83s   exit 0
+```
+
+(366 before this job + 5 new tests.)
+
+## Line coverage - measured, target not set
+
+No `coverage`/`pytest-cov` module exists in this environment and installing
+one needs owner approval, so `logs/cmd/r3_coverage.py` measures with the
+standard library alone: `trace.Trace(count=1, trace=0)` for executed lines
+and `dis.findlinestarts()` over every code object for executable lines (the
+same definition coverage.py uses). The tracer's key format was verified
+first with `logs/cmd/trace_probe.py` - a flat `{(filename, lineno): count}` -
+because the first run reported 0.0% from a dict-shape mismatch, not from a
+lack of execution.
+
+```
+module                        execed   total coverage  file
+bridge.ngspice_wrapper           376     508    74.0%  bridge/ngspice_wrapper.py
+bridge/control_law               202     274    73.7%  bridge/control_law.py
+bridge/binary_runner              75     303    24.8%  bridge/binary_runner.py
+bridge/qemu_monitor              156     214    72.9%  bridge/qemu_monitor.py
+TOTAL                            809    1299    62.3%  four core modules combined
+```
+
+143 tests executed under the tracer (`R3-01-COVERAGE3`, exit 0).
+`binary_runner`'s 24.8% is the QEMU-dependent co-simulation body, which
+cannot run on a machine with no emulator; its ADC conversion and gate-read
+helpers are in the covered quarter.
+
+The row's own wording keeps it **UNVERIFIED until the owner sets the
+coverage target**, so no target is asserted here.
+
+## Status after this job
+
+| Status | Rows |
+|---|---|
+| PASS | R5 |
+| BLOCKED (owner action) | R1, R2, R3 (coverage target), R4, R6, R7, R8 |
+| FAIL (still actionable) | R9, R10, R11 |
+| OWNER-SET, unset | R12 |
+
+Jobs this session: `S2-INIT`, `R5-01`, `R2-03`, `R3-01`. Log entries
+104-166.
