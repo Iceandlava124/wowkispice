@@ -31,16 +31,17 @@ performs the review; an agent may not).
 
 # 2026-10-28 — session 1
 
-Jobs executed: **2 of 12** (R4-01, R2-01). Commits: `9db95f7`, `b15b668`.
+Jobs executed: **2 of 12** (R4-01, R2-01). Commits: `9db95f7`, `b15b668`,
+`0b6f2b3`, `40a0ef5`.
 
 ## Status recomputed from this session's output
 
 | Row | Status | Evidence in one line |
 |---|---|---|
 | R1 | **BLOCKED** (owner action) | not attempted: `setup.ps1` downloads the ngspice DLL and wheels (rule 4 needs owner approval), and the branch still carries uncommitted work a clone would not contain |
-| R2 | **PASS** | 3/3 runs identical: `453 passed, 3 skipped` in 160.82 s, 181.92 s, 151.08 s, exit 0 each; 30/30 test files collect at least one test (456 collected); the 3 skips name `qemu-system-xtensa` |
+| R2 | **FAIL** | three runs were identical (`453 passed, 3 skipped`, 160.82/181.92/151.08 s, exit 0), then **four consecutive runs crashed** with a native access violation at 15% in `ui/schematic_editor.py:688`; the same file alone passes (36 passed, 6.90 s) and the rest of the suite is green (418 passed, 3 skipped, 36 deselected). The row's "zero flaky tests" clause is not met |
 | R3 | **FAIL** | 12 mutants exist for the ngspice wrapper (7 from JOB 4 + 5 from R4-01, all killed); **0** for `control_law.py`, **0** for `binary_runner.py`; `qemu_monitor.py`'s 4 mutants were declared an invalid harness in `tests/MUTATION_LOG.md` (JOB 3c); no coverage number is reported and the coverage target was never set |
-| R4 | **BLOCKED** (owner action) | vectors 1-9 all blocked and covered by 16 passing tests; included content scanned; binds loopback; no user paths or secrets; **but** no licence text for ngspice or QEMU exists in this checkout, so that clause cannot be satisfied from files |
+| R4 | **BLOCKED** (owner action) | vectors 1-9 all blocked and covered by 17 passing tests; included content scanned; binds loopback; no user paths or secrets; **but** no licence text for ngspice or QEMU exists in this checkout, so that clause cannot be satisfied from files |
 | R5 | **FAIL** | probe below: NaN/Inf reach `int(round(...))` and die with an incidental `ValueError`/`OverflowError`, not a named guard, and no test asserts the rejection; RC/RLC tolerance justification and the malformed-netlist requirement were not measured this session |
 | R6 | **BLOCKED** (owner action) | hand-derived ADC expectations exist (12 closed-form tests in `tests/test_adc_conversion.py`); the real-emulator gate-flip at 1995/2030 cannot run: no `qemu-system-xtensa`, `WOSP_QEMU` unset |
 | R7 | **BLOCKED** (owner action) | 10 real-emulator runs are impossible without the emulator |
@@ -62,7 +63,7 @@ was false and nothing in the suite would have noticed a regression.
 enumerated from every `.cmd(` call site) and a rejection of
 `\r \n ; | & ` $ < >` before the library is entered.
 
-**Tests:** `tests/test_security_vectors.py`, 16 cases — one per `SECURITY.md`
+**Tests:** `tests/test_security_vectors.py`, 17 cases — one per `SECURITY.md`
 row plus command-separator, legitimate-command, loopback-bind and
 tracked-file hygiene cases. Vectors that must stop early prove it by
 shadowing `ngSpice_Command`/`ngSpice_Circ` with recorders and asserting the
@@ -97,12 +98,12 @@ M5 swallow missing-include    KILLED (1 failed)
 * A byte of a historical log (`tests/MUTATION_LOG.md`, `0x97`) was replaced
   with U+FFFD by the editing tool and restored byte-for-byte before commit.
 
-## Job R2-01 — three consecutive full runs
+## Job R2-01 — three consecutive full runs, then a regression (row FAIL)
 
-Tree: `b15b668` plus the untracked `docs/SCORECARD.md` (docs only, no test
-change). Command each time: `.venv\Scripts\python.exe tools\run_tests.py`,
-launched through `tools\agentlog.ps1` as jobs `R4-01-GATE`, `R2-01-RUN2`,
-`R2-01-RUN3`.
+First batch — tree `b15b668` plus the untracked `docs/SCORECARD.md` (docs
+only, no test change). Command each time:
+`.venv\Scripts\python.exe tools\run_tests.py`, launched through
+`tools\agentlog.ps1` as jobs `R4-01-GATE`, `R2-01-RUN2`, `R2-01-RUN3`.
 
 | Run | Result | Duration | Exit |
 |---|---|---|---|
@@ -141,6 +142,45 @@ row's "every skip naming a missing binary" clause is met.
 Before this session the same runner reported `437 passed, 3 skipped` in
 168.21 s (`logs/baseline/r4-baseline-suite.txt`); the +16 are
 `tests/test_security_vectors.py`.
+
+### Second batch — the same tree, four crashes in a row
+
+After the test-only commit `40a0ef5` (a tightened path pattern plus one new
+case, 457 collected), the same command was run three more times
+(`R2-02-RUN1/2/3`). All three exited 1, and a fourth direct run
+(`logs/baseline/diag-crash.txt`) reproduced it with the untruncated trace:
+
+```
+........................................................................ [ 15%]
+...............................Windows fatal exception: access violation
+
+Current thread 0x00007eb4 (most recent call first):
+  File "ui\schematic_editor.py", line 688 in _run_in_worker
+  File "ui\schematic_editor.py", line 3027 in run_simulation
+  File "tests\test_editor_workflow.py", line 284 in test_progress_reaches_complete_after_a_run
+...
+exit=139 (segmentation fault)
+```
+
+That is the same faulting path recorded as intermittent in
+`docs/KNOWN_ISSUES.md` on 2026-10-27, and it happens in
+`test_editor_workflow.py`, which runs *before* the files this session
+changed, so it is not a defect introduced by R4-01. Isolation evidence:
+
+```
+.venv\Scripts\python.exe -m pytest tests/test_editor_workflow.py -q
+36 passed in 6.90s
+
+.venv\Scripts\python.exe -m pytest tests -q --deselect tests/test_editor_workflow.py
+418 passed, 3 skipped, 36 deselected, 33 warnings in 135.15s   exit=0
+```
+
+So every other test is green and the defect needs the full-suite context.
+Four crashes after four clean runs of the same suite is the definition of a
+flaky test, which is why R2 is **FAIL** and not PASS: the row asks for zero
+flakes, not for a majority of clean runs. The driver's rule for a regression
+in a previously-passing row is to stop and fix it before continuing, so this
+is where the session stops.
 
 ## Commands this session that produced no test change
 
@@ -220,10 +260,18 @@ next session should agree the split with the owner first.
 
 | Status | Rows |
 |---|---|
-| PASS | R2 |
-| FAIL | R3, R5, R9, R10, R11 |
+| PASS | (none) |
+| FAIL | R2, R3, R5, R9, R10, R11 |
 | BLOCKED (owner action) | R1, R4, R6, R7, R8 |
 | OWNER-SET, unset | R12 |
+
+**Session stop reason:** a row that passed in this session's first batch (R2,
+three identical clean runs) regressed to a hard crash in the second batch.
+The driver says to stop and fix a regression before continuing; the defect
+lives in `ui/schematic_editor.py` and that file carries 376+ lines of
+uncommitted work from an earlier job, so fixing it here would mean committing
+work that is not this session's. It is recorded, with evidence, as the next
+job (**R2-03**) instead.
 
 ## What this session does not claim
 

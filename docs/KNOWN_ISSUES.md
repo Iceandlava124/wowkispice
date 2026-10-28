@@ -369,3 +369,33 @@ Open defects found while making the SECURITY.md vector table executable.
    other tracked files. Measurements, counts and hashes in those logs are
    untouched; only the path prefix changed, so no file-location evidence can
    be checked against it again.
+
+## 2026-10-28 - the editor-worker access violation is no longer rare
+
+The intermittent crash recorded on 2026-10-27 reproduced **4 times in a row**
+on commit `40a0ef5`, after the same suite had completed cleanly 4 times earlier
+in the same session.
+
+```
+Windows fatal exception: access violation
+Current thread (most recent call first):
+  File "ui\schematic_editor.py", line 688 in _run_in_worker
+  File "ui\schematic_editor.py", line 3027 in run_simulation
+  File "tests\test_editor_workflow.py", line 284 in test_progress_reaches_complete_after_a_run
+```
+
+* Four reproductions: `logs/baseline/r2b-run1.txt` .. `r2b-run3.txt`
+  (via `tools/agentlog.ps1`, jobs `R2-02-RUN1/2/3`) and
+  `logs/baseline/diag-crash.txt` (direct pytest, exit 139, crash at 15%).
+* Isolation: `pytest tests/test_editor_workflow.py` -> **36 passed in 6.90s**.
+* Everything else: `pytest tests --deselect tests/test_editor_workflow.py`
+  -> **418 passed, 3 skipped, 36 deselected, exit 0**.
+* Not caused by the R4-01 changes: the crash lands in
+  `test_editor_workflow.py`, which runs before any file this session touched,
+  and the same tree produced four clean 453/3/0 runs an hour earlier.
+* Consequence: SCORECARD v1 row **R2** is FAIL on its "zero flaky tests"
+  clause. Next job R2-03 is this defect.
+* Note for whoever picks it up: `ui/schematic_editor.py` carries uncommitted
+  work from an earlier job (the same file is listed as modified at session
+  start), so a fix there has to be agreed with the owner before it can be
+  committed on its own.
