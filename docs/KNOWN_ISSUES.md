@@ -399,3 +399,35 @@ Current thread (most recent call first):
   work from an earlier job (the same file is listed as modified at session
   start), so a fix there has to be agreed with the owner before it can be
   committed on its own.
+
+## 2026-10-28 (second entry point) - the editor-worker crash also fires through test_ui_polish
+
+Job `R5-01-GATEFULL` (log entry 138), full suite with nothing deselected:
+
+```
+........................................................................ [ 14%]
+Windows fatal exception: access violation
+Current thread 0x00005c90 (most recent call first):
+  File "ui\schematic_editor.py", line 686 in _run_in_worker
+  File "ui\schematic_editor.py", line 3027 in run_simulation
+  File "tests\test_editor_workflow.py", line 284 in test_progress_reaches_complete_after_a_run
+exit 1
+```
+
+Job `R5-01-GATE2` (entry 119) reached the same frames through a different
+file, `tests/test_ui_polish.py:573 test_clicking_a_trace_row_chooses_what_the_cursor_measures`,
+with `test_editor_workflow.py` deselected - so the fault is the Qt worker
+path itself, not one test.
+
+Isolation, this session:
+
+* `pytest tests/test_editor_workflow.py` -> 36 passed (earlier session)
+* `pytest tests/test_ui_polish.py` -> **76 passed in 79.06 s** (entry 137)
+* `pytest tests --deselect <both files>` -> **366 passed, 3 skipped, 112
+  deselected, exit 0, 78.15 s** (entry 129)
+* `tools/run_tests.py` -> exit 1, thread dump only, no FAILED test line
+  (entry 134)
+
+Status unchanged: INTERMITTENT, needs full-suite context, R2 remains FAIL.
+`ui/schematic_editor.py` still carries uncommitted work from an earlier job,
+so a fix there needs the owner's agreement before it can be committed alone.

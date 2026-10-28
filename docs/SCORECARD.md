@@ -279,3 +279,195 @@ job (**R2-03**) instead.
   licence clause is not.
 * It does not claim any speed, coverage or determinism number that was not
   printed above.
+
+---
+
+# Session 2026-10-28 (continued) — job R5-01, solver failure detection
+
+## Recomputed statuses from this session's commands
+
+| Row | Status | Basis |
+|---|---|---|
+| R1 | BLOCKED | no change; still needs network approval (owner action 5) |
+| R2 | **FAIL** | three more reproductions of the same native crash this session (below) |
+| R3 | FAIL | mutants now exist for `ngspice_wrapper` (10 killed); `control_law`, `binary_runner`, `qemu_monitor` not yet; coverage target never set |
+| R4 | BLOCKED | no change; licence texts still owner action 1 |
+| R5 | **PASS** | all three clauses verified below |
+| R6/R7/R8 | BLOCKED | `WOSP_QEMU` still unset (owner action 6) |
+| R9 | FAIL | no change this session |
+| R10 | FAIL | no change this session (PyYAML still owner action 8) |
+| R11 | FAIL | no change this session (tree still carries other jobs' work) |
+| R12 | unset | owner-set only |
+
+## Job R5-01 — reproduction first (job `R5-01-REPRO`, `logs/out/00112.txt`)
+
+`tests/test_solver_error_handling.py` written against the measured failure
+signatures, run on the tree that produced them:
+
+```
+6 failed, 9 passed in 0.12s
+FAILED TestMalformedNetlistRaises::test_malformed_deck_raises_a_clear_error
+FAILED TestMalformedNetlistRaises::test_error_names_the_offending_text
+FAILED TestNonConvergentAnalysisRaises::test_conflicting_sources_op_raises
+FAILED TestNonConvergentAnalysisRaises::test_contradictory_ic_transient_raises
+FAILED TestNonConvergentAnalysisRaises::test_error_arrives_within_the_timeout
+FAILED TestNonFiniteNeverBecomesACount::test_a_finite_value_still_converts
+```
+
+Five are the defect (ngspice returned 0 while refusing the deck); the sixth
+was a wrong expectation in the reproduction itself - `binary_runner` converts
+the pre-divider sense voltage, so its half-scale input is 0.825 V, not 1.65 V.
+
+## The first detector broke three healthy physics tests
+
+After the fix landed, `GATE2` (`logs/out/00119.txt`) reported:
+
+```
+4 failed, 353 passed, 3 skipped, 112 deselected in 169.85s
+FAILED tests/test_components_library.py::TestComponentsLibrary::test_dc_motor_model
+FAILED tests/test_ngspice_bridge.py::TestNgSpiceBridge::test_rc_circuit_mathematical_precision
+FAILED tests/test_ngspice_dll_proof.py::TestNgSpiceDllProof::test_proof2_dynamic_rc_circuit
+FAILED tests/test_selfcheck.py::TestSelfcheck::test_quick_selfcheck_reports_pass
+RuntimeError: ngSpice_Command reported a failed analysis:
+  stderr doAnalyses: TRAN:  Timestep too small; time = 0.005, timestep = 0 ...
+```
+
+Every one of the three solver failures reported `time = ` **exactly the
+deck's own `.tran` stop time** (0.005 s, 0.1 s). `test_selfcheck` passed on
+its own (`R5-01-SELFCHECK`, `R5-01-SELFCHECK2`, both exit 0) and passed in
+the final gate, so it is not part of this row's evidence.
+
+## Probes 5-8: what the message actually means
+
+`logs/cmd/r5_probe5.py` (job `R5-01-PROBE5`) ran the two failing decks and
+read the vectors out of the "failed" run:
+
+| deck | rows | last time | result vs theory |
+|---|---|---|---|
+| RC precision, `.tran 10u 5m uic` | 565 | 0.005000 s (= tstop) | RMSE **0.544 mV**, max 1.649 mV |
+| DC motor, `.tran 200u 100m uic` | 555 | 0.100000 s (= tstop) | final speed **194.81** (> 150 required) |
+
+and in both, ngspice printed `No. of Data Rows : N` **before** the
+`Timestep too small` line. `r5_probe7.py` (`R5-01-PROBE7`) extended the
+`.ic v(out)=1e9` deck's stop time to 10 n, 100 n and 10 u: the marker time
+equalled tstop in all three (106/147/1011 rows, all finite), and at 10 u
+ngspice printed no marker at all - that deck is a **completed** run, not the
+"unsolvable" case probe4 called it. `r5_probe8.py` (`R5-01-PROBE8`) then
+dry-ran the rule before it was written into the wrapper:
+
+```
+completed_rc            tstop=0.005   rule_says=ok
+completed_motor         tstop=0.1     rule_says=ok
+contradictory_ic        tstop=1e-08   rule_says=ok
+conflicting_op          tstop=None    rule_says=FAILURE   (no data rows)
+conflicting_tran_no_uic tstop=1e-08    rule_says=FAILURE   (op failure, no time=)
+malformed                               rule_says=FAILURE   (raised at load)
+healthy_op                              rule_says=ok
+```
+
+## The fix (commit `6a3098d`)
+
+`cmd()` and `load_circuit()` read the captured output and raise on the
+measured markers; `_failure_report()` drops a `Timestep too small` marker
+**only** when the run produced `No. of Data Rows` **and** the marker's own
+`time =` has reached the deck's `.tran` stop time, which `load_circuit()`
+parses with SPICE suffixes (`_spice_seconds`: `5m` -> 0.005, `meg` -> 1e6).
+A failed operating point reports no `time =`, a run that dies early reports a
+time below tstop, and an unknown tstop (`None`) suppresses nothing - all
+three fail closed.
+
+## Mutation check (job `R5-01-MUTATE2`, `logs/out/00126.txt`)
+
+```
+baseline sha256: 1ea50dfc3fd6c67b58512e1cc47562c02986951deee0297ab03036d111365d99
+unmutated: exit 0  75 passed in 1.33s
+M1 drop the load-path parse check           KILLED  exit 1
+M2 drop the run-path analysis check         KILLED  exit 1
+M3 make _failure_report never match         KILLED  exit 1
+M4 drop the offending-line follower quote   KILLED  exit 1
+M5 treat warnings as failures               KILLED  exit 1
+M6 accept the marker's claim without data rows       KILLED  exit 1
+M7 suppress every timestamped marker                KILLED  exit 1
+M8 keep the line that follows a suppressed marker   KILLED  exit 1
+M9 never read the deck's stop time                  KILLED  exit 1
+M10 ignore SPICE scale suffixes (5m -> 5.0 s)       KILLED  exit 1
+restored sha256 == original: True
+mutants killed: 10/10
+```
+
+## Row R5 evidence, clause by clause
+
+**(a) RC and RLC proofs as gated pytest tests** - job `R5-01-GATED`,
+`logs/out/00133.txt`:
+
+```
+tests/test_ngspice_dll_proof.py::TestNgSpiceDllProof::test_proof2_dynamic_rc_circuit PASSED
+tests/test_ngspice_dll_proof.py::TestNgSpiceDllProof::test_proof3_underdamped_rlc_ringing PASSED
+tests/test_ngspice_dll_proof.py::TestNgSpiceDllProof::test_proof_script_runs_to_completion PASSED
+3 passed in 0.25s
+```
+
+Not skipped: the gate names `ngspice.dll not available for physics proof`
+when the DLL is absent, and it was present.
+
+**(b) Tolerances justified from measured error** - three runs of
+`tools/prove_physics_engine.py` (`R5-01-TOLERANCE`, `...2`, `...3`),
+Proof 2 re-randomises its R/C/Vin each run:
+
+| measured | sample 1 | sample 2 | sample 3 | worst | gated tolerance | margin |
+|---|---|---|---|---|---|---|
+| RC RMSE | 0.171 mV | 0.419 mV | 0.067 mV | **0.419 mV** | 20 mV | 48x |
+| RC max abs error | 0.554 mV | 1.275 mV | 0.214 mV | **1.275 mV** | (report only) | - |
+| RLC ringing frequency | 0.06% | 0.06% | 0.06% | **0.06%** | 3.0% | 50x |
+| RLC envelope decay | 0.07% | 0.07% | 0.07% | **0.07%** | 10% | 143x |
+
+plus the deterministic RC deck used by `test_ngspice_bridge`
+(`R5-01-PROBE5`): RMSE 0.544 mV against its 8 mV tolerance (14.7x).
+Each tolerance is therefore at least 14x the largest error actually
+measured on this machine, which is what the row asks for. The tolerances
+themselves were not changed - they are the ones already in the tests.
+
+**(c) Malformed / non-convergent gives a clear error within timeout** -
+`tests/test_solver_error_handling.py`, 8 tests, all passing:
+
+* malformed deck -> `RuntimeError` at load quoting `Error on line 2` and
+  the offending text (measured in `r5_probe6.py` as
+  `ngSpice_Circ rejected the untrusted netlist: ... line 3 ... r1 in out oops oops`);
+* conflicting sources under `.op` -> raises quoting the operating-point /
+  DC-solution failure;
+* the same two sources under `.tran` without `uic` -> raises
+  (`test_non_convergent_transient_raises`);
+* `test_error_arrives_within_the_timeout` measures the raise and asserts
+  **< 5.0 s**; the measured runs complete in well under a second
+  (`R5-01-ISOLATE`: 2 failed + 1 passed in 0.49 s).
+
+**(d) NaN/Inf can never reach the ADC conversion** - 7 assertions over
+`nan`, `inf`, `-inf` against both `_to_counts` (control law) and
+`_adc_counts_from_voltage` (binary runner), each expecting an exception,
+plus `test_conversion_of_nan_cannot_silently_clamp` which fails if a future
+change maps NaN to a count instead of raising, and
+`test_a_finite_value_still_converts` (1.65 V -> 2048 counts, 0.825 V -> 2048)
+proving the rejection does not swallow the working path.
+
+## Regression check for this job
+
+| check | job | result |
+|---|---|---|
+| 6 focused files (solver, sanitiser, security, components, bridge, proof) | `R5-01-FIXCHECK4` | **81 passed, exit 0** |
+| full pytest suite minus the two files that reach the crashing Qt worker | `R5-01-GATE3` | **366 passed, 3 skipped, 112 deselected, exit 0, 78.15 s** |
+| `tests/test_ui_polish.py` alone | `R5-01-UIPOLISH` | **76 passed, exit 0** |
+| full pytest suite, everything included | `R5-01-GATEFULL` | exit 1: access violation at 14% |
+| official runner `tools/run_tests.py` | `R5-01-RUNNER` | exit 1: same thread dump, no FAILED test line |
+
+The crash is the defect already recorded in `docs/KNOWN_ISSUES.md`
+(2026-10-27 and 2026-10-28 entries): `ui/schematic_editor.py:686
+_run_in_worker` <- `:3027 run_simulation`, reached this session through
+`tests/test_editor_workflow.py:284` **and** `tests/test_ui_polish.py:573`,
+while both files pass in isolation. It is R2's row, it is unchanged by this
+job, and no row that was PASS regressed (there were none).
+
+## Job count and log
+
+Jobs this session: `S2-INIT` (status recompute) and `R5-01` (the row above);
+activity log entries 104-140, chain head recorded by `agentlog_verify` at the
+end of this job. Commits: `6a3098d` (the fix + its tests), this docs commit.
