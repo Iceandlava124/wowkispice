@@ -11,3 +11,8 @@ def pytest_configure(config):
         "markers",
         "qemu: real-QEMU contract tests (qemu-system-xtensa required)",
     )
+    config.addinivalue_line(
+        "markers",
+        'req("ID"): requirement traceability marker read by '
+        "tools/check_traceability.py",
+    )

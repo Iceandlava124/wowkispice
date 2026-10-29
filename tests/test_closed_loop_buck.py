@@ -41,6 +41,7 @@ class TestThresholdsMatchFirmware(unittest.TestCase):
 
 
 class TestClosedLoopBuck(unittest.TestCase):
+    @pytest.mark.req("CO-11")
     def test_buck_regulation(self):
         res = run_closed_loop_simulation(
             total_time_ms=5.0,

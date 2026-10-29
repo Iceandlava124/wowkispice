@@ -2,7 +2,7 @@ name: Mixed-Signal Hardware-Software Co-Simulation CI
 
 on:
   push:
-    branches: [ main, master, dev ]
+    branches: [ main, master, dev, baseline-fix ]
   pull_request:
     branches: [ main, master ]
 

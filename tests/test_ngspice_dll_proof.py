@@ -21,6 +21,7 @@ when a single proof fails.
 import sys
 import os
 import unittest
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,6 +52,8 @@ def _random_seed_from_timer():
 
 class TestNgSpiceDllProof(unittest.TestCase):
 
+    @pytest.mark.req("CO-01")
+    @pytest.mark.req("CO-04")
     def test_proof_script_runs_to_completion(self):
         """End-to-end gate: the proof harness exits cleanly with every proof verified.
 
@@ -111,6 +114,7 @@ class TestNgSpiceDllProof(unittest.TestCase):
             f"(max err {max_err*1000:.3f} mV, Vin={vin:.2f} V, seed={entropy_seed})"
         )
 
+    @pytest.mark.req("CO-03")
     def test_proof3_underdamped_rlc_ringing(self):
         """Prove ngspice.dll solves both frequency AND damping of a 2nd-order RLC tank.
 

@@ -11,6 +11,7 @@ closed-form analytical differential equations:
 import sys
 import os
 import unittest
+import pytest
 import numpy as np
 
 # Add root directory to path
@@ -19,6 +20,7 @@ from bridge.ngspice_wrapper import NgSpiceEngine
 
 
 class TestNgSpiceBridge(unittest.TestCase):
+    @pytest.mark.req("CO-02")
     def test_rc_circuit_mathematical_precision(self):
         """
         Verify RC low-pass filter transient step response point-by-point against

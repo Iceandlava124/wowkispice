@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import unittest
+import pytest
 
 from bridge import firmware_runner as fr
 
@@ -32,6 +33,7 @@ class TestFaultInjection(unittest.TestCase):
             else:
                 os.environ["WOSP_QEMU"] = saved
 
+    @pytest.mark.req("CO-10")
     def test_qmp_none_with_env_set_is_clean(self):
         # WOSP_QEMU points at an existing normal-abspath, so the env gate
         # reports configured; with qmp=None the explicit "no QMP handle"

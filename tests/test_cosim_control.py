@@ -14,6 +14,7 @@ inside the solver:
 import os
 import sys
 import tempfile
+import pytest
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -201,6 +202,7 @@ class TestNetlistEmission(unittest.TestCase):
         _lines, _nets, warns = g.compile_netlist()
         self.assertTrue(any("GPIO17" in w and "not wired" in w for w in warns), warns)
 
+    @pytest.mark.req("CO-12")
     def test_laws_survive_save_and_reload(self):
         g = build_buck()
         g.control_laws["U1"] = firmware_law()
@@ -226,6 +228,7 @@ class TestNetlistEmission(unittest.TestCase):
 class TestCosimEndToEnd(unittest.TestCase):
     """The real thing: a schematic regulated by a firmware-derived loop."""
 
+    @pytest.mark.req("CO-06")
     def test_buck_regulates_from_simulated_feedback(self):
         g = build_buck(load_ohms="5")
         spec = firmware_law()
@@ -252,6 +255,7 @@ class TestCosimEndToEnd(unittest.TestCase):
         reg = run.regulation("GPIO18")
         self.assertLess(abs(reg["mean_error_counts"]), 200, reg)
 
+    @pytest.mark.req("CO-07")
     def test_output_is_regulated_across_a_load_sweep(self):
         """
         A load-aware loop, not a replayed waveform.

@@ -132,6 +132,7 @@ class TestMalformedNetlistRaises:
     """A deck ngspice cannot parse must fail the load, not pass silently."""
 
     @pytest.mark.timeout(30)
+    @pytest.mark.req("CO-09")
     def test_malformed_deck_raises_a_clear_error(self):
         engine = _engine()
         with pytest.raises(RuntimeError) as ctx:
@@ -157,6 +158,7 @@ class TestNonConvergentAnalysisRaises:
     """A deck with no solution must fail the run, not return rc 0."""
 
     @pytest.mark.timeout(30)
+    @pytest.mark.req("CO-08")
     def test_conflicting_sources_op_raises(self):
         engine = _engine()
         engine.load_circuit(NONCONVERGENT_OP)

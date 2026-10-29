@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import unittest
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -305,6 +306,7 @@ class TestGpioCosimEndToEnd(unittest.TestCase):
         freq = gpio_model.measured_frequency(times, values)
         self.assertAlmostEqual(freq, 1000.0, delta=40)
 
+    @pytest.mark.req("CO-15")
     def test_unprofiled_pin_is_reported_not_hidden(self):
         g = build_mcu_circuit({})
         lines, _nets, warns = g.compile_netlist()
@@ -448,6 +450,7 @@ tests/test_qemu_monitor_qemu.py under the @qemu marker.
         # A failed injection must not read the gate, but must still stop.
         self.assertEqual(mon.calls, ["set_adc1_value", "stop"])
 
+    @pytest.mark.req("CO-05")
     def test_cycle_adc_and_gate_flow(self):
         # A healthy double: one cycle injects the ADC value, reads the gate back,
         # and returns ok=True with the gate decision and the value in the message.
