@@ -107,6 +107,18 @@ class TestNgspiceSanitiser(unittest.TestCase):
         result = NgSpiceEngine._sanitise_line("")
         self.assertEqual(result, "")
 
+    def test_cmd_reference_in_netlist_is_rejected(self):
+        "cmd() embedded in netlist content must hit the banned-command branch (R3 coverage gap)."
+        with self.assertRaises(RuntimeError) as ctx:
+            NgSpiceEngine._sanitise_line("R1 1 0 cmd(shell echo pwned)")
+        self.assertIn("banned command", str(ctx.exception))
+
+    def test_double_plus_continuation_cannot_smuggle_control(self):
+        "'++ .control' survives the first directive check (still '+'-prefixed after one strip) and must be caught by the re-check after normalisation (R3 coverage gap)."
+        with self.assertRaises(RuntimeError) as ctx:
+            NgSpiceEngine._sanitise_line("++ .control")
+        self.assertIn(".control", str(ctx.exception))
+
 
 class TestMeasAlias(unittest.TestCase):
     """J4: .meas is ngspice's short form of .measure and must not be rejected.
