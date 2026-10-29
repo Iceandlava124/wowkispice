@@ -469,3 +469,22 @@ Owner questions added (see SCORECARD):
    installing one needs approval.
 2. Approve staging a fix to `ui/schematic_editor.py` hunk-by-hunk so the
    earlier job's uncommitted 42/17 lines are not swept into it.
+
+## 2026-10-29 — a hard kill of python leaves an orphaned QEMU (WSL)
+
+Measured (activity log #210, #212): after `SIGKILL` of the python that
+spawned it, the `qemu-system-xtensa` child **survives** — closing its stdin
+(stdin-EOF) does not terminate it. `tools/cleanup_qemu.py` reaps it, so the
+process table does reach zero through the documented reaper; prevention
+would instead set `prctl(PR_SET_PDEATHSIG, SIGKILL)` (Linux) at the three
+spawn sites: `bridge/qemu_monitor.py::start`,
+`bridge/binary_runner.py::test_gate_flip`,
+`tools/demo_closed_loop.py::run_demo`.
+
+Not applied: those files are outside the R8 job's commit allowlist (owner
+decision 2 lists two of them as do-not-commit until their own jobs are
+DONE). Windows needs no patch here: it cannot execute the Linux emulator,
+and the hard-kill check measured zero QEMU processes (#211).
+
+**OWNER ACTION:** approve staging the three-site PDEATHSIG patch (two of
+the three files are on the do-not-commit list).

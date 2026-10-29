@@ -891,3 +891,67 @@ top of the ~10 ms inject round trip.
 | R12 | OWNER-SET | unchanged — REVIEW_BRIEF.md pending |
 
 Jobs this session (continued): `R7-01`. Log entries 204-208.
+
+---
+
+# Session 2026-10-29 — job R8-01, fault injection and the orphan check
+
+Row R8: “fault injection with timeout on ngspice failure, QEMU crash
+mid-loop, monitor silence, partial UART output, out-of-range ADC; zero
+orphaned QEMU processes after a hard kill of Python (verified on Windows)”.
+
+## The five fault families, one run (#213)
+
+`106 passed, 0 failed, 0 skipped in 48.97s` across the six suites that
+hold them:
+
+| fault | evidence |
+|---|---|
+| ngspice failure, timed | `tests/test_solver_error_handling.py` — incl. `test_error_arrives_within_the_timeout`; errors surface within the timeout |
+| QEMU crash mid-loop | `test_adversarial_stress::test_binary_runner_handles_qemu_crash_mid_run` + the binary_runner read-failure mutant killed in R3-01 |
+| monitor silence | `test_qemu_monitor_unit::test_silent_emulator_times_out_within_documented_timeout`, `test_adversarial_stress::test_monitor_timeout_recovery`, dropped/corrupted-frame tests |
+| partial UART output | `test_schematic_editor::test_serial_tab_decodes_real_uart_bytes_from_a_trace` and `test_serial_tab_refuses_to_invent_frames` (partial bytes decode; nothing is invented) |
+| out-of-range ADC | `test_adc_conversion` + `test_adversarial_stress` boundary / negative / very-high clamping |
+
+## Orphan check — two definitions, measured separately (owner decision 8)
+
+**Windows-launched (#211, exit 0):** baseline `tasklist` = 0; the spawn
+attempt fails with `FileNotFoundError: [WinError 2]` (the emulator is a
+Linux ELF); a python hard-killed with `taskkill /F` (pid 25704, confirmed)
+leaves **zero** `qemu-system-xtensa` processes. The row's clause —
+“verified on Windows” — holds as measured.
+
+**WSL-launched (#210 raw, #212 with the reaper):** definition — a QEMU
+spawned by a python inside WSL is orphaned if it still exists 3 s after
+that python is SIGKILLed (no `atexit`, no `finally`), and this half passes
+when the documented reaper `tools/cleanup_qemu.py` brings the count to
+zero. Measured: victim spawned qemu 489 → parent SIGKILLed → **489 still
+alive (state S)**, so stdin EOF does *not* terminate qemu
+(`stdin_eof_killed_qemu: false`) → `tools/cleanup_qemu.py` → `✓ Killed`
+→ **0 remain** (`orphans_reaped_by_cleanup_tool: true`, exit 0).
+
+**Prevention gap (OWNER ACTION, recorded in `docs/KNOWN_ISSUES.md`):**
+zero-orphans-by-construction needs `prctl(PR_SET_PDEATHSIG, SIGKILL)`
+at the three spawn sites — `bridge/qemu_monitor.py::start`,
+`bridge/binary_runner.py::test_gate_flip`,
+`tools/demo_closed_loop.py::run_demo`. None is inside this job's commit
+allowlist (owner decision 2), so the patch is proposed, not applied.
+
+## Recomputed statuses after R8-01
+
+| Row | Status | Basis |
+|---|---|---|
+| R8 | **PASS** | five fault families 106/106 (#213); Windows half: zero orphans after a hard kill (#211); WSL half: defined separately, orphan measured, reaped to zero (#210, #212); prevention recorded as an owner action |
+| R1 | UNVERIFIED (unblocked) | unchanged |
+| R2 | BLOCKED (owner action) | unchanged |
+| R3 | **PASS** | unchanged |
+| R4 | **PASS** | unchanged |
+| R5 | PASS | unchanged |
+| R6 | **PASS** | unchanged |
+| R7 | **PASS** | unchanged |
+| R9 | FAIL | unchanged — README/QUICKSTART/TROUBLESHOOTING audit unfinished |
+| R10 | FAIL | next — CI parse with pinned PyYAML + traceability fix |
+| R11 | FAIL | unchanged |
+| R12 | OWNER-SET | unchanged |
+
+Jobs this session (continued): `R8-01`. Log entries 209-213.
