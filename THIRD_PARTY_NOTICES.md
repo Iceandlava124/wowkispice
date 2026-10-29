@@ -23,10 +23,12 @@ Get-ChildItem -Recurse tools\ngspice_dll -Include *COPYING*,*LICENSE*,*GPL*
 |---|---|---|
 | Project license | `LICENSE`, first three lines | `Apache License` / `Version 2.0, January 2004` |
 
-**Open contradiction (not fixed here, it is a licensing decision):**
-`pyproject.toml` declares `license = {text = "MIT"}` while `LICENSE` contains
-the Apache License 2.0 text. One of the two is wrong. Recorded in
-`docs/KNOWN_ISSUES.md`; resolving it is an OWNER ACTION, not an agent edit.
+**Resolved by owner decision (2026-10-28):** `pyproject.toml` now declares
+`license = {text = "Apache-2.0"}` (with the matching
+`License :: OSI Approved :: Apache Software License` classifier), agreeing
+with `LICENSE`. `LICENSE` itself was not edited. For the record, the
+contradiction that existed until this decision: `pyproject.toml` declared
+`license = {text = "MIT"}`.
 
 ## 2. Python dependencies
 
@@ -74,6 +76,14 @@ build that links PyQt5 is distributed under those terms, not under the
 project's Apache-2.0 text alone. This observation is read from the metadata
 above; what to do about it is an OWNER ACTION.
 
+**PyQt5 licence line (owner decision 1, 2026-10-28):** PyQt5 is licensed
+under GPLv3 or a commercial licence. The GPLv3 half is quoted from the
+installed package metadata — `.venv/Lib/site-packages/PyQt5-5.15.11.dist-info/METADATA`,
+field `License: GPL v3` (verbatim). The commercial-licence half is marked
+**UNVERIFIED**: no statement of a commercial option appears in any file read
+on this machine, and no licence text beyond that metadata field has been
+quoted. No legal conclusion is drawn here.
+
 ## 3. ngspice shared library (bundled, not tracked in git)
 
 `setup.ps1` downloads the official Windows DLL build into
@@ -90,10 +100,27 @@ above; what to do about it is an OWNER ACTION.
 * Searched the whole of `tools/ngspice_dll` for `*COPYING*`, `*LICENSE*`,
   `*GPL*`: **no file found**.
 
-Verdict: the copyright holders are read from the shipped binary; the license
-text is **not present in this checkout and is therefore not asserted here**.
-OWNER ACTION: vendor the upstream `COPYING` next to the DLL (this needs a
-download, which the agent may not perform under the rules in force).
+**Update (owner decision 7, 2026-10-28):** no COPYING file is vendored.
+The ngspice licence text already present in this checkout is read from the
+console distribution that `setup.ps1`'s runtime-dependency step extracts into
+`tools\ngspice\`: path `tools/ngspice/docs/COPYING` (45,714 bytes, SHA-256
+`6d939001e899ede403277fb37124c2af6f1cf92926465cd8f4bf59859e06f579`), first
+lines:
+
+```
+Ngspice Licensing
+
+Copyright (c) 2026 by ngspice team
+All rights reserved.
+
+license for this document: CC-BY-SA v4.0
+```
+
+The DLL archive itself (`tools/ngspice-47_dll_64.7z`, 34 entries, SHA-256
+`5bf5eec7db989f74849cdb32f7df62693f4f149cceeebcbd222eb35c2bb821eb`, matching
+the pin in `setup.ps1`) was listed with `7z l`: it contains no licence file.
+Verdict: copyright holders quoted from the shipped binary, licence text
+quoted from `tools/ngspice/docs/COPYING`; nothing quoted from memory.
 
 ## 4. QEMU (built by the user, never redistributed by this repo)
 
@@ -105,6 +132,10 @@ download, which the agent may not perform under the rules in force).
 
 Verdict: **not asserted**. QEMU's own license travels with the QEMU source the
 user clones.
+
+**Owner decision (2026-10-28):** no QEMU binary is redistributed by this
+repository, only the two patch files under `tools/qemu-patch/`; those patches
+are noted as GPLv2 in `tools/qemu-patch/README.md`.
 
 ## 5. ESP32 framework and firmware build output
 

@@ -10,6 +10,13 @@ binary was built from instead.
 `README.old.md` is the original patch-bundle README recovered from git
 history (`60522dc^`), kept untouched for owner review.
 
+## Licence of these patches
+
+The patch files modify QEMU and are distributed under GPLv2. This repository
+ships no QEMU source and no QEMU binary — only these two `.patch` files; see
+`THIRD_PARTY_NOTICES.md` §4. (Licence note recorded per owner decision,
+2026-10-28; no licence text is quoted or redistributed here.)
+
 ## Pinned upstream (read from a clone, not from memory)
 
 | Item | Value |
