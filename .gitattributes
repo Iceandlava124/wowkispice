@@ -7,6 +7,8 @@
 *.yml   text=auto eol=lf
 *.json  text=auto eol=lf
 *.sh    text=auto eol=lf
+*.c     text=auto eol=lf
+*.h     text=auto eol=lf
 
 # Windows scripting hosts (PowerShell 5.1, cmd.exe) read CRLF
 *.ps1   text=auto eol=crlf
