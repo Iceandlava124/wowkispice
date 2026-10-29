@@ -814,3 +814,80 @@ the 2 added for the new branches (#191).
 
 Jobs this session (continued): `R3-01` (coverage close), `R9-01`, `R4-02`,
 `R6-01`, `R3-02`. Log entries 167-203; chain head `a84cfeb7…` at #203.
+
+---
+
+# Session 2026-10-29 — job R7-01, determinism on the real emulator
+
+Row R7: “loop run 10 times on the real emulator, recording gate-flip times,
+callback counts, latency distribution with a documented bound”.
+
+## The harness
+
+`logs/cmd/r7_loop10.py` runs inside WSL through the same code path the
+contract tests use (`bridge.qemu_monitor.QemuMonitor`, the boot command of
+`binary_runner.test_gate_flip`). One run = boot the firmware, wait for the
+`BUCK_CTRL` markers, inject LOW(1500) → HIGH(2500) → LOW(1500) via
+`qom-set`, poll `read_gate()` until each expected state appears (main.c:
+<1995 → ON, >2030 → OFF), then hold a 25 s tail waiting for the firmware's
+first `TELEMETRY: loop=` line (printed at `loop_count == 10000`).
+Calibration smokes are logged separately (#204-#206); the production run is
+#207.
+
+Definitions recorded with the numbers:
+
+* flip time — injection → first `read_gate()` reporting the state that the
+  injection must produce;
+* latency — wall time of one HMP round trip (`read_gate` / `set_adc1_value`);
+* callbacks — monitor replies delivered through the reader loop, plus the
+  firmware's own telemetry lines and the absolute iteration counter they
+  carry.
+
+## The 10 runs (#207)
+
+```
+runs: 10   runs without errors: 10   flips missed: 0   panics: 0
+qemu alive at end: 10/10   boot: 3.6-5.3 s   exit 0
+flip_s      (n=30): min 0.0203  mean 0.0205  p50 0.0205  p95 0.0207  max 0.0208
+read_gate ms(n=30): min 10.083  mean 10.182  p95 10.298  max 10.328
+set_adc   ms(n=30): min 10.177  mean 10.317  p95 10.460  max 10.469
+callbacks per run: gate_reads 3, adc_writes 3 (every call replied)
+firmware telemetry: 0 lines across 10 × 25 s tails
+```
+
+The literal Phase-2 acceptance criterion as well: the contract gate-flip
+test run 10 consecutive times through `tools/run_emulator_tests.ps1` —
+**10/10 clean gate exits** (#208, `GATE10: pass=10 fail=0`).
+
+## Documented bounds (justified from the measured spread)
+
+| bound | value | measured basis |
+|---|---|---|
+| gate flip after injection | **50 ms** | worst 20.8 ms over 30 flips, spread 0.5 ms; 2.4× the worst case also covers one extra firmware loop period (≥2.6 ms, below) and host scheduling |
+| HMP round trip (set/get) | **20 ms** | worst 10.47 ms over 60 round trips; ~1.9× margin (the ~10 ms figure is the monitor's reply granularity) |
+
+Firmware-side callback bound: the first `TELEMETRY: loop=10000` line never
+appeared in 10 × 25 s of tails (plus ~1.3 s before them) ⇒ the control loop
+runs at **<380 Hz (period ≥2.6 ms)**. `TELEMETRY` prints only every 10 000
+iterations (`main.c:180`), so an absent line is a rate measurement, not a
+test failure; the loop demonstrably reacts within the 50 ms flip bound on
+top of the ~10 ms inject round trip.
+
+## Recomputed statuses after R7-01
+
+| Row | Status | Basis |
+|---|---|---|
+| R7 | **PASS** | 10 measured runs, 10/10 gate, bounds documented (#207, #208) |
+| R1 | UNVERIFIED (unblocked) | unchanged — clone-installs not yet run |
+| R2 | BLOCKED (owner action) | unchanged |
+| R3 | **PASS** | unchanged |
+| R4 | **PASS** | unchanged |
+| R5 | PASS | unchanged |
+| R6 | **PASS** | unchanged |
+| R8 | UNVERIFIED (unblocked) | next: fault injection + orphan check (WSL-launched vs Windows-launched defined separately) |
+| R9 | FAIL | ROADMAP ticks 126/130 now evidence-backed; README/QUICKSTART/TROUBLESHOOTING audit unfinished |
+| R10 | FAIL | unchanged — CI parse + traceability pending |
+| R11 | FAIL | unchanged — .gitattributes proposal pending |
+| R12 | OWNER-SET | unchanged — REVIEW_BRIEF.md pending |
+
+Jobs this session (continued): `R7-01`. Log entries 204-208.
