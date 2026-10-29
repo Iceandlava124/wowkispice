@@ -123,10 +123,10 @@ Claimed implemented. Status per evidence:
 
 **Acceptance Criteria for Phase 2:**
 - [ ] Golden trace tests pass with <2% variance - FAILS ON ITS FACE: no real reference data to compare against
-- [ ] Gate flip test passes 10/10 times consecutively - NOT RUN (3 gate-flip tests skip: `WOSP_QEMU` unset)
+- [x] Gate flip test passes 10/10 times consecutively - PASS: 10/10 clean gate exits through `tools/run_emulator_tests.ps1` (log #208) plus 10 instrumented loop runs, 30/30 flips (log #207)
 - [ ] All fault injection tests pass - PARTIAL: they pass, but on doubles
 - [ ] CLI works headlessly - PARTIAL: `--help` only
-- [ ] Sync latency measured and documented - NOT DONE
+- [x] Sync latency measured and documented - MEASURED: injection->flip 20.3-20.8 ms over 30 flips, HMP round trip <=10.5 ms; bounds (50 ms flip, 20 ms RTT) documented in `docs/SCORECARD.md` job R7-01 (log #207)
 
 ---
 
