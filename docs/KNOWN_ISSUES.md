@@ -470,6 +470,27 @@ Owner questions added (see SCORECARD):
 2. Approve staging a fix to `ui/schematic_editor.py` hunk-by-hunk so the
    earlier job's uncommitted 42/17 lines are not swept into it.
 
+## 2026-10-29 — agentlog collapsed every non-zero exit to 1 (found during R9)
+
+`tools/agentlog.ps1` ran each command in a child `powershell -Command
+<cmd>`, and PS 5.1 collapses a native exit 3 to 1 at that boundary:
+measured with `python -c "import sys; sys.exit(3)"` (real 3, recorded 1 —
+entry #231's `--require-emulator` run really exited 3 and was recorded as
+1). A second trap in the same path: passing the command as a `-Command`
+argument strips its embedded double quotes, so entry #232 executed a
+mangled `-c` argument (`SyntaxError: invalid syntax`) and recorded 0.
+
+Fix applied to the working tree, **uncommitted** — `tools/agentlog.ps1` is
+not in this session's commit allowlist: the child now receives the script
+base64-encoded via `-EncodedCommand` (no quote loss) and re-exits with the
+exact `$LASTEXITCODE`. Verified in entry #233 (`exit: 3` recorded for a
+real exit 3, output intact). Entries #227/#228 are two of my own broken
+audit invocations, recorded exactly as they ran; the hash chain never
+broke.
+
+**OWNER ACTION:** commit the `tools/agentlog.ps1` fix (one file, process
+logging tooling).
+
 ## 2026-10-29 — a hard kill of python leaves an orphaned QEMU (WSL)
 
 Measured (activity log #210, #212): after `SIGKILL` of the python that

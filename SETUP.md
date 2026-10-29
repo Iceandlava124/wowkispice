@@ -92,7 +92,7 @@ Python can bind it. It is idempotent — rerun it any time.
 python tools\run_tests.py            # suites only
 ```
 
-Expect `SELF-CHECK: PASS` and `483 tests passed, 3 skipped (the UNEXECUTED
+Expect `SELF-CHECK: PASS` and `488 tests passed, 3 skipped (the UNEXECUTED
 QEMU contract tests)`, both with
 exit code 0. If it is not green, stop and fix that before continuing —
 everything later assumes this line.
@@ -108,7 +108,7 @@ venv first (`\.venv\Scripts\Activate.ps1`).
 
 | Track | Command | Covers |
 |---|---|---|
-| **A — product suite, no WSL** | `python tools\run_tests.py` | everything native Windows; the 2 qemu-marker contract tests skip as UNEXECUTED, each reason naming the exact missing item (unset `WOSP_QEMU` / bad path / Linux ELF on Windows) |
+| **A — product suite, no WSL** | `python tools\run_tests.py` | everything native Windows; the 3 qemu-marker contract tests skip as UNEXECUTED, each reason naming the exact missing item (unset `WOSP_QEMU` / bad path / Linux ELF on Windows) |
 | **A — strict variant** | `python tools\run_tests.py --require-emulator` | same run, but a skipped or absent contract test fails the run (exit 3) |
 | **B — emulator contract** (needs the Part E build) | `powershell -ExecutionPolicy Bypass -File tools\run_emulator_tests.ps1` | runs `tests/test_qemu_monitor_qemu.py` inside WSL; non-zero if WSL is missing, the binary is missing, or **any test is skipped or fails** |
 
@@ -124,8 +124,14 @@ qemu-marker contract tests at `tests/test_qemu_monitor_qemu.py:78/105/117`
 (`:117` is the third, added after the 2026-10-24 line above). Track A
 `--require-emulator` -> **exit 3** with those skip reasons printed
 (`logs/cmd/r9_exit3.py`, `logs/out/00179.txt`). `\.\run_selfcheck.bat` ->
-`SELF-CHECK: PASS` (`logs/out/00173.txt`). Track B not re-run (needs the
-Part E build).
+`SELF-CHECK: PASS` (`logs/out/00173.txt`). Track B not re-run at that point.
+
+Re-verified 2026-10-29: Track A default -> **488 passed, 3 skipped**,
+exit 0 (log #226); Track A `--require-emulator` -> **exit 3** with the
+skip reasons printed (log #234); Track B -> **3 passed, 0 skips**, exit 0
+(log #201); `setup.ps1` re-run idempotent, exit 0 "Setup complete"
+(log #235); `run_selfcheck.bat` -> `SELF-CHECK: PASS`, gate green in
+120.5 s (log #236).
 
 UNVERIFIED steps: Track A via the `run_tests.bat` cmd wrapper (not re-run in
 this pass); Track B on a machine without the Part E build (expected: exit 2
@@ -218,7 +224,7 @@ Keep the source in your WSL home (`~/qemu-esp`) — building on `/mnt/c`
 ```powershell
 cd $env:USERPROFILE\PROJECT_WOWKISPICE
 .\run_selfcheck.bat                  # -> SELF-CHECK: PASS
-python tools\run_tests.py            # -> 483 tests passed, 3 skipped (UNEXECUTED QEMU contract tests)
+python tools\run_tests.py            # -> 488 tests passed, 3 skipped (UNEXECUTED QEMU contract tests)
 python tools\demo_closed_loop.py     # -> PASS in ~40 seconds (needs the Part E emulator)
 ```
 

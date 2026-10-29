@@ -7,8 +7,9 @@ not as a task list.
 
 A Windows-first power-electronics tool that combines a real `libngspice` solver,
 an LTspice-shaped schematic editor, and a controller workflow whose decision logic
-comes from real firmware source. The compiled firmware does not yet run inside the
-simulation loop.
+comes from real firmware source. The compiled firmware now runs inside the
+simulation loop through `bridge/binary_runner.py` — gate flips measured over
+10 runs / 30 flips on the real emulator (2026-10-29, log #207).
 
 ## The strongest slice today
 
@@ -36,10 +37,16 @@ supporting material, planned material, or material that is useful but only manua
   Monte Carlo, parametric sweep, I-V curve tracer, PV/MPPT.
 - Export to SPICE netlist, KiCad schematic/netlist, BOM, CSV/PDF/PNG.
 - Firmware image parsing and control-constant import from source.
+- The automatic ngspice ↔ firmware loop (`bridge/binary_runner.py`): the real
+  solver drives the real firmware in the emulator each timestep; gate flip at
+  1995/2030 and a 10-run latency distribution measured (logs #201, #207).
 - GPIO pin profiles and the pin map view.
 - A self-check gate and a large test suite.
 
 ### Works, but only manual
+
+(The hand-driven path below still works; it is no longer the only way — the
+automatic loop is listed under "Works and is test-backed".)
 
 - Running the compiled firmware under patched Espressif QEMU and watching it boot
   and control a buck.
@@ -48,7 +55,8 @@ supporting material, planned material, or material that is useful but only manua
 
 ### Not yet done, or only planned
 
-- An automatic bridge between the solver and the compiled firmware.
+- Rebuilding the patched QEMU binary from the tracked patches alone (the loop
+  runs against a pre-built binary; see docs/KNOWN_ISSUES.md).
 - Packaging, versioning, and a fully polished first-use story.
 - A small, defensible reference-set validation corpus.
 - Cross-platform install paths and onboarding that do not depend on knowing the repo.
@@ -58,8 +66,8 @@ supporting material, planned material, or material that is useful but only manua
 - This is not a calibrated measurement instrument.
 - This is not a vendor-validated component library.
 - This is not a certified or production release yet.
-- This does not yet execute the real firmware binary as the controller inside the
-  simulation loop.
+- The loop's emulator binary is not yet reproducible from tracked patches, and
+  the loop has not been validated against hardware.
 
 ## Why those boundaries matter
 
@@ -70,7 +78,8 @@ something that quietly over-promises.
 
 ## The most important opens
 
-1. Close the loop with the compiled firmware automatically, not only manually.
+1. Make the loop's patched QEMU rebuildable from tracked patches (the loop
+   itself now runs automatically; logs #201, #207).
 2. Make save/open and export paths trustworthy end to end.
 3. Define a small reference corpus the tool can be checked against.
 4. Make the public story, setup, and onboarding feel like a product, not a repo.

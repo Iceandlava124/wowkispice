@@ -10,22 +10,25 @@ Draw a schematic → simulate it in ngspice → attach a control law imported
 from firmware source → let it drive the gate each timestep → inspect
 waveforms → export to KiCad/SPICE/BOM/PDF.
 
-## Status (verified 2026-10-24)
+## Status (verified 2026-10-29)
 
 | Check | Result |
 |---|---|
-| `python tools/run_tests.py` | **363 passed, 2 skipped, exit 0** |
-| `run_selfcheck.bat` (fresh clone) | **SELF-CHECK: PASS**, full suite gate green (173 s) |
-| QEMU contract tests (`tests/test_qemu_monitor_qemu.py`) | **2 passed under WSL** against the built patched `qemu-system-xtensa` 9.2.2 (skipped/UNEXECUTED on the Windows side: the emulator is a Linux binary) |
-| Automatic ngspice↔firmware loop | **not built** — each track works, the coupling between them is manual (see [docs/architecture.md](docs/architecture.md)) |
+| `python tools/run_tests.py` | **488 passed, 3 skipped, exit 0** |
+| `run_selfcheck.bat` | **SELF-CHECK: PASS** — environment + solver + full suite gate green in 120.5 s (2026-10-29; fresh-clone run pending R1) |
+| QEMU contract tests (`tests/test_qemu_monitor_qemu.py`) | **3 passed under WSL** against the built patched `qemu-system-xtensa` 9.2.2 (#201, exit 0; skipped/UNEXECUTED on the Windows side: the emulator is a Linux binary) |
+| Automatic ngspice↔firmware loop | **built** — `bridge/binary_runner.py` couples ngspice to the real firmware in QEMU (see [docs/architecture.md](docs/architecture.md)) |
 
 Honest boundaries (details in [PROJECT_STATUS.md](PROJECT_STATUS.md)):
 
 - The solver, editor, co-simulation, measurements and exports are real and
   test-backed.
 - Running the firmware under patched QEMU works **manually** (inject ADC
-  with `qom-set`, read GPIO18 with `xp`); the automatic bridge is the open
-  Phase-1 deliverable.
+  with `qom-set`, read GPIO18 with `xp`), and the automatic bridge
+  (`bridge/binary_runner.py`) now couples the solver to that firmware —
+  gate flip and 10 loop runs are measured (#201, #207). What stays open is
+  rebuilding the patched QEMU binary from tracked patches alone (see
+  Known limits).
 - This is a lab/teaching tool, not a calibrated instrument.
 
 ## Quick start (Windows, no firmware/QEMU needed)
@@ -33,7 +36,7 @@ Honest boundaries (details in [PROJECT_STATUS.md](PROJECT_STATUS.md)):
 ```powershell
 powershell -ExecutionPolicy Bypass -File setup.ps1   # venv, deps, ngspice DLL
 .\run_selfcheck.bat                                  # -> SELF-CHECK: PASS
-python tools\run_tests.py                            # -> 363 passed, exit 0
+python tools\run_tests.py                            # -> 488 passed, exit 0
 .\run_editor.bat                                     # open the schematic editor
 ```
 
@@ -43,6 +46,20 @@ wire; **F2** simulate, **R** rotate, **Del** delete, **E** edit value,
 
 The full install — firmware build, patched QEMU in WSL, boot demo — is
 [SETUP.md](SETUP.md), copy-paste from a bare PC (60–90 min first time).
+
+## Docker — present but never built (not part of the verified path)
+
+`Dockerfile` and `docker-compose.yml` exist, but no container image has
+ever been built or run: `docker version` reaches only the client
+(29.8.2) and fails to connect to the daemon (measured 2026-10-29, logged
+in `logs/activity.jsonl`), and [ROADMAP.md](ROADMAP.md) records every
+containerization task as NOT RUN for the same reason. Do not treat the
+docker commands as a reproduction path until someone with a Docker daemon
+builds and runs them.
+
+The verified reproduction path is the Windows quick start above
+(`setup.ps1` → `run_selfcheck.bat` → `tools\run_tests.py`), with WSL2 for
+the emulator (SETUP.md Part E).
 
 ## Architecture
 
@@ -78,7 +95,7 @@ python tools\run_tests.py --require-emulator   # same, but a skipped/absent emul
 .\run_selfcheck.bat                            # environment + solver + full suite in one command
 ```
 
-The 2 qemu-marker contract tests skip by default with the **exact missing
+The 3 qemu-marker contract tests skip by default with the **exact missing
 item** in the reason (`WOSP_QEMU not set and no qemu-system-xtensa in PATH…`,
 `WOSP_QEMU set but binary not found at <path>`, or `not running under Linux:
 <path> is a Linux ELF…`) — labeled UNEXECUTED, never "passing". Default keeps
@@ -92,12 +109,15 @@ powershell -ExecutionPolicy Bypass -File tools\run_emulator_tests.ps1
 ```
 
 Prints which locator it used (`$env:WOSP_QEMU` first, else the documented
-sibling `qemu-build` default), runs `tests/test_qemu_monitor_qemu.py` inside
+sibling `qemu-build` default, else a `$`-free probe of the WSL filesystem
+for the build), runs `tests/test_qemu_monitor_qemu.py` inside
 WSL, prints the pytest summary, and exits non-zero if WSL or the binary is
 missing or if **any test is skipped or fails** — it never reports success for
-a skip. Verified on this box: **2 passed, 0 skips**.
+a skip. Verified on this box: **3 passed, 0 skips** (#201, exit 0).
 
-The exact command it runs (kept identical here so doc and script agree):
+The exact shape of the command it runs (kept identical here so doc and
+script agree; the two paths reflect whichever locator won — the sibling
+`qemu-build` default shown, or the WSL probe on this box):
 
 ```bash
 wsl -- bash -lc "cd '/mnt/c/<home>/Music/PROJECT_WOWKISPICE' && WOSP_QEMU='/mnt/c/<home>/Music/qemu-build/qemu-esp_develop_9.2.2_20260417/build/qemu-system-xtensa' python3 -m pytest tests/test_qemu_monitor_qemu.py -v"
@@ -113,8 +133,8 @@ Tracked in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md). The two that matter:
    3.12 (pinned in `requirements.txt` / `requirements.lock`).
 2. **Emulator contract green under WSL, but the binary is not yet reproducible
    from tracked patches** — the contract tests pass under WSL via
-   `tools\run_emulator_tests.ps1` (2 passed, 0 skips: one exercises the real
-   emulator, one the missing-binary error path). The patched binary was built
+   `tools\run_emulator_tests.ps1` (3 passed, 0 skips: the gate flip against
+   the real firmware plus the monitor's error paths). The patched binary was built
    from a local source tree and is NOT yet reproducible from tracked patches
    (see [tools/qemu-patch/](tools/qemu-patch/) and
    [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)); no from-scratch rebuild has
