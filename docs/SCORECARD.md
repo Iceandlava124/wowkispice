@@ -1097,3 +1097,102 @@ job end. Recorded in KNOWN_ISSUES with an OWNER ACTION to commit it.
 | R12 | OWNER-SET | unchanged |
 
 Jobs this session (continued): `R8-01`, `R10-01`, `R9-02`. Log entries 209-239.
+
+---
+
+# Session 2026-10-29 — STOP: session cap reached (stop condition d)
+
+## Job count
+
+Counted the way this file has counted them (scorecard job headings, not
+sub-step labels): session 1 recorded **2 of 12** (R4-01, R2-01); since
+then S2-INIT, R5-01, R2-03, R3-01, R9-01, R4-02, R6-01, R3-02, R7-01,
+R8-01, R10-01, R9-02 — **14 jobs total ≥ 12**. The loop stops here with
+R1, R11 and R12 unresolved; their smallest remaining owner questions are
+below.
+
+## Final recomputed statuses
+
+| Row | Status | Basis (log entries / commits) |
+|---|---|---|
+| R1 | **UNVERIFIED** | never attempted: three `git clone` installs are approved (decision 5) but did not start before the cap |
+| R2 | **BLOCKED (owner)** | editor-worker native crash measured, one fix tried and reverted (R2-03); owner questions 1-2 open in KNOWN_ISSUES (memory-debugger approval; staged fix approval) |
+| R3 | **PASS** | 19/19 mutants killed with the valid harness (R3-01); owner-set coverage floors met (R3-02); pytest-cov 7.1.0 + PyYAML 6.0.3 pinned (`3b1da6a`) |
+| R4 | **PASS** | 17 vector/hygiene tests (#190, re-verified #222); licences quoted from files (`18b2c1b`); zero absolute user paths/secrets (#202, #221-#222) |
+| R5 | **PASS** | RC/RLC proofs gated with measured tolerances; malformed deck raises clearly; NaN/Inf guard (`6a3098d`, R5-01 sections) |
+| R6 | **PASS** | gate flip at 1995/2030 through `tools/run_emulator_tests.ps1`: 3 passed, 0 skips, exit 0 (#201); 12 hand-derived ADC tests |
+| R7 | **PASS** | 10 runs, 30/30 flips, flip latency 20.3-20.8 ms, bounds documented (#207) |
+| R8 | **PASS** | five fault families 106/106 (#213); Windows zero orphans (#211); WSL orphan measured and reaped (#210, #212); prevention = owner action |
+| R9 | **PASS** | every README/SETUP command run and logged (#174-#239); ROADMAP (~40 ticks), PROJECT_STATUS, KNOWN_ISSUES reconciled (`5bc3d6f`) |
+| R10 | **PASS** | non-vacuous traceability 14/16 (#224), guard suite (#225), CI YAML+branch test (#225), CHANGELOG exists, **25/25** commits message-matched one-concern-each (#229, #245) |
+| R11 | **FAIL** | tree not clean: 7 modified files (5 owner-gated, main.c, agentlog.ps1) + 16 untracked roadmap files; **32 EOL offenders** measured (#240) — renormalization would stage owner-reserved files, so it is an owner action; no tracked file >5 MB (measured); `.coverage` untracked and not ignored |
+| R12 | **OWNER-SET** | `docs/REVIEW_BRIEF.md` delivered (`7f1251e`); awaits the owner's review answers |
+
+The scorecard is **not** met: R1 UNVERIFIED, R11 FAIL, R12 unset, R2
+BLOCKED — so no "meets scorecard v1" claim is made.
+
+## Test summary (this session's final gate)
+
+| Check | Result | Log |
+|---|---|---|
+| Full suite `tools/run_tests.py` | 488 passed, 3 skipped, 0 failed, 113.09 s, exit 0 | #226 |
+| `--require-emulator` | exit 3, each skip naming its binary | #234 |
+| `run_selfcheck.bat` | `SELF-CHECK: PASS`, gate green 120.5 s | #236 |
+| Traceability checker | `TRACEABILITY OK: 14 requirements, 16 tests` | #224 |
+| Checker/doctor guards + CI tests | 10 passed | #225 |
+| Hygiene (user paths/secrets) | 17 passed | #222 |
+| Fault injection | 106 passed | #213 |
+| Track B (real emulator) | 3 passed, 0 skips, exit 0 | #201 |
+| Mutants | 19/19 killed | R3-01 |
+| Commit audit | 25 commits, message matches diff, one concern each | #229, #245 |
+| Activity log | 245 entries, 0 problems, head `476701b22d158d09220316677ba9c4686a3c3dc51b7d10774067168e32fa3f5d` | verify |
+
+## Commits (25, oldest first)
+
+`9db95f7` `b15b668` `0b6f2b3` `40a0ef5` `4f5ecba` `6a3098d` `48872be`
+`3fddfe8` `93d5c94` `d3169a3` `18b2c1b` `9232d2e` `f3e2731` `0762e54`
+`3b1da6a` `515da61` `3e2423f` `9828f52` `b0eb544` `181d885` `88f312c`
+`5bc3d6f` `dcd1ee8` `3ac1672` `7f1251e` (oldest first, range head
+`7f1251e`; count verified 25).
+
+## OWNER ACTIONS (smallest remaining question each)
+
+1. **main.c** — run the logged Select-String (output
+   `logs/out/r_owner_selectstring.txt`, entries #242/#243; 11 matches, all
+   comments/docstrings), then decide: `git checkout --
+   firmware/esp32_buck_controller/src/main.c` (the one-liner) or keep the
+   edit after reviewing `docs/FIRMWARE_DECISION.md`.
+2. **Commit the agentlog fix** — `tools/agentlog.ps1` (uncommitted):
+   exit-code collapse + quote-stripping fixed, verified by #233. Outside
+   my commit allowlist.
+3. **R2 unblock** — (a) approve a run under a memory debugger to name the
+   freed object; (b) approve staging a fix to `ui/schematic_editor.py`
+   hunk-by-hunk (KNOWN_ISSUES questions 1-2).
+4. **PDEATHSIG patch** — approve staging the three-site zero-orphan patch
+   (two files are on the do-not-commit list).
+5. **EOL renormalization** — after the pending files land, run
+   `git add --renormalize .` (32 offenders listed in #240; the new
+   `*.c`/`*.h` rules in `3ac1672` also touch main.c's endings — your call).
+6. **Untracked files** — decide the 16 roadmap-added files per
+   `docs/INVENTORY.md` groups; add `.coverage` to `.gitignore` (it is not
+   ignored, #241).
+7. **R12** — review via `docs/REVIEW_BRIEF.md` and post answers here; the
+   row stays yours.
+8. **R1** — run the three approved clone-installs (ngspice URL,
+   espressif/qemu assets, pinned PyPI) as the next session's first job.
+
+## BLOCKED rows
+
+| Row | Blocker | Smallest owner question |
+|---|---|---|
+| R2 | native crash fix reverted, root object unnamed | approve memory-debugger run? approve hunk-staged editor fix? |
+| R11 (2 of 4 clauses) | tree clean + EOL strictness gated by owner-reserved files | land the reserved files, then renormalize? |
+| R12 | human review not performed | schedule the 30-60 min read in REVIEW_BRIEF? |
+
+## Activity-log anomalies (stop condition c, assessed and disclosed)
+
+#227/#228: my own broken audit invocations (recorded as run). #231/#232:
+the logger itself collapsed exit 3 to 1 and stripped quotes (PS 5.1
+`-Command`); fixed in the working tree, verified by #233 recording a real
+3, committed under owner action 2 above. The hash chain never broke:
+`agentlog_verify` reports 245 entries, 0 problems, head `476701b2…`.
