@@ -92,10 +92,17 @@ Python can bind it. It is idempotent — rerun it any time.
 python tools\run_tests.py            # suites only
 ```
 
-Expect `SELF-CHECK: PASS` and `363 tests passed, 2 skipped (the UNEXECUTED
+Expect `SELF-CHECK: PASS` and `483 tests passed, 3 skipped (the UNEXECUTED
 QEMU contract tests)`, both with
 exit code 0. If it is not green, stop and fix that before continuing —
 everything later assumes this line.
+
+**Interpreter note (measured 2026-10-28):** `python` below must resolve to
+the `.venv` interpreter. Where bare `python` is a system Python without
+this project's packages (on this box: an MSYS2 CPython 3.14),
+`python tools\run_tests.py` fails with 5 collection errors and a missing
+timeout plugin. Use `.venv\Scripts\python ...` instead, or activate the
+venv first (`\.venv\Scripts\Activate.ps1`).
 
 ### Two test tracks — which command covers what
 
@@ -109,6 +116,16 @@ Verified 2026-10-24 on this box: Track A default (363 passed, 2 UNEXECUTED
 skips with exact-item reasons), Track A `--require-emulator` with no binary
 configured (fails, as designed), Track B against the built
 `qemu-system-xtensa` (2 passed, 0 skips).
+
+Re-verified 2026-10-28 (job R9-01): Track A default -> **483 passed,
+3 skipped** (`GATE: all collected tests passed`, two runs of 120.66 s and
+186.13 s in `logs/out/00177.txt` / `00178.txt`); the 3 skips are the three
+qemu-marker contract tests at `tests/test_qemu_monitor_qemu.py:78/105/117`
+(`:117` is the third, added after the 2026-10-24 line above). Track A
+`--require-emulator` -> **exit 3** with those skip reasons printed
+(`logs/cmd/r9_exit3.py`, `logs/out/00179.txt`). `\.\run_selfcheck.bat` ->
+`SELF-CHECK: PASS` (`logs/out/00173.txt`). Track B not re-run (needs the
+Part E build).
 
 UNVERIFIED steps: Track A via the `run_tests.bat` cmd wrapper (not re-run in
 this pass); Track B on a machine without the Part E build (expected: exit 2
@@ -201,9 +218,14 @@ Keep the source in your WSL home (`~/qemu-esp`) — building on `/mnt/c`
 ```powershell
 cd $env:USERPROFILE\PROJECT_WOWKISPICE
 .\run_selfcheck.bat                  # -> SELF-CHECK: PASS
-python tools\run_tests.py            # -> 363 tests passed, 2 skipped (UNEXECUTED QEMU contract tests)
-python tools\demo_closed_loop.py     # -> PASS in ~40 seconds
+python tools\run_tests.py            # -> 483 tests passed, 3 skipped (UNEXECUTED QEMU contract tests)
+python tools\demo_closed_loop.py     # -> PASS in ~40 seconds (needs the Part E emulator)
 ```
+
+Without the Part E emulator, the demo exits **2** with
+`FAIL: qemu-system-xtensa not found` (measured 2026-10-28; it searches
+`--qemu`, `$WOSP_QEMU`, a sibling `qemu-build` checkout and `~/qemu-esp`).
+The two lines above it need no emulator.
 
 The demo boots the real firmware in QEMU, waits for its control loop,
 injects an ADC sample of 3456 through the QEMU monitor at the fixed path
