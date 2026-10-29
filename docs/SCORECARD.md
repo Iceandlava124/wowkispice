@@ -1020,3 +1020,80 @@ Jobs this session (continued): `R8-01`. Log entries 209-213.
 | R12 | OWNER-SET | unchanged |
 
 Jobs this session (continued): `R8-01`, `R10-01`. Log entries 209-229.
+
+---
+
+# Session 2026-10-29 — job R9-02, docs equal reality (README, SETUP, ROADMAP, PROJECT_STATUS)
+
+## Every command the named docs contain, run this session
+
+| Command | Measured result | Log |
+|---|---|---|
+| `powershell -ExecutionPolicy Bypass -File setup.ps1` | exit 0, idempotent (all deps satisfied, DLL present), "Setup complete" | #235 |
+| `.\run_selfcheck.bat` | `SELF-CHECK: PASS`, full-suite gate green in 120.5 s | #236 |
+| `python tools\run_tests.py` | **488 passed, 3 skipped**, exit 0 | #226 |
+| `.\run_editor.bat` | editor starts and stays alive 15 s (headless offscreen probe) | #237 |
+| `python tools\run_tests.py --require-emulator` | **exit 3**, each skip naming its missing binary | #234 |
+| `powershell ... tools\run_emulator_tests.ps1` | **3 passed, 0 skips**, exit 0, gate message printed | #201 |
+| `wsl -- bash -lc "cd ... && WOSP_QEMU=... pytest ..."` (the "exact command" block) | ran as the script's step 4; shapes compared line-by-line | #201 |
+| `docker version` / the docker build+run block | client 29.8.2 only, daemon unreachable -> README section replaced | #230 |
+| `python tools\doctor.py` | no crash; every section [OK] except `[X] QEMU not found` -> exit 1 (WSL-only emulator) | #238 |
+| SETUP Part D checkpoint `qemu_flash.bin == 4,194,304 bytes` | measured exactly 4194304 | #239 |
+| `python tools\demo_closed_loop.py` | without emulator exits 2, `FAIL: qemu-system-xtensa not found` (SETUP now documents exactly this) | #174/#180/#181 |
+
+`QUICKSTART.md` and `TROUBLESHOOTING.md` **do not exist** (recorded in
+`logs/baseline/r9-commands.txt` #171; ROADMAP 3.5 tracks creating them) —
+there are no commands in them to run. `SETUP.md`'s remaining UNVERIFIED
+items are labelled UNVERIFIED in the file itself (`run_tests.bat` wrapper;
+Track B on a machine without the Part E build).
+
+## Doc edits made to reach 0 unverified claims
+
+- **README**: status table re-measured (488/3; contract tests 3 passed
+  #201; selfcheck 120.5 s), quick-start numbers 363 -> 488, Docker section
+  replaced by the measured never-built note (#230), "2 qemu-marker" -> 3,
+  "2 passed, 0 skips" -> 3 passed (both stale), the honest-boundary bullet
+  now states the built loop with its evidence, Track B locator list
+  updated to include the WSL probe.
+- **SETUP**: 483 -> 488 (two places), 2 -> 3 contract tests, and a
+  2026-10-29 re-verification block (#226/#234/#201/#235/#236).
+- **ROADMAP**: ~40 annotations reconciled to this session — suite
+  488/0F (#226), gate flip passes (#201), R7 timing captured (#207),
+  cleanup reaped a real orphan (#210/#212), traceability non-vacuous
+  (#224), CI branch fixed (181d885), doctor/README/Docker/performance
+  rows re-measured (#230/#238).
+- **PROJECT_STATUS**: four stale claims corrected — the firmware loop now
+  runs inside the simulation (logs #201/#207); the open item became
+  "rebuild the patched QEMU from tracked patches".
+- **KNOWN_ISSUES**: recorded the agentlog exit-collapse defect and its
+  uncommitted fix (owner action; #231-#233).
+
+## Anomaly found and handled (stop condition c, assessed)
+
+While measuring `--require-emulator` the activity log itself mis-recorded
+an exit 3 as 1: PS 5.1 `-Command` collapses native non-zero exits, and a
+second trap stripped embedded quotes (#231/#232). Fixed in the working
+tree (base64 `-EncodedCommand` + explicit `exit $LASTEXITCODE`), verified
+by #233 recording a real 3. The defect is a logging-infrastructure bug,
+not a product/test failure; entries #227/#228 were my own bad invocations,
+recorded as run. The hash chain never broke — `agentlog_verify` passes at
+job end. Recorded in KNOWN_ISSUES with an OWNER ACTION to commit it.
+
+## Recomputed statuses after R9-02
+
+| Row | Status | Basis |
+|---|---|---|
+| R9 | **PASS** | every README/SETUP command run this session with logged output (table above); QUICKSTART/TROUBLESHOOTING absent and recorded; ROADMAP ticks match evidence (~40 annotations reconciled); KNOWN_ISSUES lists every open defect incl. today's logger fix |
+| R1 | UNVERIFIED (unblocked) | unchanged — three clone-installs still to run |
+| R2 | BLOCKED (owner action) | unchanged |
+| R3 | PASS | unchanged |
+| R4 | PASS | unchanged |
+| R5 | PASS | unchanged |
+| R6 | PASS | unchanged |
+| R7 | PASS | unchanged |
+| R8 | PASS | unchanged |
+| R10 | PASS | unchanged |
+| R11 | FAIL | next — `.gitattributes` proposal to show the owner |
+| R12 | OWNER-SET | unchanged |
+
+Jobs this session (continued): `R8-01`, `R10-01`, `R9-02`. Log entries 209-239.
