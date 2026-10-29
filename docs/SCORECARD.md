@@ -647,3 +647,170 @@ coverage target**, so no target is asserted here.
 
 Jobs this session: `S2-INIT`, `R5-01`, `R2-03`, `R3-01`. Log entries
 104-166.
+
+---
+
+# Session 2026-10-29 — owner decisions received; R9-01, R4-02, R6-01, R3-02
+
+The eight owner decisions arrived with the driver: licence = Apache-2.0 in
+`pyproject.toml` (LICENSE untouched); commits allowed for finished-job files
+in small groups; coverage floors set (decision 3); `docs/REVIEW_BRIEF.md`
+requested for R12; network approved only for the pinned ngspice/QEMU/PyPI
+sources with URL/size/SHA-256 logging; PyYAML approved pinned; no vendored
+COPYING files (quote instead); a patched emulator exists in WSL and
+`tools/run_emulator_tests.ps1` is its route (no `WOSP_QEMU` on Windows).
+
+## Carried from entries 167-182 (R3 coverage probes, R9-01 doc audit)
+
+* #167-#170: the stdlib `trace`-based coverage fallback (key shape fixed;
+  numbers quoted in the R3-01 section above).
+* #171: command inventory from README/SETUP written to
+  `logs/baseline/r9-commands.txt`.
+* #172/#173: `SELF-CHECK: PASS` claim (README:35 / SETUP:91) — first
+  invocation failed on a wrapper detail, direct run passes.
+* #174/#180/#181: SETUP:205's demo claim "PASS in ~40 seconds" is false on
+  this machine: exit 2, `FAIL: qemu-system-xtensa not found` (captured).
+* #175-#179: README:95's `--require-emulator` exit-3 claim verified — the
+  bare `python` on this box is MSYS2 3.14 (no PyQt5), so the documented
+  commands must name the venv interpreter; with it, skips name their
+  missing binary and `require_emulator_gate() -> 3` matches the README.
+* #182: `SETUP.md` edited (25+/3−): venv interpreter, demo expectation,
+  `run_tests.bat` UNVERIFIED note, ROADMAP tick audit.
+
+R9 stays **FAIL**: README/QUICKSTART/TROUBLESHOOTING claims are not all
+re-verified and KNOWN_ISSUES has not been reconciled for this session.
+
+## R4-02 — licence, path and vector clauses (decisions 1, 5, 7)
+
+* `pyproject.toml` declares `license = {text = "Apache-2.0"}` with the
+  matching classifier, agreeing with `LICENSE`; `LICENSE` untouched.
+  Diff (3 files, 48+/10−) at #183, committed as `18b2c1b`.
+* `tools/qemu-patch/README.md`: the patch files modify GPLv2 QEMU and are
+  distributed under GPLv2 — stated, no legal conclusion drawn.
+* `THIRD_PARTY_NOTICES.md`: PyQt5's `License: GPL v3` quoted verbatim from
+  `.venv/Lib/site-packages/PyQt5-5.15.11.dist-info/METADATA`; the
+  commercial-licence half stays **UNVERIFIED** (no file on this machine
+  states it). ngspice quoted from `tools/ngspice/docs/COPYING` (45,714
+  bytes, SHA-256 `6d939001…`) with its first lines; the DLL archive
+  (`ngspice-47_dll_64.7z`, SHA-256 `5bf5eec7…`) contains no licence file.
+  The file states plainly: no QEMU binary is redistributed, only patches.
+* Vectors: 17 tests in `tests/test_security_vectors.py` — vectors 1-9,
+  command separators, the three loopback tests ("Every bind/listen/-monitor
+  in this repository is loopback only": bind targets, TCP endpoints,
+  wildcard), absolute-user-path and credential-string scans, and the
+  non-vacuousness guard — all pass in #190 (53 passed together with the
+  sanitiser file).
+* Absolute user paths: `git grep -F` for `gudae`, `C:\Users`, `C:/Users`
+  → zero matches (#202). An earlier `-E` hit was escape mangling: in ERE
+  `\U` reduces to `U`, matching the backslash-stripped `C:Users...`
+  transcript inside SECURITY.md — not a path.
+
+**R4: PASS** (all five clauses evidenced this session).
+
+## R6-01 — real-emulator gate flip through the documented route
+
+Locator, honestly: `tools/run_emulator_tests.ps1` first ran as-is (#184):
+exit 2, it printed the documented default path — which does not exist on
+this machine (the owner-stated `Music\qemu-build\...` directory is empty,
+measured with `wsl -- ls -l`). The patched build lives on the WSL
+filesystem: `qemu-system-xtensa`, marker `adc1-value` present in the repro
+build and absent in the stock esp-tools build; QEMU 9.2.2, `esp32_sens` ×4.
+
+The script gained a third locator that probes WSL and prints which locator
+won, exactly like the first two. Entries #193-#199 record the diagnosis:
+the WSL interop layer expands `$vars` to empty before bash sees them
+(`echo $c` printed an empty line while `[ -x $c ]` became a one-argument
+test that is true for any non-empty string), so the probe command is `$`-free
+and uses `~` — which also keeps any absolute user path out of the tracked
+file (the expansion appears only in runtime output).
+
+Final run, the route tests use, exit 0 (#201):
+
+```
+[ .. ] locator        : documented default (sibling qemu-build checkout)
+[ .. ] locator        : WSL filesystem probe (patched build has no Windows path)
+       binary path   : /home/user/repro/src/build/qemu-system-xtensa
+[ ok ] binary exists
+tests/test_qemu_monitor_qemu.py::test_gate_flip_against_real_firmware PASSED
+3 passed, 1 warning in 4.48s
+[GATE] all contract tests ran and passed (0 skips)
+```
+
+* Gate flip at 1995/2030 (derived from main.c): passed against the real
+  firmware (#201; also #185 via the same inner command).
+* ADC expectations: 12 closed-form hand-derived tests in
+  `tests/test_adc_conversion.py` (cited in session 1).
+* Errors in `set_adc1_value`/`read_gate` surfaced, never swallowed: 49
+  passed in `tests/test_qemu_monitor_unit.py` + `tests/test_firmware_gpio.py`
+  (#186).
+
+**R6: PASS** (all three clauses, through `tools/run_emulator_tests.ps1`).
+
+## R3-02 — owner-set coverage floors (decision 3)
+
+Install #187 (approved): pytest-cov 7.1.0, coverage 7.17.0, PyYAML 6.0.3,
+pinned in `pyproject.toml`. Download evidence — URL, size and SHA-256 from
+PyPI's own metadata for each pinned distribution — at #203.
+
+Floors: sanitiser and ADC conversion functions ≥90%; the other modules: the
+measured value is the floor.
+
+First measurement (#188, 483 passed): `NgSpiceEngine._sanitise_line` 83% —
+lines 745-747 (the `cmd()` banned-command branch) and 756-759 (the
+post-normalisation re-check raise) had never executed → below the floor.
+
+Two tests added to `tests/test_ngspice_sanitiser.py` (#189 records the
+first attempt failing collection on a multi-line plain docstring; fixed,
+#190 = 53 passed):
+
+* `test_cmd_reference_in_netlist_is_rejected` reaches 745-747;
+* `test_double_plus_continuation_cannot_smuggle_control`: `++ .control`
+  survives the first directive check (still `+`-prefixed after one strip)
+  and must be caught by the re-check — reaches 756-759.
+
+Mutation check of the new tests (#191, `logs/cmd/r3_mutate_san.py`):
+`_is_banned_cmd` neutered → KILLED; post-normalisation re-check dropped →
+KILLED; `mutants killed: 2/2`, `restored sha256 matches: True`.
+
+Final measurement (#192, 485 passed, 3 skipped):
+
+| module | stmts | coverage | floor (decision 3) | met |
+|---|---|---|---|---|
+| bridge/ngspice_wrapper.py | 422 | 83% | measured: 83% | yes |
+| bridge/control_law.py | 202 | 95% | measured: 95% | yes |
+| bridge/qemu_monitor.py | 193 | 76% | measured: 76% | yes |
+| bridge/binary_runner.py | 272 | 18% | measured: 18% | yes |
+
+| function floor | coverage | threshold | met |
+|---|---|---|---|
+| `NgSpiceEngine._sanitise_line` | 100% (23/23) | ≥90% | yes |
+| `binary_runner._adc_counts_from_voltage` | 100% | ≥90% | yes |
+| `control_law._to_counts` and `to_counts` | 100% | ≥90% | yes |
+| `qemu_monitor.set_adc1_value` | 100% | ≥90% | yes |
+| `qemu_monitor.cycle_adc_and_gate` | 100% | ≥90% | yes |
+
+Mutants per core module (≥5, all killed): `ngspice_wrapper` 10 (#126),
+`control_law` 6, `binary_runner` 8, `qemu_monitor` 5 (#164, 19/19), plus
+the 2 added for the new branches (#191).
+
+**R3: PASS**.
+
+## Recomputed statuses after R4-02, R6-01, R3-02
+
+| Row | Status | Basis |
+|---|---|---|
+| R1 | UNVERIFIED (unblocked) | network approved for the pinned sources (decision 5); the three clone-installs not yet run |
+| R2 | BLOCKED (owner action) | unchanged: needs the owner's commit/revert decision for `ui/schematic_editor.py` and the other pre-session files |
+| R3 | **PASS** | 5+ mutants/module all killed; coverage measured; floors met (#164, #187-#192) |
+| R4 | **PASS** | 17/17 vectors + loopback + no user paths + licences read from files (#183, #190, #202) |
+| R5 | PASS | unchanged (verified earlier this session) |
+| R6 | **PASS** | real gate flip + error surfacing through `tools/run_emulator_tests.ps1` (#186, #201) |
+| R7 | UNVERIFIED (unblocked) | emulator reachable through the route; the 10 measured runs not yet executed |
+| R8 | UNVERIFIED (unblocked) | fault tests exist; orphan check for WSL-launched vs Windows-launched processes not yet defined and executed |
+| R9 | FAIL | SETUP fixes landed (#182); README/QUICKSTART/TROUBLESHOOTING audit unfinished |
+| R10 | FAIL | PyYAML installed (#187); CI parse and traceability fix pending |
+| R11 | FAIL | .gitattributes proposal pending |
+| R12 | OWNER-SET | `docs/REVIEW_BRIEF.md` not yet written |
+
+Jobs this session (continued): `R3-01` (coverage close), `R9-01`, `R4-02`,
+`R6-01`, `R3-02`. Log entries 167-203; chain head `a84cfeb7…` at #203.
