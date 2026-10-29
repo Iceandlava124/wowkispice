@@ -26,8 +26,17 @@ Each requirement maps to one or more real tests via `@pytest.mark.req("ID")`.
 
 | ID | Requirement | Reason | Tests |
 |----|-------------|--------|-------|
-| SOL-01 | Real firmware binary executes as closed-loop controller, ADC injection hooks into ngspice, gate readback to the solver | `bridge/qemu_orchestrator.py` SENS unmodelled; patched QEMU does not yet expose the ADC model; ngspice-to-QEMU coupling blocked on QEMU ADC support | `tests/test_firmware_gpio.py` (qemu marker), trace recorded as NOT IMPLEMENTED |
 | PERF-01 | Baseline soaks recorded on this machine | QEMU binary absent | recorded as UNEXECUTED |
 | CO-13 | A soak of 10 minutes leaves memory flat and the drift within a documented bound | the "(soak marker)" test was never implemented; no soak runs in the suite today | none - tracked with the baseline soaks (PERF-01) |
 
 All other requirements are implemented and green.
+
+**SOL-01 retired (2026-10-29):** the row that claimed the real firmware
+does not execute as the closed-loop controller is obsolete.
+`bridge/binary_runner.py` now runs that loop — solver sense ->
+`qom-set adc1-value` -> GPIO18 gate readback -> source callback each
+timestep — measured as a gate flip at 1995/2030 through
+`tools/run_emulator_tests.ps1` (3 passed, 0 skips, log #201) and as 10
+loop runs / 30 flips with documented latency bounds (log #207). Its
+reason, "patched QEMU does not expose the ADC model", is false for the
+patched build: `adc1-value` is present (log #193-#199 locator work).

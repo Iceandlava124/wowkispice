@@ -1145,7 +1145,7 @@ BLOCKED — so no "meets scorecard v1" claim is made.
 | Track B (real emulator) | 3 passed, 0 skips, exit 0 | #201 |
 | Mutants | 19/19 killed | R3-01 |
 | Commit audit | 25 commits, message matches diff, one concern each | #229, #245 |
-| Activity log | 245 entries, 0 problems, head `476701b22d158d09220316677ba9c4686a3c3dc51b7d10774067168e32fa3f5d` | verify |
+| Activity log | 246 entries, 0 problems, head `21607ba40a7c6d89f46078359ea2e9bb5b4bb690c57cf051cad846ed75e221f7` (final entry #246) | verify |
 
 ## Commits (25, oldest first)
 
@@ -1195,4 +1195,6 @@ BLOCKED — so no "meets scorecard v1" claim is made.
 the logger itself collapsed exit 3 to 1 and stripped quotes (PS 5.1
 `-Command`); fixed in the working tree, verified by #233 recording a real
 3, committed under owner action 2 above. The hash chain never broke:
-`agentlog_verify` reports 245 entries, 0 problems, head `476701b2…`.
+`agentlog_verify` reports **246 entries, 0 problems, head
+`21607ba40a7c6d89f46078359ea2e9bb5b4bb690c57cf051cad846ed75e221f7`**
+(entry #246, the post-sync traceability re-check, is the last entry).

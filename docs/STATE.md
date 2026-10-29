@@ -56,12 +56,12 @@ OWNER DECISION: PENDING - need to verify with real QEMU emulator before locking 
 - **Owner ACTION**: .gitattributes policy (LF/CRLF) and README/SETUP/.gitignore diffs approval pending
 - **Next job**: J4 NGSPICE SANITISER
 
-## JOB 4 - NGSPICE SANITISER (IN PROGRESS)
-- Fixed  to explicitly reject  and  directives
-- Added  to  frozenset to enable  method
-- Updated  regex and added pre-regex check for bare /.
-- Added 17 new sanitiser validation tests in 
-- All 17 tests pass: .control/.endc banned, allowed directives work, cmd allowlist updated
+## JOB 4 - NGSPICE SANITISER (IN PROGRESS)
+- Fixed  to explicitly reject  and  directives
+- Added  to  frozenset to enable  method
+- Updated  regex and added pre-regex check for bare /.
+- Added 17 new sanitiser validation tests in 
+- All 17 tests pass: .control/.endc banned, allowed directives work, cmd allowlist updated
 
 ## JOB 4 - NGSPICE SANITISER (IN PROGRESS)
 - Fixed _is_banned_directive to explicitly reject .control and .endc directives
@@ -158,12 +158,15 @@ OWNER DECISION: PENDING - need to verify with real QEMU emulator before locking 
   KILLED (2 failed). Survivor recorded honestly in tests/MUTATION_LOG.md.
 - **Combined gate after both fixes**: 431 passed, 3 skipped, 0 failed.
 
-## OPEN / NEXT
-- Not committed this turn: J4 fix (wrapper+test), doctor/traceability fixes,
-  J1 files, J2 doc. Commit grouping belongs to J3 (OWNER ACTION pending:
-  .gitattributes policy, README/SETUP/.gitignore approval).
-- Next: J4 remainder (exploit tests vs HEAD's wrapper, cmd() path map,
-  SECURITY.md vector list), then J3 commits.
+## OPEN / NEXT (refreshed 2026-10-29, session end)
+- All J3-group work is committed; the scorecard session ended at its
+  12-job cap — final statuses, the 8 owner actions and the STOP section
+  live in `docs/SCORECARD.md` (session head `d66c3b7`).
+- Current gate: **488 passed, 3 skipped, 0 failed** (log #226);
+  `agentlog_verify`: 246 entries, 0 problems, head
+  `21607ba40a7c6d89f46078359ea2e9bb5b4bb690c57cf051cad846ed75e221f7`.
+- Next job (R1): three measured `git clone` installs — network already
+  approved (owner decision 5); everything else open is an owner action.
 
 ## STEPS 1-4 (2026-10-27) - RECONCILE / HANG RE-CHECK / J4 SECURITY / J2 / J3
 
@@ -282,12 +285,21 @@ OWNER DECISION: PENDING - need to verify with real QEMU emulator before locking 
   006b6913fb470d4c15665d08990f381113708799018535445b2c69e5e0fb8a0d
   (final post-commit verify pasted in the report).
 
-### OWNER ACTIONS (open)
+### OWNER ACTIONS (open) — dispositions as of 2026-10-29
 1. J2 (a): `git --no-pager restore firmware/esp32_buck_controller/src/main.c`
-2. J3: `.gitattributes` policy approval (LF py/md/toml/txt/lock/yml/json/sc/h;
-   CRLF ps1/bat/cmd; binary images/archives) - file NOT created without it
-3. J3: approval of the README.md diff (left uncommitted)
+   — STILL OPEN. Select-String output logged (#242/#243); the one-liner is
+   `git checkout -- firmware/esp32_buck_controller/src/main.c`.
+2. J3: `.gitattributes` policy approval — DONE: the file pre-existed, was
+   extended with the owner's `*.c`/`*.h` rules and committed `3ac1672`
+   (diff shown first, log R11-GITATTRIBUTES-DIFF).
+3. J3: approval of the README.md diff (left uncommitted) — DONE: README
+   committed and re-measured this session (`9232d2e`, `5bc3d6f`).
 4. Decide whether to chase the intermittent editor-worker access violation
-   (docs/KNOWN_ISSUES.md) before the pilot
+   (docs/KNOWN_ISSUES.md) before the pilot — STILL OPEN as scorecard R2
+   (BLOCKED): two owner questions (memory-debugger run; hunk-staged fix).
 5. Remaining J4 gate item: guard `cmd()` against non-allowlisted commands
-   once the real caller set is mapped (SECURITY.md residual finding)
+   once the real caller set is mapped — DONE: verb allowlist with tests
+   (`9db95f7`).
+
+The full owner-action list for the scorecard session (8 items) is the STOP
+section in `docs/SCORECARD.md`.

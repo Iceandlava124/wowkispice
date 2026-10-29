@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keep-a-changelog.com/).
 
 ## Unreleased
 
+### Scorecard session (2026-10-28 / 2026-10-29)
+- `tools/check_traceability.py` rewritten: parses the real 4-column
+  requirements table and hyphenated IDs, unions source `req` markers with
+  junit, and still fails on zero requirements or zero marked tests.
+- CI (`.github/workflows/cosim-ci.yml`) now triggers on `baseline-fix`,
+  with `tests/test_ci_workflow.py` asserting the YAML and the branch.
+- `bridge/ngspice_wrapper.py`: failed analyses raise; transient runs that
+  finished are not raised on (R5), on top of the verb allowlist guard (R4).
+- Security: tracked-file user-path pattern tightened and home paths
+  redacted; licence text for ngspice/PyQt5/QEMU quoted from files into
+  `THIRD_PARTY_NOTICES.md`; `pyproject.toml` licence matches `LICENSE`.
+- Docs reconciled to measured output: README, SETUP, ROADMAP,
+  PROJECT_STATUS, requirements.md/requirements-matrix (SOL-01 retired on
+  gate-flip evidence), plus `docs/REVIEW_BRIEF.md` for the human review.
+- `.gitattributes` gains `*.c`/`*.h` LF rules; `tools/agentlog.ps1` records
+  exact exit codes (PS 5.1 `-Command` collapse fixed).
+- Tests: +`test_ci_workflow.py`, `test_tool_fixes.py`,
+  `test_adversarial_stress.py` and the `req` marker set; suite now
+  488 passed / 3 skipped / 0 failed.
+
 ### Polish (Task 8)
 - Added `docs/KNOWN_ISSUES.md` describing the remaining bridge/runtime issues
   and limitations in this phase.
