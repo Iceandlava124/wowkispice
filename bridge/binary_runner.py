@@ -16,7 +16,15 @@ from bridge.qemu_monitor import QemuMonitor
 
 
 def _adc_counts_from_voltage(v_sense: float, vref: float = 3.3, divider: float = 0.5, adc_bits: int = 12) -> int:
-    v_adc = v_sense / divider if divider > 0 else v_sense
+    """Counts the firmware would read for a voltage sensed upstream of the
+    feedback divider (the `vout` side, circuits/buck_converter.cir's
+    Rfb_top/Rfb_bot pair).
+
+    Documented law in bridge/control_law.py: `v_pin = sense_net *
+    divider`, so a 2:1 divider (divider=0.5) turns 3.3 V at vout into
+    1.65 V at the ADC pin -> 2048 counts of a 12-bit/3.3 V converter.
+    """
+    v_adc = v_sense * divider
     max_counts = (1 << adc_bits) - 1
     counts = int(round((v_adc / vref) * max_counts))
     return max(0, min(max_counts, counts))

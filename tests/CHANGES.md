@@ -283,3 +283,28 @@ docs/KNOWN_ISSUES.md, NOT fixed here (bridge/ is out of this job's allowlist).
   .control block EXECUTED on both HEAD and the draft (marker file created,
   `PWNED` printed); temp lib cleaned up: True.
 - Mutation evidence: tests/MUTATION_LOG.md (2026-10-27 3b/3c, 7/7 killed).
+
+## 2026-10-31 — divider convention pinned through run_binary_cosim (Q4)
+
+### test_solver_error_handling.py::test_a_finite_value_still_converts — EXPECTATION UPDATED
+- What it tested: after the non-finite rejection tests, the working path
+  asserted `_adc_counts_from_voltage(0.825) == 2048`, i.e. it pinned
+  binary_runner's INVERTED divider arithmetic (`v_adc = v_sense /
+  divider`), with a comment claiming the half-scale pre-divider input is
+  0.825 V.
+- Why: owner decision Q4(a), after the derivation from the board
+  netlist and firmware: circuits/buck_converter.cir wires a 100k/100k
+  pair so fb = vout/2, and main.c's thresholds 1995/2030 are raw counts
+  at the ADC pin (3.3 V reference, 12-bit). The documented law in
+  bridge/control_law.py is `v_pin = sense_net * divider`, which
+  binary_runner contradicted. Half scale at the PIN is 1.65 V, so the
+  half-scale value on the PRE-divider node (vout) is 3.3 V, not 0.825 V.
+- Replacement: the assertion is now
+  `_adc_counts_from_voltage(3.3) == 2048`. The rounding/clamp
+  behaviour under test is unchanged; only the node convention moved.
+  The new end-to-end pin is tests/test_binary_runner.py
+  ::TestDividerSemantics, which forces vout = 3.3 V and asserts the
+  injected count is 2048 (it failed with 4095 under the old divide,
+  job JOBB-RED). Companion derivation evidence: job Q4-DERIVE.
+- Guarded by: TestDividerSemantics (mon injection) + the unchanged
+  control_law-side tests (test_adc_conversion, test_control_law_unit).

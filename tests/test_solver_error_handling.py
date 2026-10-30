@@ -352,9 +352,10 @@ class TestNonFiniteNeverBecomesACount:
         3.3 V 12-bit converter is exactly half scale."""
         assert _to_counts(1.65, 3.3, 12) == 2048
         if _adc_counts_from_voltage is not None:  # pragma: no cover
-            # binary_runner takes the voltage BEFORE the 0.5 divider, so the
-            # half-scale input there is 0.825 V, not 1.65 V.
-            assert _adc_counts_from_voltage(0.825) == 2048
+            # binary_runner takes the voltage BEFORE the 0.5 divider, and
+            # the documented law is v_pin = sense * divider: 3.3 V at vout
+            # (half scale through the 2:1 divider) must map to 2048.
+            assert _adc_counts_from_voltage(3.3) == 2048
 
     @pytest.mark.timeout(30)
     def test_conversion_of_nan_cannot_silently_clamp(self):

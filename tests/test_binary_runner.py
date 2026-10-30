@@ -191,5 +191,32 @@ class TestLaunchPath(unittest.TestCase):
                          "the QEMU launch died on a NameError: %r" % bad)
 
 
+class TestDividerSemantics(unittest.TestCase):
+    """Q4 pinning: sense_net is the PRE-divider node (vout), so the ADC
+    count must be `vout * divider`, matching bridge/control_law.py's
+    documented `v_pin = sense_net * divider` and the board's 2:1 divider
+    (circuits/buck_converter.cir: Rfb_top vout fb 100k / Rfb_bot fb 0
+    100k) with main.c's 12-bit, 3.3 V-referenced ADC.
+
+    With vout forced to exactly 3.3 V the pin sees 1.65 V, i.e. 2048
+    counts. The inverted `v_sense / divider` maps the same node to
+    6.6 V -> 4095 (clamped), so this test fails on the old arithmetic
+    for every vout above 1.65 V.
+    """
+
+    def test_vout_3v3_reaches_the_adc_as_2048_counts(self):
+        run, mon = _run_with_fake_monitor()
+        self.assertIsNotNone(mon, "the monitor was never constructed")
+        self.assertGreaterEqual(
+            run.callback_hits, 1,
+            "the external source never called back: %r" % run.warnings)
+        self.assertTrue(mon.injected, "no ADC count was ever injected")
+        self.assertEqual(mon.injected[-1], 2048,
+                         "last injected count for vout=3.3 V: %r"
+                         % (mon.injected[-5:],))
+        self.assertNotIn(4095, mon.injected,
+                         "3.3 V through a 0.5 divider must never clamp")
+
+
 if __name__ == "__main__":
     unittest.main()
