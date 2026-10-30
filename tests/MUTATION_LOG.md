@@ -299,3 +299,39 @@ were used.
 2/2 mutants killed; control run after restore: 3 passed (entry #293).
 Entry #292 is the same harness's first run, which aborted on a path bug
 (FileNotFoundError, exit 1) before the target was touched.
+
+
+## R1FIX-A - setup.ps1 archive validation (2026-10-30)
+
+Target: setup.ps1 (Test-NgspiceArchive, the cached-file re-check, and the
+measured `-UserAgent`/`-MaximumRedirection` fetch profile) and
+tests/test_setup_download.py (five new tests, each running the function
+body extracted from setup.ps1 itself).
+Harness: logs/cmd/job_a_mutate.py via tools/agentlog.ps1 -Job R1FIX-A-MUTATE
+(entry #299). Unmutated baseline: 5 passed in 1.60 s (entry #298). Each
+mutant was applied IN PLACE, the target restored, and its SHA256 re-checked:
+f975279361a0dd7e9ae10a444878d444e06e6d57ff49ab8ccf4e59c40da8f1f4 before and
+after every restore, identical=True printed by the harness. No git commands
+were used.
+
+### Mutation i - drop the measured profile (`-UserAgent $FetchUserAgent -MaximumRedirection 8`)
+- Result: **1 failed, 4 passed** - the fetch line reverted to the exact text
+  that returned HTML in entry #278; caught by
+  test_download_call_uses_the_profile_that_measured_green.
+- Verdict: **KILLED**.
+
+### Mutation ii - checksum mismatch no longer throws (`if ($got -ne $ExpectSha.ToLower()) {` -> `if ($false) {`)
+- Result: **1 failed, 4 passed** - the driver returned 0 instead of 7;
+  caught by test_checksum_mismatch_throws_instead_of_warning.
+- Verdict: **KILLED**.
+
+### Mutation iii - 7z magic check neutered (`$head[$i] -ne $SevenZipMagic[$i]` -> `if ($false)`)
+- Result: **1 failed, 4 passed** - the HTML body was accepted (0 instead of
+  7); caught by test_html_body_is_rejected_even_without_a_pinned_checksum.
+- Verdict: **KILLED**.
+
+3/3 mutants killed; control run after restore: 5 passed (entry #299).
+The harness's per-mutation summary lines all read "MUTATION i" because of a
+`label[0]` bug in its print statement; the labelled header printed above
+each run identifies which mutation actually ran, and each was asserted
+against its own expected failing test name.

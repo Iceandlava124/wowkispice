@@ -163,8 +163,8 @@ if ($probeRc -eq 0) {
 $Archive  = Join-Path $Root "tools\ngspice-${NgspiceVersion}_dll_64.7z"
 $ExtractTo = Join-Path $Root "tools\ngspice_dll"
 $BaseUrl = "https://sourceforge.net/projects/ngspice/files/ng-spice-rework/$NgspiceVersion"
-# SHA-256 of ngspice-47_dll_64.7z as published on SourceForge. A mismatch is
-# reported, not silently accepted.
+# SHA-256 of ngspice-47_dll_64.7z as published on SourceForge. A mismatch
+# aborts setup (Test-NgspiceArchive below) instead of warning and continuing.
 $ExpectedSha = "5bf5eec7db989f74849cdb32f7df62693f4f149cceeebcbd222eb35c2bb821eb"
 
 # py7zr unpacks ngspice's .7z. Ensure it exists regardless of -SkipPython,
@@ -176,39 +176,96 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw "Could not install py7zr; cannot unpack the ngspice archives." }
 }
 
+# SourceForge serves an HTML download page instead of the file unless a
+# non-default User-Agent is sent. Measured 2026-10-30 (log entries #278,
+# #295): default UA -> HTML body in 0 of 4 fetches avoided - 4 of 4 attempts
+# returned 130879/132538 bytes titled 'Download ngspice-47_dll_64.7z (ngspice)'
+# with a mismatched sha256; User-Agent 'WISP-R1-probe/1.0' -> the real
+# 4385088-byte archive with the pinned sha256 in 4 of 4 attempts, both with
+# and without -MaximumRedirection 8. Changing this string is unmeasured.
+$FetchUserAgent = 'WISP-R1-probe/1.0'
+
+# The 7z signature, byte for byte, as measured from the real archive in log
+# entry #276 (magic_hex=377abcaf271c0004 -> 37 7A BC AF 27 1C).
+$SevenZipMagic = @(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C)
+
+function Test-NgspiceArchive {
+    # Refuse anything that is not the archive we asked for, whether it came
+    # from the network or from the cache. Before this existed, an HTML page
+    # was saved as the .7z and only a yellow checksum warning followed, so it
+    # flowed on into py7zr extraction (measured in log entry #278).
+    param([string]$Path, [string]$Name, [string]$ExpectSha)
+    $len = (Get-Item -LiteralPath $Path).Length
+    $fs = [IO.File]::OpenRead($Path)
+    try {
+        $head = New-Object byte[] 6
+        $read = $fs.Read($head, 0, 6)
+    }
+    finally { $fs.Close() }
+    $is7z = ($read -eq 6)
+    if ($is7z) {
+        for ($i = 0; $i -lt 6; $i++) {
+            if ($head[$i] -ne $SevenZipMagic[$i]) { $is7z = $false }
+        }
+    }
+    if (-not $is7z) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($read -lt 6) {
+            throw "tools\$Name is only $len bytes - too small to be the archive. Re-run setup.ps1, or download $Name manually into tools\ and re-run."
+        }
+        $hex = ($head | ForEach-Object { $_.ToString('x2') }) -join ' '
+        throw "tools\$Name is not a 7z archive (first bytes: $hex). SourceForge answered with an HTML page instead of the file, so the download was discarded. Re-run setup.ps1, or copy $Name manually into tools\ and re-run."
+    }
+    if ($ExpectSha) {
+        $got = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower()
+        if ($got -ne $ExpectSha.ToLower()) {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+            throw "Checksum mismatch for ${Name}: expected $ExpectSha, got $got. The file was discarded; re-run setup.ps1 to fetch it again, or copy it manually into tools\ and re-run."
+        }
+    }
+    return $true
+}
+
 function Get-NgspiceArchive {
     param([string]$Name, [string]$ExpectSha)
     $dest = Join-Path $Root "tools\$Name"
     if (Test-Path $dest) {
-        if (-not $ExpectSha) {
-            Write-Step "Using cached archive tools\$Name"
-            return $dest
+        if ($ExpectSha) {
+            $have = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
+            if ($have -eq $ExpectSha.ToLower()) {
+                Write-Step "Using cached archive tools\$Name (checksum verified)"
+                return $dest
+            }
+            Write-Warn2 "tools\$Name checksum differs; re-downloading."
+            Remove-Item $dest
         }
-        $have = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
-        if ($have -eq $ExpectSha.ToLower()) {
-            Write-Step "Using cached archive tools\$Name (checksum verified)"
-            return $dest
+        else {
+            # No pin for this archive (the console build), so the magic bytes
+            # are the only check - and a cached HTML page from an older run
+            # must not be trusted just because it has a filename.
+            try {
+                Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha ''
+                Write-Step "Using cached archive tools\$Name (7z header verified)"
+                return $dest
+            }
+            catch {
+                Write-Warn2 "cached tools\$Name rejected: $($_.Exception.Message)"
+                # Test-NgspiceArchive already removed the bad file, so the
+                # download below starts from a clean state.
+            }
         }
-        Write-Warn2 "tools\$Name checksum differs; re-downloading."
-        Remove-Item $dest
     }
     Write-Step "Downloading $Name"
     Write-Host "    $BaseUrl/$Name/download"
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri "$BaseUrl/$Name/download" -OutFile $dest -UseBasicParsing
+        Invoke-WebRequest -Uri "$BaseUrl/$Name/download" -OutFile $dest -UseBasicParsing -UserAgent $FetchUserAgent -MaximumRedirection 8
     }
     catch {
         throw "Download of $Name failed: $($_.Exception.Message)`n`nIf this machine has no internet access, copy $Name manually into tools\ and re-run."
     }
-    if ($ExpectSha) {
-        $got = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
-        if ($got -ne $ExpectSha.ToLower()) {
-            Write-Warn2 "Checksum mismatch for ${Name}: expected $ExpectSha, got $got"
-            Write-Warn2 "Continuing - the bind check in step 4 is the real test."
-        }
-        else { Write-Ok "Checksum verified." }
-    }
+    Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha $ExpectSha
+    if ($ExpectSha) { Write-Ok "Checksum verified." }
     return $dest
 }
 
