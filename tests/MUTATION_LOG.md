@@ -99,7 +99,7 @@ no test-job change.
 - Status: backstop present; primary fix is the real test + threading + timeouts.
 
 
-# 2026-10-25 — JOB 3c: Mutation harness invalid; survivors observed
+# 2026-10-25 ï¿½ JOB 3c: Mutation harness invalid; survivors observed
 
 The JOB 3b mutation run was invalid because it used `sys.path.insert(0, ".")` from the repo root, so the scratch copy never imported the mutated module.
 Rerunning mutation checks with a proper scratch tree is needed.
@@ -272,3 +272,30 @@ SHA256 re-checked (9f3f5a4b...fbc880 before and after).
 - Verdict: **KILLED**.
 
 5/5 mutants killed. Tree restored (SHA256 match printed by the harness).
+
+
+## R1FIX-B - run_selfcheck.bat exit propagation (2026-10-30)
+
+Target: run_selfcheck.bat (the fix) and tests/test_selfcheck.py (two new
+tests: test_bat_propagates_the_exit_code, test_bat_still_returns_zero_on_pass).
+Harness: logs/cmd/job_b_mutate.py via tools/agentlog.ps1 -Job R1FIX-B-MUTATE2
+(entry #293). Unmutated baseline in the harness control run: 3 passed in
+5.7 s; the same three tests passed in 4.60 s at entry #291. Each mutant was
+applied IN PLACE, the target restored, and its SHA256 re-checked:
+a63216679326cf0f59691fa0834ba87364e5e72462deee1ea27c2acbe163bd40 before and
+after every restore, identical=True printed by the harness. No git commands
+were used.
+
+### Mutation i - revert to bare `endlocal` (the pre-fix behaviour, measured in entry #277)
+- Result: **1 failed, 2 passed** - `AssertionError: 0 != 2` in
+  test_bat_propagates_the_exit_code: the bat swallowed selfcheck.py's exit 2.
+- Verdict: **KILLED**.
+
+### Mutation ii - hard-code `endlocal & exit /b 2`
+- Result: **1 failed, 2 passed** - `AssertionError: 2 != 0` in
+  test_bat_still_returns_zero_on_pass: a green self-check must still exit 0.
+- Verdict: **KILLED**.
+
+2/2 mutants killed; control run after restore: 3 passed (entry #293).
+Entry #292 is the same harness's first run, which aborted on a path bug
+(FileNotFoundError, exit 1) before the target was touched.

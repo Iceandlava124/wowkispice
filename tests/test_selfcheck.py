@@ -13,8 +13,11 @@ import sys
 import tempfile
 import unittest
 
+import pytest
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELFCHECK = os.path.join(REPO, "tools", "selfcheck.py")
+SELFCHECK_BAT = os.path.join(REPO, "run_selfcheck.bat")
 
 
 class TestSelfcheck(unittest.TestCase):
@@ -33,6 +36,45 @@ class TestSelfcheck(unittest.TestCase):
                       "known circuit", "test runner"):
             self.assertIn(stage, output,
                           f"self-check output never mentions {stage!r}")
+
+    @pytest.mark.timeout(120)
+    @unittest.skipUnless(sys.platform == "win32",
+                         "run_selfcheck.bat is Windows-only")
+    def test_bat_propagates_the_exit_code(self):
+        """run_selfcheck.bat must return selfcheck.py's own exit status.
+
+        Measured before the fix: a fresh clone printed
+        ``SELF-CHECK: FAIL (3 of 5 checks failed: ...)`` from the bat and
+        still reported ``exit=0`` (log entry #277), so nothing downstream
+        could gate on it. An unknown flag makes selfcheck.py exit 2 through
+        argparse in a fraction of a second, so the propagation is checked
+        without running the suite the self-check would otherwise launch.
+        """
+        proc = subprocess.run(
+            ["cmd", "/c", SELFCHECK_BAT, "--not-a-real-flag"],
+            cwd=REPO, capture_output=True, text=True, errors="replace",
+            timeout=100)
+        output = proc.stdout + proc.stderr
+        self.assertNotIn("SELF-CHECK: PASS", output, output[-2000:])
+        self.assertEqual(proc.returncode, 2, output[-2000:])
+
+    @pytest.mark.timeout(180)
+    @unittest.skipUnless(sys.platform == "win32",
+                         "run_selfcheck.bat is Windows-only")
+    def test_bat_still_returns_zero_on_pass(self):
+        """The other half of the contract: a green quick self-check must still
+        exit 0 through the same propagation path (exit 2 here would mean the
+        bat started carrying python's status into the wrong place)."""
+        env = dict(os.environ)
+        env["WOSP_SETTINGS_DIR"] = tempfile.mkdtemp(prefix="wosp-selfcheck-bat-")
+        env.setdefault("QT_QPA_PLATFORM", "offscreen")
+        proc = subprocess.run(
+            ["cmd", "/c", SELFCHECK_BAT, "--quick"],
+            cwd=REPO, env=env, capture_output=True, text=True,
+            errors="replace", timeout=150)
+        output = proc.stdout + proc.stderr
+        self.assertIn("SELF-CHECK: PASS", output, output[-2000:])
+        self.assertEqual(proc.returncode, 0, output[-2000:])
 
 
 if __name__ == "__main__":
