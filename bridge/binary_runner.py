@@ -125,7 +125,7 @@ def run_binary_cosim(
         cmd = [qemu, "-display", "none", "-serial", f"file:{uart_path}",
                "-monitor", "stdio", "-machine", machine,
                "-drive", f"file={firmware_image},if=mtd,format=raw"]
-        mon_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subsubprocess.DEVNULL)
+        mon_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         # Wait for firmware to boot
         deadline = time.monotonic() + 15.0
         wanted = list(BOOT_MARKERS)
@@ -259,7 +259,11 @@ def run_binary_cosim(
         
         engine.load_circuit(run.netlist)
         engine.cmd("run")
-        run.time, run.traces = engine.get_traces(run.nets)
+        run.time = engine.get_vector_array("time")
+        for net in run.nets:
+            values = engine.get_vector_array(net)
+            if values:
+                run.traces[net] = values
         run.callback_hits = state["hits"]
         if state.get("sync_errors", 0) > 0:
             run.warnings.append(f"sync errors: {state['sync_errors']} monitor communication failures")
