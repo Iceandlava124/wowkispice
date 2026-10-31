@@ -149,7 +149,9 @@ class TestCalibration(unittest.TestCase):
                            "the separation between same-window pairs and the "
                            "unrelated control must be measurable")
 
-    @unittest.skipUnless(_have(DARK, LIGHT), "docs/ reference screenshots not present")
+    @unittest.skipUnless(_have(LTSPICE_SCHEMATIC, LTSPICE_DIALOG),
+                         "docs/ltspice-reference/ screenshots not present "
+                         "(gitignored third-party material)")
     def test_control_sits_in_the_same_band(self):
         control = parity.compare_parity(LTSPICE_SCHEMATIC, LTSPICE_DIALOG)["score"]
         versus_us = parity.compare_parity(LTSPICE_SCHEMATIC, DARK)["score"]
