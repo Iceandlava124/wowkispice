@@ -58,9 +58,10 @@ class ToolchainResolver:
             if found:
                 candidates.append(("PATH", found))
         
-        # 5. Common WSL/Windows locations
+        # 5. Common system locations. No per-user paths: tracked files must
+        # stay portable and tests/test_security_vectors.py rejects absolute
+        # user paths outright; a custom build is reached through WOSP_QEMU.
         common_paths = [
-            r"C:\Users\gudae\Music\qemu-build\qemu-esp_develop_9.2.2_20260417\build\qemu-system-xtensa.exe",
             "/usr/bin/qemu-system-xtensa",
             "/usr/local/bin/qemu-system-xtensa",
         ]
