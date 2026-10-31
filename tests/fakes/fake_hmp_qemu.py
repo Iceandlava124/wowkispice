@@ -30,6 +30,15 @@ is accepted and ignored):
                          (bit 18 set -> gate True), use 0x00000000 for False
   FAKE_HMP_DROP_AFTER    commands answered before dropping in `drop` mode
                          (default 1; 0 drops immediately after the banner)
+  FAKE_HMP_STAY_ALIVE    when set, EOF on stdin does NOT end the process: it
+                         keeps running until it is explicitly killed. Models
+                         the peer that survives its wrapper dying, which is
+                         the leak QemuMonitor.stop() has to prevent
+                         (tests/test_qemu_monitor_unit.py::
+                         test_stop_tears_down_the_whole_process_tree).
+                         Without it a leaked fake exits on its own when the
+                         client's pipe closes, so old and fixed teardown look
+                         identical.
 """
 
 import os
@@ -50,6 +59,7 @@ def main():
     record = os.environ.get("FAKE_HMP_RECORD")
     xp_value = os.environ.get("FAKE_HMP_XP_VALUE", "0x00040000")
     drop_after = int(os.environ.get("FAKE_HMP_DROP_AFTER", "1"))
+    stay_alive = os.environ.get("FAKE_HMP_STAY_ALIVE")
 
     if mode == "silent":
         # A wedged QEMU: no banner, no prompt, no replies, ever. The client's
@@ -70,6 +80,11 @@ def main():
             os._exit(0)
         line = sys.stdin.readline()
         if not line:
+            if stay_alive:
+                # The client's end closed, but this peer does not go away:
+                # only an explicit kill of the process tree ends it.
+                while True:
+                    time.sleep(0.5)
             return 0                      # the client closed its end
         cmd = line.strip()
         if record:

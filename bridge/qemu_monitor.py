@@ -12,13 +12,69 @@ Run directly::
 
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
+import atexit
 from dataclasses import dataclass
 from typing import List, Optional
+
+# Track active monitors for cleanup
+_active_monitors = []
+_active_pids = []
+
+
+def _terminate_tree(pid):
+    """Terminate ``pid`` and every process it spawned.
+
+    On Windows ``start()`` may be handed a ``.cmd`` launcher, so the direct
+    child is ``cmd.exe`` and ``terminate()``/``kill()`` on that child leaves
+    the grandchildren alive -- measured: every full suite run leaked a pair
+    of orphaned ``fake_hmp_qemu`` pythons with a dead parent (job
+    ORPHAN-LIST, ages 33/38/86 min). ``taskkill /T`` walks the tree.
+
+    POSIX: the sh wrapper ``exec``s the interpreter, so the direct child IS
+    the workload and SIGTERM to it is the whole tree.
+    """
+    if os.name == "nt":
+        try:
+            subprocess.call(["taskkill", "/T", "/F", "/PID", str(pid)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+
+def _cleanup_all_monitors():
+    for mon in list(_active_monitors):
+        try:
+            mon.stop()
+        except:
+            pass
+    _active_monitors.clear()
+    # Also kill any tracked PIDs
+    for pid in list(_active_pids):
+        try:
+            if os.name == 'nt':
+                # /T: the tree, not just the wrapper -- see _terminate_tree.
+                subprocess.call(['taskkill', '/T', '/F', '/PID', str(pid)], 
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                os.kill(pid, 9)
+        except:
+            pass
+    _active_pids.clear()
+
+
+atexit.register(_cleanup_all_monitors)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -103,6 +159,13 @@ class QemuMonitor:
         self._reader_thread.start()
         # Consume the banner and stop at the first "(qemu) " prompt so every
         # later _hmp() call reads only its own reply.
+        try:
+            if self not in _active_monitors:
+                _active_monitors.append(self)
+            if self._proc and self._proc.pid and self._proc.pid not in _active_pids:
+                _active_pids.append(self._proc.pid)
+        except Exception:
+            pass
         self._wait_prompt(timeout=10.0)
         return self
 
@@ -150,11 +213,20 @@ class QemuMonitor:
             time.sleep(0.01)
 
     def stop(self):
-        """Terminate the QEMU process, if it is running."""
+        """Terminate the QEMU process tree, if it is running.
+
+        The whole TREE: killing only the direct child left the python
+        running the test double alive as an orphan (see _terminate_tree).
+        """
+        try:
+            if self in _active_monitors:
+                _active_monitors.remove(self)
+        except Exception:
+            pass
         if self._proc is None:
             return
         if self._proc.poll() is None:
-            self._proc.terminate()
+            _terminate_tree(self._proc.pid)
             try:
                 self._proc.wait(timeout=5)
             except subprocess.TimeoutExpired:

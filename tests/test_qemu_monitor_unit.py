@@ -29,7 +29,9 @@ Client facts these tests are derived from (bridge/qemu_monitor.py):
 """
 
 import os
+import re
 import socket
+import subprocess
 import sys
 import time
 
@@ -418,3 +420,98 @@ def test_cycle_adc_and_gate_error_shapes():
     assert cycle.message == "monitor died mid-cycle"
     # Note: cycle_adc_and_gate does not stop the monitor (caller owns lifecycle)
     # monitor.stopped may be False; caller must call monitor.stop() explicitly
+
+
+# --------------------------------------------------------------------------
+# Process-tree teardown (Windows): stop() must not leave the fake behind
+# --------------------------------------------------------------------------
+
+def _fake_pids():
+    """PIDs of live processes whose command line mentions the fake.
+
+    The command line, not the image name: pytest itself is python.exe, so
+    only a CIM query can tell the fake's children from everything else.
+    Read-only, roughly a second per call.
+
+    Two traps both hit while writing this test:
+      * the pattern must be ASSEMBLED FROM PARTS and the query must drop its
+        own ``$PID`` -- a literal ``fake_hmp_qemu`` in this command line made
+        the query match itself, so every call returned a phantom orphan and
+        the test failed on its own probe (PIDs 22836, 32516: one per call,
+        different every time, gone by the time the details were fetched);
+      * ``.ProcessId`` of a zero-match query prints nothing, so an empty
+        result is a valid, readable "no fakes".
+    """
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "$p = '*' + 'fake_hmp' + '_qemu*'; "
+         "(Get-CimInstance Win32_Process | Where-Object "
+         "{ $_.ProcessId -ne $PID -and $_.CommandLine -like $p }).ProcessId"],
+        capture_output=True, text=True, timeout=40, errors="replace")
+    pids = set()
+    for token in re.split(r"[\s,]+", (out.stdout or "").strip()):
+        if token.isdigit():
+            pids.add(int(token))
+    return pids
+
+
+def _fake_pid_details(pids):
+    """Command lines + parents for the survivors, for a self-explaining failure."""
+    if not pids:
+        return ""
+    ids = ",".join(str(p) for p in sorted(pids))
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -in @(%s) } | "
+         "ForEach-Object { '{0} ppid={1} {2}' -f $_.ProcessId, $_.ParentProcessId, "
+         "($_.CommandLine -replace '\\s+', ' ') }" % ids],
+        capture_output=True, text=True, timeout=40, errors="replace")
+    return " | ".join(line.strip()[:180] for line in (out.stdout or "").splitlines()
+                      if line.strip())
+
+
+@pytest.mark.timeout(90)
+@pytest.mark.skipif(os.name != "nt",
+                    reason="the leak is Windows-specific: Popen(.cmd) makes "
+                           "cmd.exe the direct child, so terminate() spares "
+                           "the python that actually runs the fake")
+def test_stop_tears_down_the_whole_process_tree(tmp_path, monkeypatch):
+    """stop() must take the fake's python processes with it, not just cmd.exe.
+
+    Measured before the fix: every full suite run left a pair of orphaned
+    ``fake_hmp_qemu`` pythons behind with a dead parent (read-only listing
+    job ORPHAN-LIST: ages 33/38/86 min, parent_alive=False, while the
+    machine sat under the owner's 2 GB RAM floor).
+
+    The test snapshots which fake PIDs exist BEFORE this test starts, so an
+    orphan leaked by an earlier test can neither fail it nor mask one: the
+    assertion is only that THIS monitor's processes are gone afterwards.
+    """
+    launcher, record = launch_fake(tmp_path, monkeypatch)
+    # The peer must not disappear on its own when the wrapper's pipe closes:
+    # that EOF-driven exit is exactly what masked the leak (a run with the
+    # PRE-FIX stop() passed until this was set). Only an explicit kill of
+    # the whole tree may end it.
+    monkeypatch.setenv("FAKE_HMP_STAY_ALIVE", "1")
+    before = _fake_pids()
+
+    mon = QemuMonitor(qemu=launcher)
+    mon.start()
+    try:
+        mon.set_adc1_value(2012)
+        started = _fake_pids() - before
+        assert started, "the fake never started; this test would prove nothing"
+    finally:
+        mon.stop()
+
+    leaked = set()
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        leaked = _fake_pids() - before
+        if not leaked:
+            break
+        time.sleep(0.2)
+    assert not leaked, ("stop() left orphaned fake qemu processes: %s"
+                        % (_fake_pid_details(leaked) or sorted(leaked)))
+    # The teardown must not have broken the protocol path either.
+    assert recorded_commands(record) == [QOM_SET_2012]
