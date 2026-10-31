@@ -244,7 +244,12 @@ function Get-NgspiceArchive {
             # are the only check - and a cached HTML page from an older run
             # must not be trusted just because it has a filename.
             try {
-                Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha ''
+                # `$null =` is load-bearing: without it the validator's
+                # `return $true` joined Get-NgspiceArchive's own output and
+                # the caller received @($true, $dest) - measured in R1 run 1,
+                # where py7zr was handed the string 'True' (FileNotFoundError)
+                # and setup.ps1 exited 1 on a fresh clone.
+                $null = Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha ''
                 Write-Step "Using cached archive tools\$Name (7z header verified)"
                 return $dest
             }
@@ -264,7 +269,7 @@ function Get-NgspiceArchive {
     catch {
         throw "Download of $Name failed: $($_.Exception.Message)`n`nIf this machine has no internet access, copy $Name manually into tools\ and re-run."
     }
-    Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha $ExpectSha
+    $null = Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha $ExpectSha
     if ($ExpectSha) { Write-Ok "Checksum verified." }
     return $dest
 }
