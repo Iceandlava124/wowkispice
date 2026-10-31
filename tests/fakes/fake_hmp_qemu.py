@@ -39,6 +39,14 @@ is accepted and ignored):
                          Without it a leaked fake exits on its own when the
                          client's pipe closes, so old and fixed teardown look
                          identical.
+  FAKE_HMP_FIRMWARE      when set, the double also models exactly ONE firmware
+                         rule so the R7 harness (tools/loop_repeat.py) can be
+                         driven end to end: it writes the boot markers and a
+                         TELEMETRY line to the -serial file: it is given, and
+                         `xp` reflects the last `qom-set ... adc1-value N` by
+                         main.c's rule - gate ON when N < 1995, OFF when
+                         N > 2030, hold in between. Still a double: it proves
+                         the harness logic, never firmware behaviour.
 """
 
 import os
@@ -60,6 +68,34 @@ def main():
     xp_value = os.environ.get("FAKE_HMP_XP_VALUE", "0x00040000")
     drop_after = int(os.environ.get("FAKE_HMP_DROP_AFTER", "1"))
     stay_alive = os.environ.get("FAKE_HMP_STAY_ALIVE")
+    firmware = os.environ.get("FAKE_HMP_FIRMWARE")
+
+    if firmware:
+        # Boot sentinel + firmware telemetry, written to the -serial file: the
+        # harness polls, so loop_repeat's marker wait and its TELEMETRY tail
+        # both terminate on data instead of on their timeouts.
+        uart = None
+        argv = sys.argv[1:]
+        for i, a in enumerate(argv):
+            if a == "-serial" and i + 1 < len(argv) and \
+                    argv[i + 1].startswith("file:"):
+                uart = argv[i + 1][len("file:"):]
+        if uart:
+            repo = os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+            if repo not in sys.path:
+                sys.path.insert(0, repo)
+            from bridge.qemu_orchestrator import BOOT_MARKERS
+            with open(uart, "w") as fh:
+                for marker in BOOT_MARKERS:
+                    fh.write(marker + "\n")
+                fh.write("TELEMETRY: loop=10000 adc=0 gate=OFF "
+                         "thresh=[1995,2030] mode=adaptive\n")
+
+    # main.c's rule, applied only in firmware mode: <1995 ON, >2030 OFF,
+    # inside the band the previous state is held (hysteresis).
+    gate_on = bool(int(xp_value, 16) & 0x40000)
+    last_adc = None
 
     if mode == "silent":
         # A wedged QEMU: no banner, no prompt, no replies, ever. The client's
@@ -92,6 +128,13 @@ def main():
                 fh.write(cmd + "\n")
         commands += 1
 
+        if firmware and cmd.startswith("qom-set") and "adc1-value" in cmd:
+            parts = cmd.split()
+            try:
+                last_adc = int(parts[parts.index("adc1-value") + 1])
+            except (ValueError, IndexError):
+                last_adc = None
+
         # QEMU's readline echoes the typed command back before replying;
         # the client skips lines that contain the command text.
         _write(cmd + "\n")
@@ -102,7 +145,14 @@ def main():
             _write("garbage that is neither address nor value: no hex token here\n")
         elif cmd.startswith("xp"):
             # Real HMP xp formatting: "<addr>: <value>".
-            _write("000000003ff44004: %s\n" % xp_value)
+            value = xp_value
+            if firmware and last_adc is not None:
+                if last_adc < 1995:
+                    gate_on = True
+                elif last_adc > 2030:
+                    gate_on = False
+                value = "0x00040000" if gate_on else "0x00000000"
+            _write("000000003ff44004: %s\n" % value)
         # qom-set's success reply is silence: only the echo precede the prompt.
 
         _write(PROMPT)
