@@ -16,12 +16,12 @@ Q5(a)).
 | R3 | **PASS** | Unchanged. 19/19 mutants, coverage floors met, `pytest-cov` + `PyYAML==6.0.3` pinned. |
 | R4 | **PASS** | Unchanged (licence text quoted from files, hygiene vectors green). |
 | R5 | **PASS** | Unchanged (RC/RLC proofs with measured tolerances, NaN/Inf guard). |
-| R6 | **evidence now committed; re-score pending a fresh run** | The blocker recorded at SCORECARD:1532 (`test_gate_flip` NOT IN HEAD) is gone: `bridge/binary_runner.py` is tracked and clean (`18e6ebd` landing, `8b13d63` launch path, `f36350d` divider law), `tests/test_qemu_monitor_qemu.py` and the driver `tools/run_emulator_tests.ps1` are tracked and clean (job STATUS-TRACKED). The measurement itself (#201) is unchanged. |
+| R6 | **PASS** (re-scored 2026-10-31) | Route run through `tools/run_emulator_tests.ps1`: WSL locator found `/home/user/repro/src/build/qemu-system-xtensa`, **3 contract tests passed, 0 skipped, `[GATE] all contract tests ran and passed`, exit 0** (#419). Threshold probe on the real firmware (#420): `1994 -> ON`, `2031 -> OFF`, `1994 -> ON` flips across the band, and `1995/2030/1995` all hold - exactly `main.c`'s `raw < 1995` / `raw > 2030` rule. Hand-derived conversion expectations: 12 closed-form tests in `tests/test_adc_conversion.py` plus `TestDividerSemantics` (`d783da0`, #360/#361). Errors surfaced: `qemu_monitor.py:138,152,210,260,278,299,304` asserted in `tests/test_qemu_monitor_unit.py` (#414 gate, 41 tests collect across the four R6 files, #425). |
 | R7 | **FAIL (reproducibility)** | Unchanged blocker: the harness `logs/cmd/r7_loop10.py` is covered by `.gitignore:58 logs/` (job Q1-CommittedStatus), so a clone cannot reproduce #207. Needs a job that moves the harness out of `logs/` (owner approval — it also changes `.gitignore`). |
 | R8 | **PASS** | Unchanged, plus this session's teardown leak: red test first (#310, leaked pid 22836), fix, green (#314, #316), mutation 1/1 killed with byte-identical restore (#317). |
 | R9 | **PASS** | Unchanged. |
 | R10 | **PASS** | Unchanged (traceability, guard suite, one-concern-per-commit). |
-| R11 | **FAIL** | Unchanged: tree not clean, `.coverage` untracked and **not** ignored (`.gitignore` has a "never-commit coverage" comment at line 88 but no pattern), EOL renormalisation is an owner step after the Q6 decisions. |
+| R11 | **FAIL** (all four clauses now measured) | clean tree: FAIL (Q6 untracked set, `.coverage` still unignored, `main.c` owner restore). No tracked file > 5 MB: **PASS** - 176 tracked files, none over 5 MB (#421). No scratch files: **PASS** - the only name matches were `bug_report.yml` (matched `temp` inside `ISSUE_TEMPLATE`) and `tests/hidpi_probe.py`, which `tests/test_ui_polish.py:824,844` and `ui/schematic_editor.py:4329` use (#421, #423). Line endings per `.gitattributes`: **FAIL** - 34 violations (#424): 25 files with `eol=lf` but CRLF on disk, 9 with `eol=crlf` but LF on disk; plus `tests/CHANGES.md` stored `i/-text` (#426-#429). Owner renormalise step. |
 | R12 | **OWNER-SET** | Unchanged: `docs/REVIEW_BRIEF.md` delivered (`7f1251e`), owner schedules it. |
 
 ## Commits made this session (branch `baseline-fix`)
@@ -100,6 +100,7 @@ Facts from job Q6-REASONS2 (#352), Q6-IMPORTS, Q6-IMPORTLINES, Q6-DOCTORREFS.
 | `tools/doctor.py` | `tests/test_tool_fixes.py` runs and reads it (lines 18–58); `setup.ps1:372` runs it. |
 | `tools/cleanup_qemu.py` | `setup.ps1:358` runs it. |
 | `tools/fetch_qemu.py` | `setup.ps1:365` runs it. |
+| `tools/qualify_qemu.py` | `bridge/binary_runner.py:118` (tracked, clean) imports it; `tools/doctor.py:75` does too. |
 
 These four are the reason R1's setup step cannot be clean today; they are the
 "doctor / toolchain" work owner decision 2 already listed as finished (J7/J9).
@@ -184,6 +185,56 @@ access violation, `ui/schematic_editor.py:686 _run_in_worker` from
 `tests/test_ui_polish.py:573`; full suite 4/4 crashes, `tools/run_tests.py`
 2/2 (#134, #138), each file alone 0 crashes.
 
+## R6 re-score (2026-10-31) - PASS
+
+Route: the command the tests document, through `tools/run_emulator_tests.ps1`
+(#419, exit 0):
+
+```
+locator: WSL filesystem probe -> /home/user/repro/src/build/qemu-system-xtensa
+python3 -m pytest tests/test_qemu_monitor_qemu.py -v   (inside WSL)
+3 passed, 0 skipped  /  [GATE] all contract tests ran and passed (0 skips)
+```
+
+Threshold measurement on the real firmware (#420, `logs/cmd/r6_probe.py`
+driving `binary_runner.test_gate_flip`), against `main.c`'s
+`raw < 1995 -> ON`, `raw > 2030 -> OFF`, else hold:
+
+| injected counts | expected (main.c) | measured gate |
+|---|---|---|
+| 1994 | ON (below 1995) | True |
+| 2031 | OFF (above 2030) | False |
+| 1994 | ON again | True |
+| 1995 / 2030 / 1995 | hold (inside the band) | True / True / True |
+
+Both cases PASS with `errors=[]`. Case A flips while case B holds, which is
+what rules out a stale read: the reading follows the injected counts.
+
+Clause 3 of the row (errors surfaced, never swallowed): the raising paths are
+`qemu_monitor.py:138,152,210,260,278,299,304`; the assertions live in
+`tests/test_qemu_monitor_unit.py` (lines 115-127, 184-185, 206-207, 224,
+233-239, 246-251, 403-410) and were all green inside the 512-passed gate
+(#414). 41 tests collect across the four R6 files (#425).
+
+R7 stays FAIL on reproducibility (its harness is still outside the clone -
+owner action 4); R6's own evidence path is tracked and clean.
+
+## R11 clause measurements (2026-10-31)
+
+| Clause | Result | Evidence |
+|---|---|---|
+| no tracked file > 5 MB | PASS | 176 tracked files, none over 5 MB (#421) |
+| no scratch files | PASS | name matches were `bug_report.yml` (matched `temp` inside `ISSUE_TEMPLATE`) and `tests/hidpi_probe.py`, used by `tests/test_ui_polish.py:824,844` and `ui/schematic_editor.py:4329` (#421, #423) |
+| line endings per `.gitattributes` | FAIL | 34 violations (#424): 25 files with `eol=lf` but CRLF on disk, 9 with `eol=crlf` but LF on disk (`setup.ps1`, `run_*.bat`, `tools/*.ps1`, `verify_clone.ps1`); plus `tests/CHANGES.md` stored `i/-text` (#426-#429). `.gitignore` is CRLF but no rule covers an extensionless file, so it is not a violation |
+| clean tree | FAIL | Q6 untracked set, `.coverage`, `main.c` owner restore |
+
+Method note, recorded honestly: the first pass (#421) used a regex that only
+matched lines *starting* with `i/crlf` and undercounted (reported 1); #424
+parses both tokens and is the number above. Two logged jobs (#422, #427)
+failed with exit -196608 because I invoked a script before it finished
+writing - a harness race of mine, kept in the log rather than hidden; the
+reruns (#423, #428) succeeded.
+
 ## Open owner actions
 
 1. **Q6 decisions** — approve/dispose each row of the inventory above, then
@@ -196,5 +247,12 @@ access violation, `ui/schematic_editor.py:686 _run_in_worker` from
 4. **R7 harness** — approve moving `logs/cmd/r7_loop10.py` (and its driver)
    out of the ignored `logs/` tree so R7 becomes reproducible.
 5. **R12** — schedule the human review (`docs/REVIEW_BRIEF.md`).
-6. **Logger commit** — `tools/agentlog.ps1` + `tools/agentlog_verify.ps1`
-   carry the Q5(a) fix in the worktree; committing them is one commit.
+6. ~~Logger commit~~ - **done**: `aa97db2` carries the Q5(a) fix; both files
+   are tracked and clean.
+7. **EOL renormalise (owner step) - two caveats measured today**: (a) 9 files
+   carry `eol=crlf` but are LF on disk (`setup.ps1`, `run_*.bat`,
+   `tools/*.ps1`), so the step must restore CRLF, not only strip it;
+   (b) `git add --renormalize .` will **not** fix `tests/CHANGES.md` - git
+   classifies it `-text`, so its bytes are stored as-is (51 CRLF lines + 5
+   lone CR bytes inside the blob, #426-#429). That file needs a content
+   rewrite to LF.
