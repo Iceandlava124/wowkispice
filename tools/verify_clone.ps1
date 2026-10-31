@@ -126,6 +126,19 @@ try {
                        '(\d+ skipped[^\r\n]*)', '(\d+ error[^\r\n]*)')) {
         if ($gateOut -match $pat) { Record ("GATE-SUMMARY {0}" -f $Matches[1]) }
     }
+    # Preserve the failure names: run_tests.py's console tail and the clone's
+    # own logs/pytest-last.txt both die with the clone.
+    foreach ($line in ($gateOut -split "`r?`n")) {
+        if ($line -match '^(FAILED|ERROR) ') { Record ("GATE-DETAIL {0}" -f $line.Trim()) }
+    }
+    $clonePytest = Join-Path $Clone 'logs\pytest-last.txt'
+    if (Test-Path $clonePytest) {
+        $keep = Join-Path (Join-Path $Repo 'logs') ("r1-run{0}-pytest.txt" -f $RunId)
+        Copy-Item $clonePytest $keep -Force
+        Record ("GATE-OUTPUT copied to {0}" -f $keep)
+    } else {
+        Record 'GATE-OUTPUT missing in clone'
+    }
 
     # ---- 4. VERIFY ------------------------------------------------------------
     $t3 = [Diagnostics.Stopwatch]::StartNew()
