@@ -19,3 +19,10 @@ foreach ($l in $lines) {
 $lines | ForEach-Object { $_ | ConvertFrom-Json } | Group-Object job | ForEach-Object {
   "{0}: {1} entries, {2} non-zero exit" -f $_.Name, $_.Count, (($_.Group | Where-Object { $_.exit -ne 0 }).Count)
 }
+
+# Owner decision Q5(a): verification must be readable from the EXIT CODE, not
+# only from the text. The log deliberately keeps its two known problems (the
+# duplicated seq 254, the overwritten output file), so this exits 1 until the
+# owner decides anything different - that is the honest state, not a defect.
+if ($bad -gt 0) { exit 1 }
+exit 0
