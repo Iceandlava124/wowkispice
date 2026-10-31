@@ -146,3 +146,36 @@ def test_gate_flip_against_real_firmware():
     # Specific gate states depend on firmware state, but we should get boolean values
     for g in result["gates"]:
         assert isinstance(g["gate"], bool), f"Gate should be boolean: {g}"
+
+
+@pytest.mark.qemu
+@pytest.mark.skipif(
+    not HAS_QEMU,
+    reason=SKIP_REASON or "not skipped: qemu-system-xtensa is available",
+)
+def test_gate_follows_the_output_voltage_through_the_divider():
+    """Q4: a voltage at `vout`, converted by binary_runner's own law,
+    flips the gate on the real firmware at the expected output voltage.
+
+    main.c decides on raw counts (< 1995 ON, > 2030 OFF, 12-bit / 3.3 V),
+    and the board's 2:1 divider (Rfb_top/Rfb_bot) makes that band
+    vout = 3.2154..3.2718 V. 3.21 V sits just below the band and 3.28 V
+    just above it, so ON -> OFF -> ON across the three injections.
+    """
+    from bridge import binary_runner
+
+    qemu = _qemu_binary()
+    assert qemu
+
+    result = binary_runner.test_gate_flip(
+        qemu=qemu, low_v=3.21, high_v=3.28, settle_delay=0.05)
+
+    assert not result["errors"], f"errors: {result['errors']}"
+    counts = result["counts"]
+    assert counts["low"] == 1992, f"3.21 V must convert to 1992: {counts}"
+    assert counts["high"] == 2035, f"3.28 V must convert to 2035: {counts}"
+    gates = [g["gate"] for g in result["gates"]]
+    assert gates == [True, False, True], (
+        "gate at the expected output voltage: vout 3.21 V -> %d counts "
+        "(ON), 3.28 V -> %d counts (OFF), back to 3.21 V (ON); got %r"
+        % (counts["low"], counts["high"], gates))

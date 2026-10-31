@@ -296,15 +296,35 @@ def test_gate_flip(
     low_adc: int = 1500,
     high_adc: int = 2500,
     settle_delay: float = 0.05,
+    low_v: Optional[float] = None,
+    high_v: Optional[float] = None,
+    vref: float = 3.3,
+    divider: float = 0.5,
+    adc_bits: int = 12,
 ) -> Dict[str, object]:
     """Test gate flipping behavior against real firmware.
     
     Injects ADC values below and above thresholds and verifies gate state changes.
+
+    Pass OUTPUT voltages (`low_v`/`high_v`, the `vout` side of the board's
+    Rfb_top/Rfb_bot divider) instead of counts and they are converted here
+    with `_adc_counts_from_voltage` - the same `v_pin = sense * divider`
+    law bridge/control_law.py documents - *before* anything is launched, so
+    the conversion is observable even when no emulator is available.
+    `result["counts"]` reports what was selected either way.
     """
     from bridge.qemu_monitor import QemuMonitor
     from bridge.qemu_orchestrator import BOOT_MARKERS, _log_path
-    
-    result = {"ok": False, "gates": [], "errors": []}
+
+    if low_v is not None:
+        low_adc = _adc_counts_from_voltage(
+            low_v, vref=vref, divider=divider, adc_bits=adc_bits)
+    if high_v is not None:
+        high_adc = _adc_counts_from_voltage(
+            high_v, vref=vref, divider=divider, adc_bits=adc_bits)
+
+    result = {"ok": False, "gates": [], "errors": [],
+              "counts": {"low": low_adc, "high": high_adc}}
     
     if firmware_image is None:
         firmware_image = os.path.join(
@@ -368,6 +388,12 @@ def test_gate_flip(
         for adc_val in [low_adc, high_adc, low_adc]:
             try:
                 mon.set_adc1_value(adc_val)
+                if settle_delay > 0:
+                    # Give the firmware time to sample the injected value and
+                    # act on it before we read the gate back; without this the
+                    # read races the control loop (the parameter existed but
+                    # was never used).
+                    time.sleep(settle_delay)
                 gate = mon.read_gate()
                 gates.append({"adc": adc_val, "gate": gate})
                 result["gates"].append(gates[-1])

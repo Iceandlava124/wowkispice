@@ -269,5 +269,44 @@ class TestDividerSemantics(unittest.TestCase):
                          "3.3 V through a 0.5 divider must never clamp")
 
 
+class TestGateFlipVoltagePath(unittest.TestCase):
+    """Q4: a caller passes OUTPUT voltages and binary_runner's own
+    conversion decides the counts, before anything is booted, so a broken
+    law cannot hide behind a missing emulator.
+
+    Board netlist: Rfb_top vout fb 100k / Rfb_bot fb 0 100k -> the pin
+    sees half of vout. main.c: raw < 1995 -> gate ON, raw > 2030 -> OFF,
+    12-bit over a 3.3 V reference, i.e. the flip band is
+    vout = 3.2154..3.2718 V. So 3.21 V must land below the band and
+    3.28 V above it.
+    """
+
+    def test_voltage_arguments_are_converted_before_the_emulator_starts(self):
+        res = binary_runner.test_gate_flip(
+            qemu="/no/such/qemu-system-xtensa-for-q4",
+            low_v=3.21, high_v=3.28)
+        counts = res.get("counts") or {}
+        self.assertEqual(counts.get("low"), 1992,
+                         "3.21 V at vout through the 0.5 divider: %r"
+                         % counts)
+        self.assertEqual(counts.get("high"), 2035,
+                         "3.28 V at vout through the 0.5 divider: %r"
+                         % counts)
+        self.assertTrue(res["errors"],
+                        "the missing binary must still be reported")
+        self.assertEqual(res.get("gates"), [],
+                         "no gate reading is possible without an emulator")
+
+    def test_voltage_and_counts_arguments_agree(self):
+        """low_v=3.21 and low_adc=1992 must select the same injection."""
+        by_v = binary_runner.test_gate_flip(
+            qemu="/no/such/qemu-system-xtensa-for-q4", low_v=3.21)
+        by_c = binary_runner.test_gate_flip(
+            qemu="/no/such/qemu-system-xtensa-for-q4", low_adc=1992)
+        self.assertEqual(by_v["counts"]["low"],
+                         by_c["counts"]["low"],
+                         "voltage path and counts path disagree")
+
+
 if __name__ == "__main__":
     unittest.main()
