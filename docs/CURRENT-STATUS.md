@@ -16,7 +16,7 @@ Q5(a)).
 | R3 | **PASS** | Unchanged. 19/19 mutants, coverage floors met, `pytest-cov` + `PyYAML==6.0.3` pinned. |
 | R4 | **PASS** | Unchanged (licence text quoted from files, hygiene vectors green). |
 | R5 | **PASS** | Unchanged (RC/RLC proofs with measured tolerances, NaN/Inf guard). |
-| R6 | **PASS** (re-scored 2026-10-31) | Route run through `tools/run_emulator_tests.ps1`: WSL locator found `/home/user/repro/src/build/qemu-system-xtensa`, **3 contract tests passed, 0 skipped, `[GATE] all contract tests ran and passed`, exit 0** (#419). Threshold probe on the real firmware (#420): `1994 -> ON`, `2031 -> OFF`, `1994 -> ON` flips across the band, and `1995/2030/1995` all hold - exactly `main.c`'s `raw < 1995` / `raw > 2030` rule. Hand-derived conversion expectations: 12 closed-form tests in `tests/test_adc_conversion.py` plus `TestDividerSemantics` (`d783da0`, #360/#361). Errors surfaced: `qemu_monitor.py:138,152,210,260,278,299,304` asserted in `tests/test_qemu_monitor_unit.py` (#414 gate, 41 tests collect across the four R6 files, #425). |
+| R6 | **PASS** (re-scored 2026-10-31) | Route run through `tools/run_emulator_tests.ps1`: WSL locator found `<wsl-home>/repro/src/build/qemu-system-xtensa` (full path in entry #419), **3 contract tests passed, 0 skipped, `[GATE] all contract tests ran and passed`, exit 0** (#419). Threshold probe on the real firmware (#420): `1994 -> ON`, `2031 -> OFF`, `1994 -> ON` flips across the band, and `1995/2030/1995` all hold - exactly `main.c`'s `raw < 1995` / `raw > 2030` rule. Hand-derived conversion expectations: 12 closed-form tests in `tests/test_adc_conversion.py` plus `TestDividerSemantics` (`d783da0`, #360/#361). Errors surfaced: `qemu_monitor.py:138,152,210,260,278,299,304` asserted in `tests/test_qemu_monitor_unit.py` (#414 gate, 41 tests collect across the four R6 files, #425). |
 | R7 | **FAIL (reproducibility)** | Unchanged blocker: the harness `logs/cmd/r7_loop10.py` is covered by `.gitignore:58 logs/` (job Q1-CommittedStatus), so a clone cannot reproduce #207. Needs a job that moves the harness out of `logs/` (owner approval — it also changes `.gitignore`). |
 | R8 | **PASS** | Unchanged, plus this session's teardown leak: red test first (#310, leaked pid 22836), fix, green (#314, #316), mutation 1/1 killed with byte-identical restore (#317). |
 | R9 | **PASS** | Unchanged. |
@@ -191,7 +191,7 @@ Route: the command the tests document, through `tools/run_emulator_tests.ps1`
 (#419, exit 0):
 
 ```
-locator: WSL filesystem probe -> /home/user/repro/src/build/qemu-system-xtensa
+locator: WSL filesystem probe -> <wsl-home>/repro/src/build/qemu-system-xtensa
 python3 -m pytest tests/test_qemu_monitor_qemu.py -v   (inside WSL)
 3 passed, 0 skipped  /  [GATE] all contract tests ran and passed (0 skips)
 ```
