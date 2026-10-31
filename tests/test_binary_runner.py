@@ -40,7 +40,19 @@ class TestBinaryRunner(unittest.TestCase):
         old = os.environ.get("WOSP_QEMU")
         try:
             os.environ.pop("WOSP_QEMU", None)
-            run = binary_runner.run_binary_cosim(g, {"GPIO18": {"sense_net": "vout"}})
+            # Hermetic about the firmware image: a fresh clone has no
+            # .pio/build/qemu_flash.bin (gitignored), and run_binary_cosim
+            # reports the missing image BEFORE it ever looks at WOSP_QEMU.
+            # Measured in the R1 clone install (entry #403): the test then
+            # asserted on "firmware image not found" and failed, while the
+            # dev tree passed for the wrong reason. A 64-byte stand-in makes
+            # the assertion mean what it says in both trees.
+            with tempfile.TemporaryDirectory() as td:
+                fw = os.path.join(td, "flash.bin")
+                with open(fw, "wb") as fh:
+                    fh.write(b"\x00" * 64)
+                run = binary_runner.run_binary_cosim(
+                    g, {"GPIO18": {"sense_net": "vout"}}, firmware_image=fw)
             self.assertIn("WOSP_QEMU", " ".join(run.warnings))
         finally:
             if old is not None:
