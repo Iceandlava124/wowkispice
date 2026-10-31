@@ -1,0 +1,4 @@
+{
+  "description": "Buck converter hysteretic regulation",
+  "name": "buck_regulation"
+}
