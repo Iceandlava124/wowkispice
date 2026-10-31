@@ -177,11 +177,11 @@ docs/KNOWN_ISSUES.md, NOT fixed here (bridge/ is out of this job's allowlist).
 - Related: JOB 3b added `stop` parameter to `cycle_adc_and_gate`; JOB 3c strengthens the tests to provably validate the fix.
 
 
-### tests/test_ngspice_sanitiser.py - NEW - sanitiser validation
-- What it tests: 17 tests validating the ngspice input sanitiser.
-- Why changed: New test file for JOB 4 ngspice sanitiser.
-- New assertions: .control and .endc banned, run/alter/bg_run/destroy allowed,
-  .tran/.ac/.dc/.op/.model/.measure allowed, unknown directives pass through.
+### tests/test_ngspice_sanitiser.py - NEW - sanitiser validation
+- What it tests: 17 tests validating the ngspice input sanitiser.
+- Why changed: New test file for JOB 4 ngspice sanitiser.
+- New assertions: .control and .endc banned, run/alter/bg_run/destroy allowed,
+  .tran/.ac/.dc/.op/.model/.measure allowed, unknown directives pass through.
 
 ### tests/test_closed_loop_buck.py - NEW class TestGetSyncDataArityMatchesHeader (JOB 1: hang regression)
 
