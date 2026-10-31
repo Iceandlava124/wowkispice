@@ -160,36 +160,6 @@ def _archive_source():
     return "\r\n".join(parts)
 
 
-def _run_get_archive(root, expect_sha=""):
-    """Call the shipped Get-NgspiceArchive and report the full pipeline
-    output as COUNT= and VALUE= lines."""
-    script = (
-        "$ErrorActionPreference = 'Stop'\r\n"
-        "function Write-Step($m) {}\r\n"
-        "function Write-Ok($m) {}\r\n"
-        "function Write-Warn2($m) {}\r\n"
-        "$Root = $args[0]\r\n"
-        + _archive_source() + "\r\n"
-        "$out = @(Get-NgspiceArchive -Name 'ngspice-7z.7z' "
-        "-ExpectSha $args[1])\r\n"
-        "Write-Output ('COUNT=' + $out.Count)\r\n"
-        "foreach ($item in $out) { Write-Output ('VALUE=' + $item) }\r\n"
-        "exit 0\r\n"
-    )
-    handle, script_path = tempfile.mkstemp(suffix=".ps1")
-    os.close(handle)
-    with open(script_path, "w", encoding="utf-8", newline="") as fh:
-        fh.write(script)
-    try:
-        proc = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-             "-File", script_path, str(root), expect_sha],
-            capture_output=True, text=True, errors="replace", timeout=120)
-        return proc.returncode, (proc.stdout + proc.stderr)
-    finally:
-        os.remove(script_path)
-
-
 def _cached_archive(tmp_path):
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -250,6 +220,104 @@ def test_every_validator_call_discards_its_boolean():
     leaks = [line for line in calls
              if "$null = Test-NgspiceArchive" not in line]
     assert not leaks, "validator output is not discarded: %r" % leaks
+
+
+def _run_get_archive(root, expect_sha="", fail_first=0, fail_always=False):
+    """Call the shipped Get-NgspiceArchive with a scripted network: the fake
+    Invoke-WebRequest writes HTML for the first `fail_first` calls (or always,
+    when `fail_always`), then a real 7z payload. Returns (rc, output).
+
+    The fake shadows the cmdlet for this child process only, so the retry
+    logic under test is still setup.ps1's own text."""
+    script = (
+        "$ErrorActionPreference = 'Stop'\r\n"
+        "function Write-Step($m) {}\r\n"
+        "function Write-Ok($m) {}\r\n"
+        "function Write-Warn2($m) { [Console]::Error.WriteLine('WARN ' + $m) }\r\n"
+        "$script:BaseUrl = 'https://example.invalid/ngspice'\r\n"
+        "$script:FetchUserAgent = 'test-agent'\r\n"
+        "$script:CallCount = 0\r\n"
+        "$script:FailFirst = [int]$args[2]\r\n"
+        "$script:FailAlways = ($args[3] -eq '1')\r\n"
+        "function Invoke-WebRequest {\r\n"
+        "  param($Uri, $OutFile, [switch]$UseBasicParsing, $UserAgent, "
+        "$MaximumRedirection)\r\n"
+        "  $script:CallCount++\r\n"
+        "  if ($script:FailAlways -or "
+        "($script:CallCount -le $script:FailFirst)) {\r\n"
+        "    [IO.File]::WriteAllText($OutFile, "
+        "'<html><title>Download</title></html>')\r\n"
+        "  } else {\r\n"
+        "    $bytes = [byte[]](0x37,0x7A,0xBC,0xAF,0x27,0x1C,1,2,3,4)\r\n"
+        "    [IO.File]::WriteAllBytes($OutFile, $bytes)\r\n"
+        "  }\r\n"
+        "}\r\n"
+        "$Root = $args[0]\r\n"
+        + _archive_source() + "\r\n"
+        "try {\r\n"
+        "  $out = @(Get-NgspiceArchive -Name 'ngspice-7z.7z' "
+        "-ExpectSha $args[1])\r\n"
+        "  Write-Output ('COUNT=' + $out.Count)\r\n"
+        "  foreach ($item in $out) { Write-Output ('VALUE=' + $item) }\r\n"
+        "  Write-Output ('CALLS=' + $script:CallCount)\r\n"
+        "  exit 0\r\n"
+        "}\r\n"
+        "catch {\r\n"
+        "  [Console]::Error.WriteLine($_.Exception.Message)\r\n"
+        "  Write-Output ('CALLS=' + $script:CallCount)\r\n"
+        "  exit 7\r\n"
+        "}\r\n"
+    )
+    handle, script_path = tempfile.mkstemp(suffix=".ps1")
+    os.close(handle)
+    with open(script_path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(script)
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", script_path, str(root), expect_sha, str(fail_first),
+             "1" if fail_always else "0"],
+            capture_output=True, text=True, errors="replace", timeout=180)
+        return proc.returncode, (proc.stdout + proc.stderr)
+    finally:
+        os.remove(script_path)
+
+
+def _fresh_root(tmp_path):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    return tmp_path
+
+
+@WIN_ONLY
+def test_html_answer_is_retried_until_the_real_archive_arrives(tmp_path):
+    """R1 measured it twice: SourceForge answers an HTML page instead of the
+    archive (entries #276, #278, and again in this session's R1 run at
+    06:40 - first bytes `3c 68 74 6d 6c 3e`). Owner action 1 asks for one
+    measured retry, so the first HTML answer must not end the run: the
+    download is attempted again and the returned value is still exactly one
+    archive path."""
+    root = _fresh_root(tmp_path)
+    rc, out = _run_get_archive(str(root), "", fail_first=1)
+    assert rc == 0, out
+    counts = [ln for ln in out.splitlines() if ln.startswith("COUNT=")]
+    calls = [ln for ln in out.splitlines() if ln.startswith("CALLS=")]
+    assert counts == ["COUNT=1"], out
+    assert calls == ["CALLS=2"], (
+        "the HTML answer was not retried: %r" % (calls, out))
+
+
+@WIN_ONLY
+def test_download_gives_up_after_a_bounded_number_of_attempts(tmp_path):
+    """A retry must not hang forever on a dead network: the attempt count is
+    bounded and the caller still gets the error."""
+    root = _fresh_root(tmp_path)
+    rc, out = _run_get_archive(str(root), "", fail_always=True)
+    assert rc == 7, out
+    calls = [ln for ln in out.splitlines() if ln.startswith("CALLS=")]
+    assert calls, out
+    n = int(calls[0].split("=", 1)[1])
+    assert 2 <= n <= 3, "attempts=%d not bounded to 2-3: %s" % (n, out)
 
 
 @WIN_ONLY

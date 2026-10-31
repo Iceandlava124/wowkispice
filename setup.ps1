@@ -262,14 +262,32 @@ function Get-NgspiceArchive {
     }
     Write-Step "Downloading $Name"
     Write-Host "    $BaseUrl/$Name/download"
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri "$BaseUrl/$Name/download" -OutFile $dest -UseBasicParsing -UserAgent $FetchUserAgent -MaximumRedirection 8
+    # Owner action 1: one measured retry. SourceForge answered with an HTML
+    # page instead of the archive in #276/#278, and again during this
+    # session's R1 clone install (first bytes 3c 68 74 6d 6c 3e - job
+    # R1-RUN1F), so one attempt turned a flaky mirror into a failed install.
+    # Every attempt downloads AND validates, so the retry also covers a
+    # truncated or wrong payload, and the loop is bounded at three.
+    $MaxAttempts = 3
+    $attempt = 0
+    $lastError = ''
+    while ($attempt -lt $MaxAttempts) {
+        $attempt++
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri "$BaseUrl/$Name/download" -OutFile $dest -UseBasicParsing -UserAgent $FetchUserAgent -MaximumRedirection 8
+            $null = Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha $ExpectSha
+            break
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            if ($attempt -ge $MaxAttempts) {
+                throw "Download of $Name failed after $attempt attempts: $lastError`n`nIf this machine has no internet access, copy $Name manually into tools\ and re-run."
+            }
+            Write-Warn2 "attempt $attempt of ${MaxAttempts} failed ($lastError); retrying"
+            Start-Sleep -Seconds 2
+        }
     }
-    catch {
-        throw "Download of $Name failed: $($_.Exception.Message)`n`nIf this machine has no internet access, copy $Name manually into tools\ and re-run."
-    }
-    $null = Test-NgspiceArchive -Path $dest -Name $Name -ExpectSha $ExpectSha
     if ($ExpectSha) { Write-Ok "Checksum verified." }
     return $dest
 }
