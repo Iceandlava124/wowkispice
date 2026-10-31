@@ -7,3 +7,10 @@ pytest>=8.0.0
 # Python 3.12; 5.15.11 is the verified floor. See docs/KNOWN_ISSUES.md.
 PyQt5>=5.15.11
 pyqtgraph>=0.13.0
+# tests/test_ci_workflow.py imports yaml at module level, and a fresh clone
+# installs ONLY this file: without it the suite dies during collection
+# (measured - ModuleNotFoundError: No module named 'yaml' at
+# tests/test_ci_workflow.py:11, log entry #271), which is one of the three
+# reasons row R1 scored FAIL. Pinned exactly, with no skip guard: a missing
+# yaml must fail loudly (owner decision Q2(a)).
+PyYAML==6.0.3
