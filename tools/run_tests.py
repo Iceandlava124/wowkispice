@@ -60,6 +60,23 @@ def pytest(cmd_extra=None):
     )
 
 
+def write_full_output(text, name):
+    """Preserve the FULL pytest output under `logs/`.
+
+    The console only ever shows this runner's own last-25-line tail, and
+    that tail hid the name of the failing test twice: two complete suite
+    runs (#301, #302) had to be repeated just to learn WHICH test failed,
+    because the FAILED line never reached the captured file. Whatever
+    happens, the whole output lands here.
+    """
+    log_dir = os.path.join(ROOT, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    path = os.path.join(log_dir, name)
+    with open(path, "w", encoding="utf-8", errors="replace") as fh:
+        fh.write(text)
+    return path
+
+
 def require_emulator_gate():
     """Second gate (--require-emulator): the qemu-marker tests must RUN.
 
@@ -70,6 +87,7 @@ def require_emulator_gate():
     print()
     print("[ .. ] --require-emulator: running only the qemu-marker contract tests")
     proc = pytest(["-m", "qemu"])
+    full_path = write_full_output(proc.stdout, "pytest-emulator-last.txt")
     lines = proc.stdout.splitlines()
     skip_lines = [
         line.strip() for line in lines
@@ -112,6 +130,7 @@ def main(argv=None):
              "default keeps them as UNEXECUTED skips")
     args = parser.parse_args(argv)
     proc = pytest()
+    full_path = write_full_output(proc.stdout, "pytest-last.txt")
     lines = proc.stdout.splitlines()
 
     summary = {}
@@ -127,6 +146,8 @@ def main(argv=None):
             summary["skipped"] = line.strip()
 
     print("\n".join(lines[-25:]))
+    print("full pytest output: logs/%s (%d lines)" % (
+        os.path.basename(full_path), len(lines)))
     print()
     for key in ("passed", "failed", "error", "skipped"):
         if key in summary:
