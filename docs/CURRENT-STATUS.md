@@ -12,7 +12,7 @@ Q5(a)).
 | Row | Status now | What changed / evidence |
 | --- | --- | --- |
 | R1 | **RE-RUNNING (3 installs in progress)** | The three recorded causes of the last FAIL are fixed and committed: setup.ps1 rejects a non-archive download (`994ca91`), `run_selfcheck.bat` propagates the real exit code (`4786bb2`), PyYAML is pinned in `requirements.txt` so a clone can collect (owner decision Q2a, `10c42d0`). This session added two more fixes found by the first clone install: `Get-NgspiceArchive` no longer leaks the validator's boolean (`4883f65`, entry #374), and a bounded 3-attempt retry covers SourceForge's HTML answers (`a43bfeb`, entry #393). Results in the table below. |
-| R2 | **BLOCKED (owner)** | Unchanged. Two owner questions open: (Q7) approve a memory-debugger run — facts gathered, see below; approve a hunk-staged fix to `ui/schematic_editor.py`. No source change made (owner: "do not apply the editor fix"). |
+| R2 | **PASS** (measured 2026-10-31) | Three consecutive full `tools/run_tests.py` runs at one HEAD, all **512 passed, 3 skipped, 33 warnings**, exit 0: #439 (246.6 s), #440 (212.5 s), #441 (217.5 s). Same skip set in all three, each skip naming the missing binary. 515 collected, 34/34 test files collect >=1 test, **0 files collecting 0 tests** (#442). The first attempt (#433) failed 1 test - `test_no_absolute_user_paths_in_tracked_files` caught the WSL home path I had written into this file; redacted to `<wsl-home>/` and re-verified (#436, 17 passed), commit `0aa0d55`. Open: the root cause of the 2026-10-28/29 editor crash is still undiagnosed (Q7 owner action) - it has not recurred in these runs. |
 | R3 | **PASS** | Unchanged. 19/19 mutants, coverage floors met, `pytest-cov` + `PyYAML==6.0.3` pinned. |
 | R4 | **PASS** | Unchanged (licence text quoted from files, hygiene vectors green). |
 | R5 | **PASS** | Unchanged (RC/RLC proofs with measured tolerances, NaN/Inf guard). |
@@ -184,6 +184,39 @@ access violation, `ui/schematic_editor.py:686 _run_in_worker` from
 `run_simulation`, entered from `tests/test_editor_workflow.py:284` or
 `tests/test_ui_polish.py:573`; full suite 4/4 crashes, `tools/run_tests.py`
 2/2 (#134, #138), each file alone 0 crashes.
+
+## R2 re-score (2026-10-31) - PASS
+
+Command each time: `.venv\Scripts\python.exe tools\run_tests.py` through
+`tools/agentlog.ps1`, transcripts in `logs/r2-run<N>-pytest.txt`.
+
+| Run | Entry | Result | Duration | Exit |
+|---|---|---|---|---|
+| 1 | #439 | 512 passed, 3 skipped, 33 warnings | 238.96 s | 0 |
+| 2 | #440 | 512 passed, 3 skipped, 33 warnings | 205.84 s | 0 |
+| 3 | #441 | 512 passed, 3 skipped, 33 warnings | 210.34 s | 0 |
+
+Clause by clause:
+
+* **three consecutive runs, identical counts, zero failures** - 512/512/512
+  passed, 3/3/3 skipped, 33/33/33 warnings (#439-#441).
+* **zero flaky tests** - no test changed status across the three runs; the
+  same three skips each time.
+* **zero test files collecting 0 tests** - 515 collected, 34 test files on
+  disk, 34 of them collecting >= 1 test, 0 empty (#442). `run_tests.py` only
+  detects the *global* empty case, which is why this is measured separately.
+* **every skip naming a missing binary** - all three read: `WOSP_QEMU not set
+  and no qemu-system-xtensa in PATH or the working directory (Track B:
+  tools/run_emulator_tests.ps1, see SETUP.md)`.
+
+Honest caveats: (1) the three runs exercised this worktree, which still
+carries the pre-existing uncommitted modifications (`main.c`,
+`ui/schematic_editor.py`, `ui/schematic_items.py`, `bridge/cosim_runner.py`,
+`bridge/qemu_orchestrator.py`) - what a *clone* runs is R1's question;
+(2) the 2026-10-28/29 editor crash that made this row FAIL then has not
+recurred in these runs, but its root cause is still open under Q7, so the
+row is PASS **on its stated threshold**, not a claim that the defect is
+understood.
 
 ## R6 re-score (2026-10-31) - PASS
 
