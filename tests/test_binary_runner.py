@@ -204,6 +204,45 @@ class TestDividerSemantics(unittest.TestCase):
     for every vout above 1.65 V.
     """
 
+    def test_firmware_threshold_counts_round_trip_through_the_divider(self):
+        """The two main.c thresholds, as voltages, must convert back to the
+        same counts.
+
+        main.c compares RAW counts: <1995 turns the gate ON, >2030 turns it
+        OFF, on a 12-bit ADC whose 0..4095 counts span 0..3.3 V. So
+        1995 counts = 1.6077 V and 2030 counts = 1.6359 V AT THE PIN, which
+        through the board's 2:1 divider (Rfb_top/Rfb_bot) is vout = 3.2154 V
+        and 3.2718 V. Feeding those sense-node voltages back through the
+        conversion must reproduce 1995 and 2030 exactly; the inverted law
+        (`v_sense / divider`) turns them into 7985/8124 -> clamped 4095.
+        """
+        vref, bits, max_counts = 3.3, 12, (1 << 12) - 1
+        for counts in (1995, 2030):
+            v_pin = counts / max_counts * vref
+            vout = v_pin / 0.5
+            self.assertAlmostEqual(v_pin,
+                                   1.607693 if counts == 1995 else 1.635897,
+                                   places=5,
+                                   msg="pin voltage for %d counts" % counts)
+            self.assertEqual(
+                binary_runner._adc_counts_from_voltage(vout, vref=vref,
+                                                       divider=0.5,
+                                                       adc_bits=bits),
+                counts,
+                "round trip failed for %d counts (vout=%.6f V)"
+                % (counts, vout))
+        # The inverted law (`v_sense / divider`) maps those same two
+        # sense-node voltages to 7985 and 8124 counts, both clamped to full
+        # scale, so it can never land on the firmware's thresholds.
+        for counts in (1995, 2030):
+            vout = (counts / max_counts * vref) / 0.5
+            inverted = int(round((vout / 0.5) / vref * max_counts))
+            inverted = max(0, min(max_counts, inverted))
+            self.assertEqual(inverted, max_counts,
+                             "inverted law should saturate at %d counts "
+                             "for vout=%.6f V" % (counts, vout))
+            self.assertNotEqual(inverted, counts)
+
     def test_vout_3v3_reaches_the_adc_as_2048_counts(self):
         run, mon = _run_with_fake_monitor()
         self.assertIsNotNone(mon, "the monitor was never constructed")
