@@ -1198,3 +1198,434 @@ the logger itself collapsed exit 3 to 1 and stripped quotes (PS 5.1
 `agentlog_verify` reports **246 entries, 0 problems, head
 `21607ba40a7c6d89f46078359ea2e9bb5b4bb690c57cf051cad846ed75e221f7`**
 (entry #246, the post-sync traceability re-check, is the last entry).
+
+# Session 2026-10-30 — Q1–Q7 evidence audit, then R1 run as scored
+
+Owner message this session: answer seven questions with pasted output and
+**no new edits**, then run R1 as scored; findings that need source changes
+become jobs under the master rules and are not fixed in the clone; stop at
+the first owner action. Row wording is untouched below.
+
+## Part 1 — the seven questions (entries #258–#280)
+
+### Q1 — which code path produced the gate-flip evidence in #201 and #207
+
+**#201** (job `R6-01-ROUTE`, exit 0, 11 307 ms) ran `FILE:tools/run_emulator_tests.ps1`,
+which inside WSL ran `pytest tests/test_qemu_monitor_qemu.py -v` with
+`WOSP_QEMU=<wsl-home>/repro/src/build/qemu-system-xtensa` →
+`test_gate_flip_against_real_firmware` (tests/test_qemu_monitor_qemu.py:122),
+which calls `binary_runner.test_gate_flip(qemu=...)` at line 133;
+`test_gate_flip` is defined at **bridge/binary_runner.py:280**.
+**#207** (job `R7-01-FULL`, exit 0, 305 635 ms) ran `logs\cmd\r7_drive.ps1` →
+WSL `python3 logs/cmd/r7_loop10.py <qemu> 10`, a scratch harness driving
+`bridge.qemu_monitor.QemuMonitor` directly.
+**Neither uses `tools/demo_closed_loop.py`.** Re-verified this session (#280):
+
+```
+tracked=True  bridge/binary_runner.py
+tracked=True  tests/test_binary_runner.py
+tracked=True  tests/test_qemu_monitor_qemu.py
+tracked=True  tools/demo_closed_loop.py
+tracked=True  tools/run_emulator_tests.ps1
+tracked=False logs/cmd/r7_loop10.py
+ M bridge/binary_runner.py
+ bridge/binary_runner.py | 385 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 376 insertions(+), 9 deletions(-)
+NOT IN HEAD (git show | select-string found no match)
++def test_gate_flip(
+.gitignore:58:logs/	logs/cmd/r7_loop10.py
+```
+
+The function that produced #201's evidence and the harness that produced
+#207's are both uncommitted; the harness is gitignored entirely.
+**→ R6 FAIL, R7 FAIL (not reproducible from a clone).** Queued job: land
+`bridge/binary_runner.py` (owner decision 2 forbids committing it until its
+own job is DONE) and move the R7 harness out of `logs/`.
+
+### Q2 — which binary did the tests use, and is it patches 0001+0002?
+
+Used: `<wsl-home>/repro/src/build/qemu-system-xtensa` (proved by the
+`WOSP_QEMU=` line in #201 and the argv recorded in #207), 65 469 800 bytes,
+mtime 2026-10-07 10:18:02 UTC,
+sha256 `f89e9bc9c31e52bb59f23becbf889f36f6794a1e41936be22f673e651018ddac`,
+`--version` → `QEMU emulator version 9.2.2` (rc 0).
+
+Scratch-clone check (#261–#263): clone of tag `esp-develop-9.2.2-20260417`
+(HEAD `40edccac`, `git describe` = the tag exactly), `git apply --check` and
+apply **OK** for 0001, then 0002. The build tree is **not a git repo**, so
+provenance was established by diffing the 6 files the patches touch against
+the freshly-patched source: **5 SAME, `hw/misc/esp32_sens.c` DIFFERS** — the
+build tree still carries `timer_mod(&s->conv_timer, ...)`, exactly the hunk
+patch 0002 replaces with an immediate `esp32_sens_convert(s)`; the whole diff
+is 16 lines = 0002's hunk and nothing else. Timeline agrees: build source
+10:12 UTC, binary 10:18 UTC, patch 0002 committed `1cd96f7` at 10:50 UTC —
+**after** the build. **The measured binary is tag + 0001 only, without 0002 →
+provenance UNVERIFIED as "0001+0002".**
+
+Reconciliation with the earlier "empty" claim: Windows
+`Test-Path C:\<user>\Music\qemu-build\...\qemu-system-xtensa` →
+`exists=False`, parent exists but WSL `ls` shows `total 0` — the path really
+is empty; the binary the tests used lives in the WSL `repro` tree, not there.
+
+### Q3 — R2's two owner questions, and what crashed
+
+`docs/KNOWN_ISSUES.md:465-471`:
+
+1. *Approve running the suite under a memory debugger* (Application Verifier /
+   Dr. Memory / an address sanitizer) to name the object being freed —
+   installing one needs approval.
+2. *Approve staging a fix to `ui/schematic_editor.py` hunk-by-hunk* so the
+   earlier job's uncommitted 42/17 lines are not swept into it.
+
+Crash: `Windows fatal exception: access violation` (exit 139 /
+3221225477) at `ui/schematic_editor.py:688 _run_in_worker` ← `:3027
+run_simulation`, raised from `tests/test_editor_workflow.py:284
+test_progress_reaches_complete_after_a_run`. Frequency, as measured
+(KNOWN_ISSUES.md:440-445):
+
+```
+8 prefix files, 118 tests                  11 runs   0 crashes
+all 31 modules imported, prefix tests only 11 runs   1 crash
+full suite (pytest)                         4 runs   4 crashes
+tools/run_tests.py                          2 runs   2 crashes
+```
+
+Isolation holds: `pytest tests/test_editor_workflow.py -q` → 36 passed;
+`pytest tests --deselect tests/test_editor_workflow.py` → 418 passed,
+3 skipped, 36 deselected, exit 0.
+
+### Q4 — divider semantics
+
+Board netlist (`circuits/buck_converter.cir`): `Rfb_top vout fb 100k`,
+`Rfb_bot fb 0 100k` → **fb = vout / 2**, and the comment states the firmware
+believes in a 2:1 divider. `main.c:9` agrees (`V_feedback = V_out / 2`);
+`main.c:40-41` are raw counts at the pin (`ADC_LOW_THRESHOLD 1995`,
+`ADC_HIGH_THRESHOLD 2030`), 12-bit, vref 3.3 V (`(1<<12)-1 = 4095`).
+
+Sense-node voltages, derived:
+
+```
+count 1995 → fb = 1995/4095 * 3.3 = 1.60354 V → vout = 3.20708 V
+count 2030 → fb = 2030/4095 * 3.3 = 1.63165 V → vout = 3.26329 V
+midpoint 2012.5 → fb = 1.62177 V → vout = 3.24354 V   (matches the
+control_law.py docstring's 1.6218 / 3.2436)
+```
+
+`bridge/control_law.py:62` states the convention:
+`v_pin = sense_net * divider`, with `divider` the attenuation from the sense
+net to the ADC pin, and `control_law.py:77` adds that the correct `divider`
+is 1.0 when `sense_net` is the divider output.
+
+`bridge/binary_runner.py:19` does the opposite:
+
+```
+v_adc = v_sense / divider if divider > 0 else v_sense
+```
+
+**It is not correct for the node actually passed.** The nodes callers pass are
+undivided ones — `sense_net: "vout"` (tools/capture_golden.py:42,
+tests/test_binary_runner.py:41, tests/test_adc_conversion.py:72) and
+`sense_net: "in"` (tools/cli.py:175, tests/test_adversarial_stress.py:97) —
+and binary_runner's own default is `divider=0.5` (line 18), which
+`normalize_law` also permits (`0 < divider <= 1`). For `vout` the pin sees
+`vout * 0.5`, so the correct count is `vout * 0.5 / vref * 4095`; the code
+computes `vout / 0.5` = `vout * 2` → **4× the firmware's counts**, and for a
+regulated 3.24 V output it evaluates 6.48 V, which the clamp at line 22 pins
+to 4095 permanently.
+
+Which test pins the answer: **none pins the board-level relationship.** Two
+tests pin each side separately:
+
+* `tests/test_solver_error_handling.py::test_a_finite_value_still_converts`
+  pins the helper's current arithmetic — `_adc_counts_from_voltage(0.825) ==
+  2048` with the comment "binary_runner takes the voltage BEFORE the 0.5
+  divider";
+* `tests/test_closed_loop_buck.py::TestThresholdsMatchFirmware::
+  test_divider_is_not_applied_twice` pins the *model* side —
+  `divider_ratio == 0.5` and `adc_low != 997`, i.e. the reading comes from
+  the real `fb` node and 1995 is never halved.
+
+No test runs `run_binary_cosim` with a known `vout` and asserts the injected
+counts, so the inversion above is unguarded. → queued job.
+
+### Q5 — test counts: now versus the 431 recorded earlier
+
+Recorded (`docs/STATE.md:175`): `pytest tests -q --timeout=60` → **431
+passed, 3 skipped** = 434 collected (STATE.md's own reconciliation: every
+run collects passed+failed+skipped).
+
+Now:
+
+| anchor | count | entry |
+|---|---|---|
+| dev tree, `--collect-only -q` | **499** collected in 2.09 s | #274 D |
+| dev tree, full gate | **496 passed, 3 skipped, 0 failed in 112.87 s**, `GATE: all collected tests passed` | #279 |
+| committed branch (a clone) | **487** collected in 1.77 s | #270:537 |
+| 431-era commit `2bd250a` (detached worktree) | **417** collected, 24 files | #268:77 |
+
+The arithmetic closes exactly. 487 → 499 is **+12**, all of it in three
+untracked files (#275, 12 collected together):
+
+```
+tests/test_datasheet_symbols.py   8
+tests/test_golden_traces.py       2
+tests/test_load_step_injection.py 2
+```
+
+417 → 487 is **+70**: six new committed files
+(`test_solver_error_handling` 24, `test_security_vectors` 17,
+`test_adversarial_stress` 10, `test_tool_fixes` 7, `test_binary_runner` 5,
+`test_ci_workflow` 3 = 66) plus two files that grew
+(`test_ngspice_sanitiser` 34→36, `test_control_law_unit` 16→18 = +4).
+The 434 recorded against 417 committed at the time = 17 tests that were
+dev-tree-only then and have since been committed. No file collects 0.
+
+### Q6 — are R7's 20.3–20.8 ms simulated or wall time?
+
+**Wall time.** `logs/cmd/r7_loop10.py` measures with `time.monotonic()`
+(marker_to_telemetry, `started`, `t_inject` — #265). The JSON in #207:
+
+```
+flip_s_all      n=30  min 0.0203  mean 0.0205  p50 0.0205  p95 0.0207  max 0.0208
+latency_read_gate_ms n=30  min 10.083  mean 10.182  p95 10.298  max 10.328
+latency_set_adc_ms   n=30  min 10.177  mean 10.317  p95 10.460  max 10.469
+runs 10, runs_without_errors 10, flips_missed 0, panics 0,
+qemu_alive_at_end_runs 10, telemetry_lines 0, boot_s 3.615–5.258
+```
+
+What varies between the 10 runs: boot time (3.62–5.26 s), total run time
+(29.4–31.1 s), host/WSL scheduling, and the flip latency at the harness's
+0.1 ms quantisation. What does **not** vary: the injected sequence is
+identical in all 10 runs (LOW 1500 → HIGH 2500 → LOW 1500; 3 flips × 10 = 30
+samples), each followed by a 25 s telemetry tail, and every run reports
+`gate_states [[1500,true],[2500,false],[1500,true]]`.
+
+Stated bounds (SCORECARD.md, R7 session, "Documented bounds"):
+**gate flip ≤ 50 ms** (worst 20.8 ms, spread 0.5 ms), **HMP round trip
+≤ 20 ms** (worst 10.47 ms), firmware loop **<380 Hz / period ≥2.6 ms**
+inferred from 0 telemetry lines in 250 s.
+
+### Q7 — `git --no-pager diff tools/agentlog.ps1`
+
+One hunk, 9 lines, 8 insertions / 1 deletion (#280):
+
+```
+@@ -26,7 +26,14 @@ Push-Location $root
+ } elseif ($Command) {
+-  $out = (& powershell ... -Command $Command 2>&1 | Out-String); $what = $Command
++  # Two PS 5.1 traps, both measured this session: (1) -Command collapses a
++  # native exit 3 to 1 ... (2) passing $inner as a -Command argument strips
++  # its embedded double quotes ... hand the child the script base64-encoded
++  $inner = "$Command; if (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE }"
++  $b64 = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($inner))
++  $out = (& powershell ... -EncodedCommand $b64 2>&1 | Out-String); $what = $Command
+```
+
+`Get-Sha`, the `$prev`/`$seq` chain computation, `out_sha256` and the entry
+construction all sit **outside** the hunk — **hashing and chain logic
+untouched**. The file is tracked and this fix is uncommitted (owner action 2).
+
+## Part 2 — job R1 as scored: three real `git clone` installs
+
+Protocol: `logs/cmd/r1_all2.ps1` (#277), three consecutive
+`git clone --no-hardlinks -b baseline-fix` into `%TEMP%`, each running the
+tree's own `setup.ps1`, then `tools/run_tests.py`, then the tree's own
+`run_selfcheck.bat` (invoked by absolute path — the first attempt #269 used
+`cmd /c run_selfcheck.bat`, whose relative path cmd resolves against the
+*process* cwd, so the verify step never ran; harness bug, fixed).
+Nothing was copied from the dev tree; `git status --porcelain` in each clone
+was empty.
+
+| run | clone ms | setup exit / ms | tests exit / ms | verify exit / ms | verify printed |
+|---|---|---|---|---|---|
+| 1 | 2 851 | **1** / 93 275 | **1** / 4 032 | 0 / 2 715 | `SELF-CHECK: FAIL (3 of 5)` |
+| 2 | 2 606 | **1** / 82 301 | **1** / 3 578 | 0 / 2 675 | `SELF-CHECK: FAIL (3 of 5)` |
+| 3 | 2 121 | **1** / 78 412 | **1** / 4 027 | 0 / 2 633 | `SELF-CHECK: FAIL (3 of 5)` |
+
+Totals per run ≈ 100 s / 88 s / 85 s. **R1 FAIL: 0/3 reached a passing
+verify step, and no test count was produced** (collection aborted each time).
+
+### Failure 1 — setup.ps1 downloads an HTML page, not the archive (deterministic)
+
+Each run's `ngspice-47_dll_64.7z` was ~133 KB with a **different** hash:
+
+```
+run 1  133 222 B  ee1fe1eb6700e46fe81dac41a3f7f491a640da3b4f01f0f927c07e49e40ed5f2
+run 2  132 748 B  9fad0c32f93c3f46e4e368a6e577dc3529d8c9b0ce70aea916cea979d9039071
+run 3  134 031 B  4cf5d5adbb57a0273c224a179d80700cae8bc5078bad82b4dccb5619c1e6a8c3
+pinned                                    5bf5eec7db989f74849cdb32f7df62693f4f149cceeebcbd222eb35c2bb821eb
+```
+
+`py7zr` then raised `Bad7zFile: not a 7z file` and setup.ps1 threw at line
+220 → exit 1. Reproduced on demand (#278), byte-for-byte from setup.ps1:199:
+
+```
+V1  Invoke-WebRequest ... -UseBasicParsing            → 132 747 B, error=none
+                                                      <title>Download ngspice-47_dll_64.7z (ngspice)</title>
+V2  same + browser User-Agent                          → 403 Forbidden
+V3  V1 repeated                                        → 133 755 B, same HTML title
+```
+
+So it is **not transient network flakiness**: the exact line in setup.ps1
+reliably receives SourceForge's HTML landing page, HTTP 200, so its `catch`
+never fires; only the checksum warning (`Checksum mismatch … Continuing - the
+bind check in step 4 is the real test`) notices, and setup continues into a
+guaranteed extraction failure. A download through a different UA/redirect
+profile **does** return the correct 4 385 088-byte archive with the pinned
+hash and valid 7z magic `37 7a bc af 27 1c` (#276). The dev tree never
+notices because `tools/ngspice-47_dll_64.7z` is already cached there.
+
+→ queued job: make `Get-NgspiceArchive` fail fast on checksum mismatch, and
+fetch the real payload (the redirect/UA profile that works), with one
+measured retry. Not fixed here (clone is read-only; setup.ps1 not in this
+job's allowlist).
+
+### Failure 2 — a clone cannot collect its own suite (PyYAML)
+
+```
+ERROR collecting tests/test_ci_workflow.py
+tests\test_ci_workflow.py:11: in <module>
+    import yaml
+E   ModuleNotFoundError: No module named 'yaml'
+Interrupted: 1 error during collection        (#271, full traceback)
+```
+
+`requirements.txt` is the only file a clone installs and it has no PyYAML
+(#273 section C: no yaml/cov line in any `requirements*.txt`); the dev venv
+has `yaml 6.0.3` (#273 D), which is why the dev gate passes. Owner decision 6
+approved PyYAML "in the dev requirements with its version" — the file that
+matters is the one a clone installs. → owner question below.
+
+### Failure 3 — the verify step cannot fail (measured)
+
+`run_selfcheck.bat` returns 0 even though `selfcheck.py` printed
+`SELF-CHECK: FAIL (3 of 5)` and returns 1. Probed with three scratch bats
+(#274):
+
+```
+setlocal … cmd /c exit 1 … endlocal                 → exit 0
+setlocal … cmd /c exit 1 … endlocal & exit /b %ERRORLEVEL%  → exit 1
+bat shaped exactly like run_selfcheck.bat, python exits 1    → exit 0
+```
+
+The trailing `endlocal` swallows the errorlevel. `selfcheck.py` itself is
+correct (`return 1` at line 278, `sys.exit(main())` at 288). → queued job:
+one line in `run_selfcheck.bat`.
+
+### Clone vs dev tree
+
+| | dev tree | clone (committed) |
+|---|---|---|
+| collected | 499 (#274 D) | 487 (#270:537) |
+| gate | 496 passed, 3 skipped, 0 failed, 112.87 s, `GATE: all collected tests passed` (#279) | 1 error during collection, exit 1 (#277) |
+| verify | n/a | prints FAIL, exits 0 (#274/#277) |
+| ngspice | cached, hash verified | HTML page, setup exit 1 (#277) |
+
+Difference = the 12 tests in 3 untracked files, plus the 3 tests in
+`test_ci_workflow.py` that the clone cannot import.
+
+## Recomputed statuses
+
+| Row | Status now | Reason |
+|---|---|---|
+| R1 | **FAIL** | 0/3 clone-installs reached a passing verify step: setup exit 1 (#277), collection error (#271), verify prints FAIL and exits 0 (#274) |
+| R6 | **FAIL** | evidence function `test_gate_flip` and its driver are uncommitted (`NOT IN HEAD`, #280); not reproducible from a clone |
+| R7 | **FAIL** | same, plus the harness `logs/cmd/r7_loop10.py` is gitignored (#280); measurements stand as evidence but the row's reproducibility clause fails |
+| R2 | BLOCKED (owner) | unchanged — owner questions 1–2 open (Q3) |
+| R4, R5, R8, R9, R10, R11 | unchanged | no new evidence this session |
+| R12 | unset (owner) | unchanged |
+
+## Jobs queued (source changes; nothing fixed in the clone)
+
+1. **setup.ps1 downloader** — fail fast on checksum mismatch; fetch the
+   payload that actually arrives; one measured retry (#276, #278).
+2. **run_selfcheck.bat exit propagation** — `endlocal & exit /b %ERRORLEVEL%`
+   (#274).
+3. **PyYAML for clones** — pending the owner question below.
+4. **binary_runner divider inversion** — `v_sense / divider` vs the
+   documented `v_pin = sense_net * divider`, with a test that runs
+   `run_binary_cosim` at a known `vout` (Q4).
+5. **Land `bridge/binary_runner.py` + move the R7 harness out of `logs/`**
+   — required before R6/R7 can be re-scored (Q1); owner decision 2 gates it.
+
+## New owner actions
+
+9. **R1/PyYAML** — add `PyYAML==6.0.3` to the file a clone installs
+   (`requirements.txt`), or make `tests/test_ci_workflow.py` skip when `yaml`
+   is absent? Decision 6 said "dev requirements"; a clone only installs
+   `requirements.txt`.
+10. **R6/R7 re-score** — `bridge/binary_runner.py` is on your do-not-commit
+    list until its own job is DONE; that job cannot finish without the
+    commit. Which comes first?
+
+## Activity log
+
+Entries **#258–#280**. `agentlog_verify` after #280: every job above shows
+one entry, the chain head recomputed clean, and the only non-zero exits
+(#258, #269) are the *subjects* of these findings, not logging faults.
+### Activity-log anomaly found by `agentlog_verify` (stop condition c)
+
+`agentlog_verify` after this session's work (#281) reported **2 problems**:
+
+```
+OUTPUT HASH MISMATCH logs/out/00254.txt
+CHAIN BREAK at entry 257
+entries: 280  problems: 2  head: 925d0c72fd5932c0f2ff212fbb8baa63da4f239d8a4be3327a7bec3e0a5366f2
+verify_exit=0
+```
+
+Diagnosis â€” exactly one duplicate `seq` exists in the whole log:
+
+```
+{254: 2}                      (281 entries scanned; every other seq unique)
+
+seq 254  utc 2026-10-29T18:03:55.7224067Z  job Q2-SCRATCH    exit 7  ms 628578
+         out_sha256 82dbe4b64d7c5b8e6cc3d9c92c380bf714a828eb9a734228fff030b44f158b09
+seq 254  utc 2026-10-29T18:04:46.1333353Z  job Q1-COMMITTED  exit 0  ms  1003
+         out_sha256 99eb681407bfa2ea4ba5714d2626c9af90b0c852704f50c5ef62f1d087c94216
+both     prev c9d982d57324ccd22826109c515e9b0a1324c62a5e4768d72eca6b55c11cfc03
+entry 258 (R1-EVIDENCE-Q1Q7) prev fb42fe0e7641d719c231fb07127d0f58e8527206039e557d1849520a03beb160
+```
+
+**Cause:** `agentlog.ps1` allocates `seq = last+1` *before* it runs the command.
+Two of my jobs were launched concurrently (the 10.5-minute WSL scratch-clone
+job `Q2-SCRATCH` and the 1-second `Q1-COMMITTED`), both read seq 253, and both
+appended seq 254. Consequences, both mechanical:
+
+1. the second writer reused the output path `logs/out/00254.txt`, so
+   `Q1-COMMITTED`'s recorded `out_sha256` no longer matches the file on disk
+   (**the OUTPUT HASH MISMATCH** â€” the file now holds `Q2-SCRATCH`'s output);
+2. two entries share one `prev`, so the chain forks and entry 258's `prev`
+   matches only one parent (**the CHAIN BREAK at entry 257**).
+
+**No evidence was lost.** Both entries retain their `tail` field, which holds
+the cited output verbatim â€” `Q1-COMMITTED`'s tail still carries the Q1 proof
+(`tracked=False logs/cmd/r7_loop10.py`, the `bridge/binary_runner.py | 385`
+diffstat, `+def test_gate_flip(`) and `Q2-SCRATCH`'s tail still carries the
+Q2 result (`Q2SCRATCH: SAME:` Ã— 5, `Q2SCRATCH: DIFF_STATUS=7`). Every other
+entry (278 of 280) verifies clean: one mismatching file, one break.
+
+**Not repaired.** Repairing this means rewriting `logs/activity.jsonl` and
+re-hashing the chain â€” that is tampering with the very evidence the chain
+exists to protect, so it is left exactly as recorded and raised as an owner
+action instead.
+
+**Two tool defects it proves:**
+
+* `agentlog.ps1` is not concurrency-safe (seq allocation races; output path
+  derived from the raced seq). Serialising jobs is the working workaround.
+* `agentlog_verify.ps1` reports `problems: 2` and still **exits 0**
+  (`verify_exit=0` above), so a caller can mistake a broken chain for a clean
+  one.  Verification must be read by output, not exit status, until fixed.
+
+**Owner actions (log integrity):**
+
+11. The chain forked at seq 254 cannot be repaired without rewriting
+    `logs/activity.jsonl`. Re-baseline the chain (re-seal from entry 255) and
+    accept the loss of verifiability for entries 1â€“254, or keep the broken
+    chain as an honest record and carry the anomaly forward? **Not**
+    re-sealed without a decision.
+12. Approve a one-hunk fix to `tools/agentlog.ps1` (allocate `seq` under a
+    file lock, or refuse to start when another run is in flight) and to
+    `tools/agentlog_verify.ps1` (exit non-zero when `problems > 0`)?
+

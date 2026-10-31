@@ -303,3 +303,41 @@ OWNER DECISION: PENDING - need to verify with real QEMU emulator before locking 
 
 The full owner-action list for the scorecard session (8 items) is the STOP
 section in `docs/SCORECARD.md`.
+
+## Q5 — ACTIVITY-LOG CHAIN: THE TWO BAD ENTRIES AND THE OWNER'S HEAD (2026-10-31)
+
+Owner decision Q5(a): the chain is kept broken ON PURPOSE — it is NOT
+re-sealed. The logger now runs the command first and allocates `seq`
+under a mutex (both changes are documented in the comment block of
+`tools/agentlog.ps1`); `tools/agentlog_verify.ps1` exits non-zero when
+problems remain. This section records exactly what stays broken.
+
+### The two bad entries (`logs/activity.jsonl`, line numbers as of this record)
+
+| line | seq | job | exit | output file | recorded sha256 (first 12) | prev |
+|---|---|---|---|---|---|---|
+| 254 | 254 | Q1-COMMITTED | 0 | logs/out/00254.txt | 99eb681407bf | c9d982d5 |
+| 257 | 254 (DUPLICATE) | Q2-SCRATCH | 7 | logs/out/00254.txt | 82dbe4b64d7c | c9d982d5 |
+
+What happened: two concurrent jobs both read last-seq 253 before either
+command had run (the old allocate-then-run order), both allocated 254,
+both recorded `prev c9d982d5` (the fork), and both wrote
+`logs/out/00254.txt` — the second overwrote the first. So
+`agentlog_verify.ps1` reports exactly two problems, and only these two:
+
+- `OUTPUT HASH MISMATCH logs/out/00254.txt`
+- `CHAIN BREAK at entry 257`
+
+### Owner's chain head
+
+As reported by `tools/agentlog_verify.ps1` at this record point:
+
+```
+entries: 349  problems: 2  head: abf332e9e30de066dded8bf83b792363c8294ca1573c98c23f4b04bd80472f1c
+```
+
+Later entries extend the chain from the fixed logger; the two problems
+above stay as recorded — do not re-seal.
+
+Evidence: jobs Q5-ENTRY-DETAIL4 (entry listing) and Q5-HEAD-CAPTURE
+(verify head), plus the verify output pasted in the session report.
