@@ -11,7 +11,7 @@ Q5(a)).
 
 | Row | Status now | What changed / evidence |
 | --- | --- | --- |
-| R1 | **FAIL** (not re-run this session) | Owner start state: a clone at HEAD fails its gate because tracked code imports files a clone does not have; last measured 5 failed / 507 passed in a fresh HEAD clone (#483, prior session). This session's worktree gate is green (#489); the clone path is the R1 job (3x `tools/verify_clone.ps1`), last scored runs in the section below. |
+| R1 | **PASS** (re-scored 3/3 this session) | Three consecutive fresh `git clone --no-hardlinks` installs at HEAD `6628a89` - zero dev-tree files, clone tree proven empty by `CLONE_TREE_DIRTY=[]` - each ran `setup.ps1` then the full gate then `run_selfcheck.bat` and exited 0: **VERDICT PASS x3 with identical test counts 514 passed / 9 skipped / 58 subtests / 0 failed** (#557, #559, #560; wall 527 s / 784 s / 956 s; both ngspice downloads the same SHA-256 every run). The 9 clone skips are the artifact-dependent tests absent from a clone by design (4 firmware.elf, 4 WOSP_QEMU, 1 gitignored LTspice screenshot); the worktree's 519/4 (#532) differs from the clone's 514/9 only by those 5 artifact tests that pass where the artifacts exist. Scorecard row met with evidence: three consecutive installs reaching a passing verify with identical test counts - full table in the section below. |
 | R2 | **PASS** (owner-measured 2026-10-31, #439-#441; recheck 1/3 this session) | Full gate at HEAD: **519 passed, 4 skipped, 33 warnings, exit 0, 178.20 s** (#532, HEAD `3454fbe`); prior green 517 passed, 4 skipped, 130.10 s (#489). All 4 skips name the missing `qemu-system-xtensa`/firmware image. Test-count movement 512/3 -> 517/4 -> 519/4 reconciled below (owner decision 6). Open owner action Q7 (editor-crash root cause) unchanged - the crash did not recur. |
 | R3 | **PASS** | Unchanged basis (19/19 mutants, coverage floors); this session's gate and the R6 suite run re-ran those modules green (#489, #492). |
 | R4 | **PASS** | Unchanged (licence text quoted from files, hygiene vectors green); gate green (#489). |
@@ -66,12 +66,19 @@ archive is recorded with size and SHA-256. The clone is never edited.
 | 2 | 0 (2.5 s) | 0 (84.0 s) | 1 (134.8 s) — 491 passed, **5 failed**, 7 skipped | 1 (135.5 s) | **FAIL** | 357 s | R1-RUN2 (#405), HEAD `6090ed9` |
 | 3 | 0 (2.3 s) | 0 (79.8 s) | 1 (137.7 s) — 491 passed, **5 failed**, 7 skipped | 1 (132.5 s) | **FAIL** | 353 s | R1-RUN3 (#406), HEAD `6090ed9` |
 | 4 (confirmation after the two test jobs) | 0 (1.5 s) | 0 (84.5 s) | 1 (136.8 s) — 492 passed, **3 failed**, 8 skipped | 1 (162.3 s) | **FAIL** | 385 s | R1-RUN4-CONFIRM (#415), HEAD `250dbf6` |
+| 5 (re-score) | 0 (11.2 s) | 0 (125.3 s) | 0 (199.0 s) - **514 passed, 9 skipped**, 58 subtests | 0 (181.5 s) - SELF-CHECK: PASS | **PASS** | 527 s | R1-VERIFY-RUN5 (#557), HEAD `6628a89` |
+| 6 (re-score) | 0 (3.5 s) | 0 (177.1 s) | 0 (280.3 s) - **514 passed, 9 skipped**, 58 subtests | 0 (306.2 s) - SELF-CHECK: PASS | **PASS** | 784 s | R1-VERIFY-RUN6 (#559), HEAD `6628a89` |
+| 7 (re-score) | 0 (6.6 s) | 0 (353.6 s) | 0 (282.5 s) - **514 passed, 9 skipped**, 58 subtests | 0 (297.2 s) - SELF-CHECK: PASS | **PASS** | 956 s | R1-VERIFY-RUN7 (#560), HEAD `6628a89` |
 
 Earlier, superseded attempts against older HEADs are kept in
 `logs/r1-verify.txt` (they are what found the boolean leak and the missing
-retry); the three rows above are the scored set. All three runs are
-identical: same HEAD, same downloads (both ngspice archives, same SHA-256),
-same counts, same five failing tests, same verdict.
+retry). Runs 1-4 are the superseded FAIL set - identical within each set
+(same HEAD, same downloads, same five failing tests, same verdict).
+**Runs 5-7 are the scored set**: same HEAD `6628a89`, same downloads (both
+ngspice archives, same SHA-256), identical counts 514 passed / 9 skipped /
+58 subtests, three PASS verdicts - meets the scorecard row (three
+consecutive real clone installs reaching a passing verify step with
+identical test counts) with evidence #557, #559, #560.
 
 ### The five gate failures, and what became of each
 
@@ -91,7 +98,9 @@ Run 4 is the confirmation after the two test jobs were committed: the two
 fixed tests left the list (492 passed, 8 skipped - the calibration test now
 skips with its stated reason), and **the only failures left are the three
 untracked-file failures**. Nothing else separates a clone from a passing
-gate at this HEAD - which is exactly what Q6 decides.
+gate at this HEAD - which is exactly what Q6 decides. Q6 committed those
+three files in the 10-31 batch, and the re-score proves it: runs 5-7 all
+exit 0 with identical counts.
 
 
 ## Q6 — untracked inventory, proposed disposition
