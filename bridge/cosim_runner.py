@@ -106,6 +106,7 @@ def run_cosim(
     probe_nets: Optional[List[str]] = None,
     progress_callback=None,
     stop_flag=None,
+    load_stepper=None,
 ) -> CosimRun:
     """
     Compile `model`, execute the netlist, and drive each entry of `laws`.
@@ -189,8 +190,13 @@ def run_cosim(
         engine.set_vsrc_callback(callback)
         # Progress and abort are combined into one hook: passing both
         # separately used to silently drop the progress callback.
-        if progress_callback is not None or stop_flag is not None:
+        if progress_callback is not None or stop_flag is not None or load_stepper is not None:
             def hook(t, n):
+                if load_stepper is not None:
+                    try:
+                        load_stepper.check_and_apply(t)
+                    except Exception:
+                        pass
                 if progress_callback is not None:
                     progress_callback(t, n)
                 if stop_flag is not None and stop_flag():
