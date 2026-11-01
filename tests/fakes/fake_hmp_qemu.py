@@ -47,6 +47,10 @@ is accepted and ignored):
                          main.c's rule - gate ON when N < 1995, OFF when
                          N > 2030, hold in between. Still a double: it proves
                          the harness logic, never firmware behaviour.
+  FAKE_HMP_UART          when set to "empty", the -serial file stays empty
+                         even in FAKE_HMP_FIRMWARE mode (no boot markers, no
+                         TELEMETRY): proves tools/loop_repeat.py depends on
+                         no firmware log text (owner decision 1).
 """
 
 import os
@@ -71,16 +75,17 @@ def main():
     firmware = os.environ.get("FAKE_HMP_FIRMWARE")
 
     if firmware:
-        # Boot sentinel + firmware telemetry, written to the -serial file: the
-        # harness polls, so loop_repeat's marker wait and its TELEMETRY tail
-        # both terminate on data instead of on their timeouts.
+        # Boot sentinel + a TELEMETRY line, written to the -serial file.
+        # tools/loop_repeat.py no longer reads them (owner decision 1); the
+        # double still models them, and FAKE_HMP_UART=empty removes even
+        # these so a test can prove the harness needs no log text at all.
         uart = None
         argv = sys.argv[1:]
         for i, a in enumerate(argv):
             if a == "-serial" and i + 1 < len(argv) and \
                     argv[i + 1].startswith("file:"):
                 uart = argv[i + 1][len("file:"):]
-        if uart:
+        if uart and os.environ.get("FAKE_HMP_UART") != "empty":
             repo = os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__))))
             if repo not in sys.path:

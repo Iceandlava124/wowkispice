@@ -8,9 +8,9 @@ of bridge.binary_runner.test_gate_flip). It also runs against the test
 double tests/fakes/fake_hmp_qemu.py in FAKE_HMP_FIRMWARE mode, which is what
 tests/test_loop_repeat.py does to keep the harness itself honest. One run:
 
-    boot firmware -> wait for the control-loop marker -> inject LOW/HIGH/LOW
-    -> record gate-flip times, every monitor round-trip latency, callback
-    counts, and whether QEMU stayed alive.
+    boot firmware -> prove the control loop runs (text-free readiness probe)
+    -> inject LOW/HIGH/LOW -> record gate-flip times, every monitor
+    round-trip latency, callback counts, and whether QEMU stayed alive.
 
 Prints one JSON line prefixed R7_JSON: with per-run records and aggregates.
 Definitions recorded with the numbers:
@@ -19,16 +19,27 @@ Definitions recorded with the numbers:
                   (main.c: <1995 -> ON, >2030 -> OFF);
   * latency     - wall time of one read_gate() or set_adc1_value() HMP
                   round trip through the bridge;
-  * callbacks   - successful monitor replies (reader-loop callbacks), plus
-                  the firmware's own control-loop telemetry lines
-                  ("TELEMETRY: loop=N ...", printed every 10000 iterations)
-                  and the absolute iteration counter N they carry.
+  * callbacks   - successful monitor replies (reader-loop callbacks): every
+                  gate read and ADC write the monitor answered.
+
+MEASUREMENT NOTE (owner decision, 2026-11-01): the harness reads NO
+firmware log text for boot, readiness, measurement or verdict - the image
+actually built prints neither "TELEMETRY: loop=" nor any line this harness
+requires. What the removed 25 s tail was for: catch the firmware's first
+"TELEMETRY: loop=10000" print (the counter prints every 10000 iterations)
+to derive marker-to-telemetry time and loop_rate_hz_est. No recorded R7
+measurement ever needed that line: #207 logged telemetry_lines 0 on all 10
+runs with marker_to_telemetry_s null - every flip, latency and callback
+count came from the monitor - and #208's 10/10 contract-gate runs used no
+UART text; on the built image the wait cost 25.1 s of a 29.4 s run (#505).
+The only remaining UART read is the end-of-run ESP-IDF crash-banner scan
+("Guru Meditation"/"PANIC"): it can only ADD failures, never make a run
+pass, and it is framework output, not a main.c log line.
 
 Usage: python3 tools/loop_repeat.py <qemu-path> [runs]
 """
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -39,16 +50,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # tools/ -> 
 sys.path.insert(0, REPO)
 
 from bridge.qemu_monitor import QemuMonitor            # noqa: E402
-from bridge.qemu_orchestrator import BOOT_MARKERS      # noqa: E402
 
 FLASH = os.path.join(REPO, "firmware", "esp32_buck_controller", ".pio",
                      "build", "esp32dev", "qemu_flash.bin")
 LOW, HIGH = 1500, 2500        # firmware thresholds (main.c): <1995 ON, >2030 OFF
-BOOT_DEADLINE = 20.0
-FLIP_BOUND = 5.0
+BOOT_DEADLINE = 20.0   # readiness probe only: boot-to-loop slack for the
+                       # first below-threshold injection to flip the gate
+FLIP_BOUND = 5.0       # measured injections 2/3 (documented R7 flip bound)
 POLL = 0.01
-TAIL_S = 25.0   # first TELEMETRY needs 10000 iterations; measured <606 Hz
-                # (16 reads/iter at <94 us each) puts it at ~16-17 s
 
 # Calibrated against the firmware's own UART prints: with adc < 1995 the
 # firmware turns the gate on and read_gate() reports True (see
@@ -58,7 +67,12 @@ EXPECTED = {LOW: True, HIGH: False}
 
 
 def boot(qemu, tag):
-    """Spawn QEMU and wire a QemuMonitor exactly like test_gate_flip does."""
+    """Spawn QEMU and wire a QemuMonitor exactly like test_gate_flip does.
+
+    No firmware log line is waited for: the HMP prompt proves QEMU is up,
+    and control-loop readiness is proved functionally in one_run by the
+    readiness probe flipping the gate (owner decision 1).
+    """
     uart = os.path.join(tempfile.gettempdir(), "r7-uart-%s.log" % tag)
     if os.path.exists(uart):
         os.remove(uart)
@@ -73,20 +87,6 @@ def boot(qemu, tag):
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL)
 
-    deadline = time.monotonic() + BOOT_DEADLINE
-    wanted = list(BOOT_MARKERS)
-    while wanted and time.monotonic() < deadline:
-        try:
-            with open(uart, errors="replace") as fh:
-                text = fh.read()
-            wanted = [m for m in wanted if m not in text]
-        except OSError:
-            pass
-        if proc.poll() is not None:
-            break
-        time.sleep(0.05)
-    marker_at = time.monotonic()
-
     mon = QemuMonitor(qemu)
     mon._proc = proc
     mon._buf = bytearray()
@@ -96,22 +96,45 @@ def boot(qemu, tag):
     mon._reader_thread.start()
     mon._wait_prompt(timeout=10.0)
     time.sleep(0.5)
-    return mon, proc, uart, wanted, marker_at
+    return mon, proc, uart, time.monotonic()
 
 
 def one_run(qemu, index):
     rec = {"run": index, "errors": [], "flips": [], "latencies": [],
-           "callbacks": {"gate_reads": 0, "adc_writes": 0,
-                         "telemetry_lines": 0, "loop_max": 0},
+           "callbacks": {"gate_reads": 0, "adc_writes": 0},
            "gate_states": [], "qemu_alive_at_end": False}
     mon = proc = None
     started = time.monotonic()
     try:
-        mon, proc, uart, wanted, marker_at = boot(qemu, "run%d" % index)
-        rec["boot_s"] = round(marker_at - started, 3)
-        if wanted:
-            rec["errors"].append("boot markers missing: %r" % wanted)
+        mon, proc, uart, ready_at = boot(qemu, "run%d" % index)
+        rec["boot_s"] = round(ready_at - started, 3)
+
+        # Readiness probe (text-free): a below-threshold injection must flip
+        # the gate ON within BOOT_DEADLINE or the control loop never ran.
+        t_ready = time.monotonic()
+        t = time.monotonic()
+        mon.set_adc1_value(LOW)
+        rec["latencies"].append(
+            {"op": "set_adc", "ms": round((time.monotonic() - t) * 1000, 3)})
+        rec["callbacks"]["adc_writes"] += 1
+        deadline = t_ready + BOOT_DEADLINE
+        ready = False
+        while time.monotonic() < deadline:
+            t = time.monotonic()
+            gate = mon.read_gate()
+            rec["latencies"].append(
+                {"op": "read_gate", "ms": round((time.monotonic() - t) * 1000, 3)})
+            rec["callbacks"]["gate_reads"] += 1
+            if gate is True:
+                ready = True
+                break
+            time.sleep(POLL)
+        if not ready:
+            rec["errors"].append(
+                "control loop never flipped the gate ON within %.0fs"
+                % BOOT_DEADLINE)
             return rec
+        rec["readiness_s"] = round(time.monotonic() - t_ready, 3)
 
         for value in (LOW, HIGH, LOW):
             t_inject = time.monotonic()
@@ -142,34 +165,17 @@ def one_run(qemu, index):
                     "no flip to %s within %.1fs at adc=%d" % (expected, FLIP_BOUND, value))
             time.sleep(0.05)
 
-        # Tail: wait (bounded) for the firmware's first TELEMETRY line so the
-        # firmware-side callback count and loop rate are observable.
-        tail0 = time.monotonic()
-        deadline = tail0 + TAIL_S
+        # End-of-run crash scan - the ONLY UART read left (see MEASUREMENT
+        # NOTE): the ESP-IDF crash banner can only add failures; no
+        # measurement or verdict depends on any firmware log line.
         text = ""
-        while time.monotonic() < deadline:
+        if os.path.exists(uart):
             try:
                 with open(uart, errors="replace") as fh:
                     text = fh.read()
-            except OSError:
-                text = ""
-            if "TELEMETRY: loop=" in text:
-                break
-            time.sleep(0.25)
-        rec["telemetry_wait_s"] = round(time.monotonic() - tail0, 3)
-        try:
-            tele = re.findall(r"TELEMETRY: loop=(\d+)", text)
-            rec["callbacks"]["telemetry_lines"] = len(tele)
-            rec["callbacks"]["loop_max"] = max((int(n) for n in tele), default=0)
-            if tele:
-                # First TELEMETRY fires at loop_count == 10000, and the loop
-                # starts when the "Entering ... control loop" marker prints
-                # (marker_at, 50 ms poll granularity).
-                rec["marker_to_telemetry_s"] = round(
-                    (tail0 - marker_at) + (time.monotonic() - tail0), 3)
-            rec["panics"] = text.count("Guru Meditation") + text.count("PANIC")
-        except OSError as exc:
-            rec["errors"].append("uart read failed: %s" % exc)
+            except OSError as exc:
+                rec["errors"].append("uart read failed: %s" % exc)
+        rec["panics"] = text.count("Guru Meditation") + text.count("PANIC")
         rec["qemu_alive_at_end"] = proc.poll() is None
     except Exception as exc:                      # noqa: BLE001 - record, keep running
         rec["errors"].append("%s: %s" % (type(exc).__name__, exc))
@@ -239,14 +245,7 @@ def main():
         "callbacks_per_run": {
             "gate_reads": stats([r["callbacks"]["gate_reads"] for r in records]),
             "adc_writes": sorted({r["callbacks"]["adc_writes"] for r in records}),
-            "telemetry_lines": stats([r["callbacks"]["telemetry_lines"] for r in records]),
-            "firmware_loop_max": stats([r["callbacks"]["loop_max"] for r in records]),
         },
-        "marker_to_telemetry_s": stats([r["marker_to_telemetry_s"] for r in records
-                                        if r.get("marker_to_telemetry_s")]),
-        "loop_rate_hz_est": stats([round(10000.0 / r["marker_to_telemetry_s"], 1)
-                                   for r in records
-                                   if r.get("marker_to_telemetry_s")]),
         "panics": sum(r.get("panics", 0) for r in records),
         "qemu_alive_at_end_runs": sum(1 for r in records if r["qemu_alive_at_end"]),
         "records": records,

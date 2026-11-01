@@ -69,16 +69,25 @@ def test_one_run_against_the_fake_emulator(tmp_path):
     assert gate_lat["max"] < 5000, "a fake answers instantly: %r" % gate_lat
 
     adc_lat = data["latency_set_adc_ms"]
-    assert adc_lat and adc_lat["n"] == 3, adc_lat
+    assert adc_lat and adc_lat["n"] == 4, adc_lat  # +1 readiness write
 
     reads = data["callbacks_per_run"]["gate_reads"]
-    assert reads and reads["min"] >= 3, reads
-    assert data["callbacks_per_run"]["adc_writes"] == [3]
+    # readiness probe polls at least one gate read before the 3 measured ones
+    assert reads and reads["min"] >= 4, reads
+    # readiness write + 3 measured injections
+    assert data["callbacks_per_run"]["adc_writes"] == [4]
 
-    # the double's TELEMETRY line must have been seen, so the tail wait
-    # terminated on data rather than on its 25 s timeout
-    assert data["marker_to_telemetry_s"] is not None
-    assert data["marker_to_telemetry_s"]["max"] < 25
+    # owner decision (1): everything above must come from the MONITOR. The
+    # fields the old UART tail produced are gone outright, and the run
+    # succeeded without needing any firmware log line.
+    assert "marker_to_telemetry_s" not in data
+    assert "loop_rate_hz_est" not in data
+    assert "telemetry_lines" not in data["callbacks_per_run"]
+    assert "firmware_loop_max" not in data["callbacks_per_run"]
+    assert data["records"][0].get("readiness_s") is not None
+    # flip times are measured, never fabricated
+    assert all(f["flip_s"] > 0
+               for r in data["records"] for f in r["flips"]), data["records"]
 
 
 def test_the_fake_receives_the_expected_commands(tmp_path):
@@ -87,7 +96,29 @@ def test_the_fake_receives_the_expected_commands(tmp_path):
     assert proc.returncode == 0, proc.stdout[-2000:]
     sent = record.read_text().splitlines()
     adc_sets = [l for l in sent if l.startswith("qom-set") and "adc1-value" in l]
-    assert len(adc_sets) == 3, sent
+    # 4 writes: the readiness probe plus the measured LOW/HIGH/LOW
+    assert len(adc_sets) == 4, sent
     assert any("1500" in l for l in adc_sets), sent
     assert any("2500" in l for l in adc_sets), sent
     assert any(l.startswith("xp") for l in sent), sent
+
+
+def test_the_harness_needs_no_firmware_log_text(tmp_path):
+    """Owner decision (1): with FAKE_HMP_UART=empty the double writes
+    NOTHING to the serial file - no boot markers, no TELEMETRY, no
+    "Raw ADC". The run must still succeed, because the harness derives
+    readiness and every measurement from the monitor alone."""
+    proc = _run_one({
+        "FAKE_HMP_FIRMWARE": "1",
+        "FAKE_HMP_UART": "empty",
+        "FAKE_HMP_RECORD": str(tmp_path / "record.txt"),
+    })
+    assert proc.returncode == 0, (
+        "harness must not depend on firmware log text\n"
+        "STDOUT:\n%s\nSTDERR:\n%s" % (proc.stdout[-4000:], proc.stderr[-2000:]))
+    data = _json_line(proc.stdout)
+    assert data is not None, "no R7_JSON line:\n%s" % proc.stdout[-2000:]
+    assert data["runs_without_errors"] == 1, data["records"]
+    assert data["flips_missed"] == 0, data["records"]
+    flips = data["flip_s_all"]
+    assert flips and flips["n"] == 3, flips
