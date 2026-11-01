@@ -12,16 +12,16 @@ Q5(a)).
 | Row | Status now | What changed / evidence |
 | --- | --- | --- |
 | R1 | **FAIL** (not re-run this session) | Owner start state: a clone at HEAD fails its gate because tracked code imports files a clone does not have; last measured 5 failed / 507 passed in a fresh HEAD clone (#483, prior session). This session's worktree gate is green (#489); the clone path is the R1 job (3x `tools/verify_clone.ps1`), last scored runs in the section below. |
-| R2 | **PASS** (owner-measured 2026-10-31, #439-#441; recheck 1/3 this session) | Full gate at HEAD: **517 passed, 4 skipped, 33 warnings, exit 0, 130.10 s** (#489); all 4 skips name the missing `qemu-system-xtensa`. Open owner action Q7 (editor-crash root cause) unchanged - the crash did not recur. |
+| R2 | **PASS** (owner-measured 2026-10-31, #439-#441; recheck 1/3 this session) | Full gate at HEAD: **519 passed, 4 skipped, 33 warnings, exit 0, 178.20 s** (#532, HEAD `3454fbe`); prior green 517 passed, 4 skipped, 130.10 s (#489). All 4 skips name the missing `qemu-system-xtensa`/firmware image. Test-count movement 512/3 -> 517/4 -> 519/4 reconciled below (owner decision 6). Open owner action Q7 (editor-crash root cause) unchanged - the crash did not recur. |
 | R3 | **PASS** | Unchanged basis (19/19 mutants, coverage floors); this session's gate and the R6 suite run re-ran those modules green (#489, #492). |
 | R4 | **PASS** | Unchanged (licence text quoted from files, hygiene vectors green); gate green (#489). |
 | R5 | **PASS** | Unchanged (RC/RLC proofs with measured tolerances, NaN/Inf guard); gate green (#489). |
 | R6 | **PASS** (PARTIAL lifted, re-scored this session) | Owner's R6* clause proven end-to-end: emulator route **4 contract tests passed, 0 skipped, `[GATE] all contract tests ran and passed`, exit 0** (#490), including `test_gate_follows_the_output_voltage_through_the_divider PASSED` - 3.21 V -> 1992 counts -> gate ON, 3.28 V -> 2035 counts -> gate OFF, back ON (`[True, False, True]`), derived by `binary_runner._adc_counts_from_voltage` (the `v_pin = sense * divider` law) before injection. Hand-derived conversion + error-surfacing suites: **58 passed** (#492). |
-| R7 | **FAIL** (not re-measured this session) | Owner start state: harness lived in gitignored `logs/`. The harness file is now tracked at HEAD (`afe2669`, #487), but the 10-run determinism measurement has not been re-run through it this session (UNVERIFIED); iteration 2's job - `main.c` stays untouched. |
+| R7 | **PASS** (re-measured this session, #534) | Threshold (SCORECARD: loop 10 times on the real emulator, recording gate-flip times, callback counts, latency distribution with a documented bound) measured through the tracked harness `tools/loop_repeat.py` (commits `afe2669` -> `fdd80c9` -> `3454fbe`): **10/10 runs error-free, 30/30 expected flips matched, flips_missed 0, panics 0, qemu alive at end 10/10**. Gate-flip times n=30: min 0.0203 s, mean 0.0217 s, p50 0.0205 s, p95 0.0218 s, max 0.051 s. Callbacks per run: gate_reads 60-65 (mean 61.7), adc_writes 4. Latency: read_gate n=617 mean 33.7 ms p50 40.3 p95 50.5 max 71.2; set_adc n=40 mean 14.7 ms p50 10.4 p95 31.2 max 40.4. run_s 3.29-4.31 (owner start state was 29.4 s), readiness_s 2.49-2.94, boot 0.56-1.15 s. Observed bound: flip latency <= 0.051 s. |
 | R8 | **PASS** | Unchanged basis; orphan check after this session's full gate + emulator route: **zero** qemu/fake_hmp processes on Windows, none in WSL (the single `pgrep` hit was its own shell) (#491). |
 | R9 | **PASS** | Unchanged. |
 | R10 | **PASS** | Unchanged (traceability, guard suite, one-concern-per-commit). |
-| R11 | **FAIL** | Unchanged: tree not clean (#488) - 5 files with real content diffs (`bridge/cosim_runner.py`, `bridge/qemu_orchestrator.py`, `firmware/esp32_buck_controller/src/main.c`, `ui/schematic_editor.py`, `ui/schematic_items.py`) plus 6 untracked paths; `main.c` and `ui/schematic_editor.py` are untouchable per the driver. Owner start state also carries 34 line-ending violations and `tests/CHANGES.md` stored as binary. |
+| R11 | **FAIL** | Tree still not clean: **3** content files with real diffs now (`bridge/qemu_orchestrator.py`, `firmware/esp32_buck_controller/src/main.c`, `ui/schematic_editor.py`) plus 6 untracked paths (`.cloud-attachments/`, `.coverage`, `docs/ARCHITECTURE_LOOP.md`, `docs/WINDOWS_QEMU_BUILD.md`, `tools/cli.py`, `uv.lock`) - measured PRE-DOC-STATUS this session; `ui/schematic_items.py` and `bridge/cosim_runner.py` left the dirty set via `e26e6d7` / `d69d98a`. `main.c` (owner restore) and `ui/schematic_editor.py` (owner decision 3: stays uncommitted) are untouchable per the driver. Owner start state also carries 34 line-ending violations and `tests/CHANGES.md` stored as binary. |
 | R12 | **OWNER-SET** | Unchanged: `docs/REVIEW_BRIEF.md` delivered (`7f1251e`), owner schedules it. |
 
 ## Commits made this session (branch `baseline-fix`)
@@ -39,9 +39,15 @@ Q5(a)).
 | `6090ed9` | verify_clone keeps the clone's pytest output after the clone is gone |
 | `79c9c46` | test: test_missing_qemu is hermetic about the firmware image (R1 finding) |
 | `250dbf6` | test: the LTspice calibration test guards the images it actually reads (R1 finding) |
+| `e26e6d7` | Q6: `ui/schematic_items.py` committed with its datasheet-symbol tests (proof-before-commit) |
+| `d69d98a` | Q6: `bridge/cosim_runner.py` load_stepper kwarg with `test_load_step_injection` (proof-before-commit) |
+| `fdd80c9` | R7: harness drops firmware-log-text dependence (text-free readiness probe; green 4/4, mutants M1-M4 killed, gate 518/4) |
+| `3454fbe` | owner decision 4: R7_FLASH override, dummy flash in tmp_path, skip reason names `qemu_flash.bin` (M5/M6 killed, gate 519/4) |
 
 Full gate after each group: 507 passed (#375) → 510 (#380) → 512 (#398) →
-**512 passed, 3 skipped, 0 failed** after the last two commits (#414).
+**512 passed, 3 skipped, 0 failed** after the last two commits (#414) →
+517 passed, 4 skipped (#489) → 518 passed, 4 skipped (#518) →
+**519 passed, 4 skipped, 0 failed** at HEAD `3454fbe` (#532).
 Clone installs: three scored runs at `6090ed9` (#403, #405, #406) plus one
 confirmation run at `250dbf6` (#415).
 
@@ -218,6 +224,41 @@ recurred in these runs, but its root cause is still open under Q7, so the
 row is PASS **on its stated threshold**, not a claim that the defect is
 understood.
 
+## Test-count reconciliation 512/3 -> 517/4 -> 519/4 (owner decision 6)
+
+The naive reading "+18 test defs landed between `f2fc456` and `55c44f1` but
+only +5 passed" is reconciled by counting collected *items* rather than defs,
+and by what was on disk when the baseline ran. Evidence: #538 (test-touching
+diffs), #539 (per-commit defs via `git show`, no checkout), #540
+(collect-only at HEAD), #541 (the arithmetic below, all MATCH), plus
+agentlog `??` status tails (#1, #64, #304, #305, #327) and the 12-test
+collect at #275.
+
+1. **Defs per commit** (#539): `f2fc456` = 496, `55c44f1` = 514,
+   `fdd80c9` = 515, `3454fbe` = 516.
+2. **Constant item gap of 7.** The two parametrize-bearing files
+   (`tests/test_qemu_monitor_unit.py`, `tests/test_solver_error_handling.py`)
+   are byte-identical `f2fc456..HEAD` (#541), so the gap is the same now as
+   at the baseline: collect-only at HEAD is 523 items vs 516 defs (#540) ->
+   gap 7. `tests/` is also byte-identical `250dbf6..f2fc456` (#541), so the
+   #414 tracked state equals `f2fc456`'s.
+3. **The baseline run counted 12 uncommitted defs.** 512 passed + 3 skipped
+   = 515 items, minus 496 tracked defs, minus the 7-item gap = 12 - exactly
+   `test_datasheet_symbols.py` (8) + `test_golden_traces.py` (2) +
+   `test_load_step_injection.py` (2). Those three files sat **untracked on
+   disk** during #414/#439-#441 (agentlog `??` tails from #1 through #327;
+   they collect 12 tests at #275) and were only committed in the 10-31 10:24
+   Q6 batch (`cec64b7`, `8c63fe8`, `080dea9`).
+4. **Committed evolution** (#541): 496 + 18 = 514 defs -> 514 + 7 = 521
+   items = 517 passed + 4 skipped (#489). Of the +18 defs, 12 were already
+   counted in the baseline as untracked files, so the genuinely new items
+   are 6: two gate-flip voltage tests and the R7 divider qemu test
+   (`c731125`) plus three harness tests (`afe2669`). The divider qemu test
+   skips without the firmware image, so skips go 3 -> 4 and passed goes
+   512 -> 517. `fdd80c9` adds the no-log-text harness test -> 518/4 (#518).
+   `3454fbe` adds the skip-reason naming test -> **519/4 = 523 items =
+   516 defs + 7** (#532, #540). All three equalities MATCH.
+
 ## R6 re-score (2026-10-31) - PASS
 
 Route: the command the tests document, through `tools/run_emulator_tests.ps1`
@@ -249,8 +290,9 @@ Clause 3 of the row (errors surfaced, never swallowed): the raising paths are
 233-239, 246-251, 403-410) and were all green inside the 512-passed gate
 (#414). 41 tests collect across the four R6 files (#425).
 
-R7 stays FAIL on reproducibility (its harness is still outside the clone -
-owner action 4); R6's own evidence path is tracked and clean.
+R7's harness is now tracked at HEAD (`afe2669` -> `fdd80c9` -> `3454fbe`)
+and its 10-run determinism measurement is re-done through it (#534); R6's
+own evidence path is tracked and clean.
 
 ## R11 clause measurements (2026-10-31)
 
@@ -277,8 +319,9 @@ reruns (#423, #428) succeeded.
    `ui/schematic_editor.py` fix.
 3. **main.c restore** — owner runs
    `git checkout -- firmware/esp32_buck_controller/src/main.c` (J2, Q6a).
-4. **R7 harness** — approve moving `logs/cmd/r7_loop10.py` (and its driver)
-   out of the ignored `logs/` tree so R7 becomes reproducible.
+4. ~~R7 harness~~ - **done**: `tools/loop_repeat.py` +
+   `tests/test_loop_repeat.py` are tracked (`afe2669`, `fdd80c9`,
+   `3454fbe`); the 10-run measurement through the tracked harness is #534.
 5. **R12** — schedule the human review (`docs/REVIEW_BRIEF.md`).
 6. ~~Logger commit~~ - **done**: `aa97db2` carries the Q5(a) fix; both files
    are tracked and clean.
