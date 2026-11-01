@@ -12,7 +12,7 @@ Q5(a)).
 | Row | Status now | What changed / evidence |
 | --- | --- | --- |
 | R1 | **PASS** (re-scored 3/3 this session) | Three consecutive fresh `git clone --no-hardlinks` installs at HEAD `6628a89` - zero dev-tree files, clone tree proven empty by `CLONE_TREE_DIRTY=[]` - each ran `setup.ps1` then the full gate then `run_selfcheck.bat` and exited 0: **VERDICT PASS x3 with identical test counts 514 passed / 9 skipped / 58 subtests / 0 failed** (#557, #559, #560; wall 527 s / 784 s / 956 s; both ngspice downloads the same SHA-256 every run). The 9 clone skips are the artifact-dependent tests absent from a clone by design (4 firmware.elf, 4 WOSP_QEMU, 1 gitignored LTspice screenshot); the worktree's 519/4 (#532) differs from the clone's 514/9 only by those 5 artifact tests that pass where the artifacts exist. Scorecard row met with evidence: three consecutive installs reaching a passing verify with identical test counts - full table in the section below. |
-| R2 | **PASS** (owner-measured 2026-10-31, #439-#441; recheck 1/3 this session) | Full gate at HEAD: **519 passed, 4 skipped, 33 warnings, exit 0, 178.20 s** (#532, HEAD `3454fbe`); prior green 517 passed, 4 skipped, 130.10 s (#489). All 4 skips name the missing `qemu-system-xtensa`/firmware image. Test-count movement 512/3 -> 517/4 -> 519/4 reconciled below (owner decision 6). Open owner action Q7 (editor-crash root cause) unchanged - the crash did not recur. |
+| R2 | **PASS** (owner-measured 2026-10-31, #439-#441; recheck 1/3 this session) | Full gate at HEAD: **519 passed, 4 skipped, 33 warnings, exit 0, 178.20 s** (#532, HEAD `3454fbe`), reconfirmed 519/4 at HEAD `c4c16e4` (#570, 218.26 s); prior green 517 passed, 4 skipped, 130.10 s (#489). All 4 skips name the missing `qemu-system-xtensa`/firmware image. Test-count movement 512/3 -> 517/4 -> 519/4 reconciled below (owner decision 6). Open owner action Q7 (editor-crash root cause) unchanged - the crash did not recur. |
 | R3 | **PASS** | Unchanged basis (19/19 mutants, coverage floors); this session's gate and the R6 suite run re-ran those modules green (#489, #492). |
 | R4 | **PASS** | Unchanged (licence text quoted from files, hygiene vectors green); gate green (#489). |
 | R5 | **PASS** | Unchanged (RC/RLC proofs with measured tolerances, NaN/Inf guard); gate green (#489). |
@@ -21,7 +21,7 @@ Q5(a)).
 | R8 | **PASS** | Unchanged basis; orphan check after this session's full gate + emulator route: **zero** qemu/fake_hmp processes on Windows, none in WSL (the single `pgrep` hit was its own shell) (#491). |
 | R9 | **PASS** | Unchanged. |
 | R10 | **PASS** | Unchanged (traceability, guard suite, one-concern-per-commit). |
-| R11 | **FAIL** | Tree still not clean: **3** content files with real diffs now (`bridge/qemu_orchestrator.py`, `firmware/esp32_buck_controller/src/main.c`, `ui/schematic_editor.py`) plus 6 untracked paths (`.cloud-attachments/`, `.coverage`, `docs/ARCHITECTURE_LOOP.md`, `docs/WINDOWS_QEMU_BUILD.md`, `tools/cli.py`, `uv.lock`) - measured PRE-DOC-STATUS this session; `ui/schematic_items.py` and `bridge/cosim_runner.py` left the dirty set via `e26e6d7` / `d69d98a`. `main.c` (owner restore) and `ui/schematic_editor.py` (owner decision 3: stays uncommitted) are untouchable per the driver. Owner start state also carries 34 line-ending violations and `tests/CHANGES.md` stored as binary. |
+| R11 | **FAIL** (2 dirty files remain, both owner-forbidden) | The one committable dirty file is done: `bridge/qemu_orchestrator.py`'s 68-line duplicate-QemuMonitor copy was committed as `c4c16e4` (the names re-export from committed `bridge/qemu_monitor.py`; no code or test imports them from the orchestrator; 42 focused tests green; full gate **519 passed, 4 skipped, 0 failed** at the new HEAD, #570). Remaining dirty: `firmware/esp32_buck_controller/src/main.c` (owner restore) and `ui/schematic_editor.py` (owner decision 3: stays uncommitted) - both untouchable per the driver - plus 6 untracked paths (`.cloud-attachments/`, `.coverage`, `docs/ARCHITECTURE_LOOP.md`, `docs/WINDOWS_QEMU_BUILD.md`, `tools/cli.py`, `uv.lock`) that need an owner commit-or-skip decision. `ui/schematic_items.py`, `bridge/cosim_runner.py`, `bridge/qemu_orchestrator.py` left the dirty set via `e26e6d7` / `d69d98a` / `c4c16e4`. Owner start state also carries 34 line-ending violations and `tests/CHANGES.md` stored as binary. |
 | R12 | **OWNER-SET** | Unchanged: `docs/REVIEW_BRIEF.md` delivered (`7f1251e`), owner schedules it. |
 
 ## Commits made this session (branch `baseline-fix`)
@@ -43,11 +43,15 @@ Q5(a)).
 | `d69d98a` | Q6: `bridge/cosim_runner.py` load_stepper kwarg with `test_load_step_injection` (proof-before-commit) |
 | `fdd80c9` | R7: harness drops firmware-log-text dependence (text-free readiness probe; green 4/4, mutants M1-M4 killed, gate 518/4) |
 | `3454fbe` | owner decision 4: R7_FLASH override, dummy flash in tmp_path, skip reason names `qemu_flash.bin` (M5/M6 killed, gate 519/4) |
+| `6628a89` | docs: R7 re-scored PASS with the 10-run evidence; test-count reconciliation 512/3 -> 517/4 -> 519/4 (owner decision 6) |
+| `8cec5c7` | docs: R1 re-scored PASS - three clone installs 3/3 at `6628a89` with identical 514/9 counts (#557, #559, #560) |
+| `c4c16e4` | bridge: drop `qemu_orchestrator.py`'s duplicate QemuMonitor copy (68 dead lines; 42 focused tests green; gate 519/4 #570) |
 
 Full gate after each group: 507 passed (#375) → 510 (#380) → 512 (#398) →
 **512 passed, 3 skipped, 0 failed** after the last two commits (#414) →
 517 passed, 4 skipped (#489) → 518 passed, 4 skipped (#518) →
-**519 passed, 4 skipped, 0 failed** at HEAD `3454fbe` (#532).
+**519 passed, 4 skipped, 0 failed** at HEAD `3454fbe` (#532), reconfirmed
+**519 passed, 4 skipped, 0 failed** at HEAD `c4c16e4` (#570).
 Clone installs: three scored runs at `6090ed9` (#403, #405, #406) plus one
 confirmation run at `250dbf6` (#415).
 
