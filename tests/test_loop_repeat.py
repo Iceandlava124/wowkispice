@@ -23,9 +23,15 @@ LOOP = os.path.join(ROOT, "tools", "loop_repeat.py")
 FAKE = os.path.join(ROOT, "tests", "fakes", "fake_hmp_qemu.py")
 
 
-def _run_one(fake_mode_env, timeout=120):
+def _run_one(fake_mode_env, tmp_path, timeout=120):
+    # Owner decision (4): a fresh clone has no .pio/build/qemu_flash.bin
+    # (gitignored), so fake runs point R7_FLASH at a dummy image built in
+    # tmp_path. Same hermetic pattern as tests/test_binary_runner.py.
+    flash = tmp_path / "dummy_flash.bin"
+    flash.write_bytes(b"\x00" * 64)
     env = dict(os.environ)
     env.update(fake_mode_env)
+    env["R7_FLASH"] = str(flash)
     return subprocess.run(
         [sys.executable, LOOP, FAKE, "1"],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=timeout)
@@ -47,13 +53,15 @@ def test_one_run_against_the_fake_emulator(tmp_path):
     proc = _run_one({
         "FAKE_HMP_FIRMWARE": "1",
         "FAKE_HMP_RECORD": str(tmp_path / "record.txt"),
-    })
+    }, tmp_path)
     assert proc.returncode == 0, (
         "harness failed against the fake double\nSTDOUT:\n%s\nSTDERR:\n%s"
         % (proc.stdout[-4000:], proc.stderr[-2000:]))
 
     data = _json_line(proc.stdout)
     assert data is not None, "no R7_JSON line:\n%s" % proc.stdout[-2000:]
+    # the harness used the dummy image from tmp_path (decision 4)
+    assert data["flash"] == str(tmp_path / "dummy_flash.bin"), data["flash"]
 
     assert data["runs"] == 1
     assert data["runs_without_errors"] == 1, data["records"]
@@ -92,7 +100,7 @@ def test_one_run_against_the_fake_emulator(tmp_path):
 
 def test_the_fake_receives_the_expected_commands(tmp_path):
     record = tmp_path / "record.txt"
-    proc = _run_one({"FAKE_HMP_FIRMWARE": "1", "FAKE_HMP_RECORD": str(record)})
+    proc = _run_one({"FAKE_HMP_FIRMWARE": "1", "FAKE_HMP_RECORD": str(record)}, tmp_path)
     assert proc.returncode == 0, proc.stdout[-2000:]
     sent = record.read_text().splitlines()
     adc_sets = [l for l in sent if l.startswith("qom-set") and "adc1-value" in l]
@@ -112,7 +120,7 @@ def test_the_harness_needs_no_firmware_log_text(tmp_path):
         "FAKE_HMP_FIRMWARE": "1",
         "FAKE_HMP_UART": "empty",
         "FAKE_HMP_RECORD": str(tmp_path / "record.txt"),
-    })
+    }, tmp_path)
     assert proc.returncode == 0, (
         "harness must not depend on firmware log text\n"
         "STDOUT:\n%s\nSTDERR:\n%s" % (proc.stdout[-4000:], proc.stderr[-2000:]))

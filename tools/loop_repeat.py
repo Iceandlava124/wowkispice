@@ -36,6 +36,10 @@ The only remaining UART read is the end-of-run ESP-IDF crash-banner scan
 ("Guru Meditation"/"PANIC"): it can only ADD failures, never make a run
 pass, and it is framework output, not a main.c log line.
 
+R7_FLASH overrides the firmware image path; the fake-double tests point
+it at a dummy image in tmp_path so they need no gitignored build
+artifact (owner decision 4, 2026-11-01).
+
 Usage: python3 tools/loop_repeat.py <qemu-path> [runs]
 """
 import json
@@ -51,8 +55,9 @@ sys.path.insert(0, REPO)
 
 from bridge.qemu_monitor import QemuMonitor            # noqa: E402
 
-FLASH = os.path.join(REPO, "firmware", "esp32_buck_controller", ".pio",
-                     "build", "esp32dev", "qemu_flash.bin")
+FLASH = os.environ.get("R7_FLASH") or os.path.join(
+    REPO, "firmware", "esp32_buck_controller", ".pio",
+    "build", "esp32dev", "qemu_flash.bin")
 LOW, HIGH = 1500, 2500        # firmware thresholds (main.c): <1995 ON, >2030 OFF
 BOOT_DEADLINE = 20.0   # readiness probe only: boot-to-loop slack for the
                        # first below-threshold injection to flip the gate

@@ -44,11 +44,12 @@ def _is_linux_elf(path):
 def _skip_reason():
     """Name the EXACT missing item, or return "" when the tests can run.
 
-    Three distinct shapes, never collapsed into one generic message:
+    Four distinct shapes, never collapsed into one generic message:
       1. WOSP_QEMU set but pointing at a path that does not exist,
       2. WOSP_QEMU unset with no fallback binary anywhere,
       3. a Linux ELF binary seen from a non-Linux host (it exists but this
-         OS cannot execute it -- Track B runs it inside WSL instead).
+         OS cannot execute it -- Track B runs it inside WSL instead),
+      4. the firmware image (gitignored qemu_flash.bin) missing.
     """
     env = os.environ.get("WOSP_QEMU") or ""
     if env and not os.path.exists(env):
@@ -67,6 +68,15 @@ def _skip_reason():
             "not running under Linux: %s is a Linux ELF that Windows cannot "
             "execute (Track B: tools/run_emulator_tests.ps1 runs these tests "
             "inside WSL)" % qemu
+        )
+    flash = os.environ.get("R7_FLASH") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "firmware", "esp32_buck_controller", ".pio", "build",
+        "esp32dev", "qemu_flash.bin")
+    if not os.path.exists(flash):
+        return (
+            "firmware image not found at %s (gitignored build artifact; "
+            "build it with pio run, or point R7_FLASH at an image)" % flash
         )
     return ""
 
@@ -179,3 +189,29 @@ def test_gate_follows_the_output_voltage_through_the_divider():
         "gate at the expected output voltage: vout 3.21 V -> %d counts "
         "(ON), 3.28 V -> %d counts (OFF), back to 3.21 V (ON); got %r"
         % (counts["low"], counts["high"], gates))
+
+
+def test_skip_reason_names_the_missing_flash_artifact(tmp_path):
+    """Owner decision (4): with the gitignored firmware image absent
+    the skip reason must NAME the artifact (qemu_flash.bin), not
+    collapse into a generic message. WOSP_QEMU points at a dummy that
+    passes the binary checks first."""
+    qemu_dummy = tmp_path / "qemu-system-xtensa"
+    qemu_dummy.write_bytes(b"not-an-elf")
+    missing = tmp_path / "qemu_flash.bin"
+    old_q = os.environ.get("WOSP_QEMU")
+    old_f = os.environ.get("R7_FLASH")
+    try:
+        os.environ["WOSP_QEMU"] = str(qemu_dummy)
+        os.environ["R7_FLASH"] = str(missing)
+        reason = _skip_reason()
+    finally:
+        if old_q is None:
+            os.environ.pop("WOSP_QEMU", None)
+        else:
+            os.environ["WOSP_QEMU"] = old_q
+        if old_f is None:
+            os.environ.pop("R7_FLASH", None)
+        else:
+            os.environ["R7_FLASH"] = old_f
+    assert "qemu_flash.bin" in reason, reason
