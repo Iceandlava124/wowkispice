@@ -7,12 +7,56 @@ WireItem      orthogonal wire that tracks its two endpoint pins
 """
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QPainter, QPen, QPainterPath
+from PyQt5.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPainterPath
 from PyQt5.QtWidgets import (QGraphicsItem, QGraphicsObject, QGraphicsEllipseItem,
                              QGraphicsPathItem)
 
+import os
+
 from bridge.cad_engine import SchematicComponent
-from ui.schematic_symbols import GRID, SYMBOLS, extent_of, label_of, pins_of
+from ui.schematic_symbols import (GRID, SYMBOLS, extent_of, label_of, pins_of)
+
+# Datasheet diagrams: datasheets/<COMP_TYPE>.png is copied in by
+# tools/extract_datasheet_img.py from the part's datasheet PDF. When the file
+# exists the drawn diagram is the datasheet's own image; when it does not,
+# the symbol falls back to a plain square with the pins along its edges.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATASHEET_DIR = os.path.join(REPO_ROOT, "datasheets")
+_DATASHEET_IMAGES = {}          # comp_type -> (mtime, QImage) or (None, None)
+
+
+def datasheet_image_path(comp_type: str):
+    """Path of the copied datasheet diagram for a type, or None."""
+    path = os.path.join(DATASHEET_DIR, str(comp_type) + ".png")
+    return path if os.path.isfile(path) else None
+
+
+def datasheet_image(comp_type: str):
+    """Cached QImage for the type's datasheet diagram, or None.
+
+    The cache keys on (path, mtime) so dropping a new PNG into datasheets/
+    takes effect without restarting the editor (clear_datasheet_cache exists
+    for tests that replace files inside one process).
+    """
+    path = datasheet_image_path(comp_type)
+    if path is None:
+        _DATASHEET_IMAGES.pop(str(comp_type), None)
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    hit = _DATASHEET_IMAGES.get(str(comp_type))
+    if hit is not None and hit[0] == mtime and hit[1] is not None:
+        return hit[1]
+    img = QImage(path)
+    _DATASHEET_IMAGES[str(comp_type)] = (mtime, img if not img.isNull() else None)
+    return img if not img.isNull() else None
+
+
+def clear_datasheet_cache():
+    """Forget cached datasheet images (tests, and after replacing files)."""
+    _DATASHEET_IMAGES.clear()
 
 INK = QColor("#d6dde5")
 WIRE_BLUE = QColor("#5aa9ff")
@@ -80,7 +124,17 @@ def _draw_board(painter: QPainter, comp_type: str):
 
 
 def draw_symbol(painter: QPainter, comp_type: str):
-    """Draw the component body (pins are drawn separately as PinItems)."""
+    """Draw the component body (pins are drawn separately as PinItems).
+
+    Body precedence, in order:
+      1. a copied datasheet diagram in datasheets/<TYPE>.png, if present;
+      2. the dedicated hand-drawn symbol for the built-in types;
+      3. a generic square with the pins along its edges (any type that
+         declares pins but has no dedicated drawing);
+      4. an honest "?" box for a type with no pin data at all.
+    """
+    if _draw_datasheet_image(painter, comp_type):
+        return
     if _draw_board(painter, comp_type):
         return
     if comp_type == "R":
@@ -159,11 +213,77 @@ def draw_symbol(painter: QPainter, comp_type: str):
             _seg(painter, -40 if x < 0 else 40, y, x, y, width=1.5)
         painter.drawText(QRectF(-40, -14, 80, 28), Qt.AlignCenter, "MCU")
 
-    else:  # unknown type (e.g. loaded from a file) - keep it visible and honest
+    else:  # no dedicated drawing: square with the pins along its edges when
+           # the type has pin geometry, otherwise keep it visible and honest.
+        if _draw_generic_box(painter, comp_type):
+            return
         painter.setPen(QPen(INK, 2.0))
         painter.setBrush(QBrush(SYMBOL_FILL))
         painter.drawRect(QRectF(-20, -14, 40, 28))
         painter.drawText(QRectF(-20, -14, 40, 28), Qt.AlignCenter, "?")
+
+
+def _draw_datasheet_image(painter: QPainter, comp_type: str) -> bool:
+    """Draw the copied datasheet diagram for the type, if one exists.
+
+    The image is fitted (aspect kept) inside the symbol's declared extent so
+    pins, labels and hit geometry stay exactly where the symbol data says.
+    """
+    img = datasheet_image(comp_type)
+    if img is None:
+        return False
+    ex, ey, ew, eh = extent_of(comp_type)
+    margin = 6.0
+    target = QRectF(ex + margin, ey + margin, ew - 2 * margin, eh - 2 * margin)
+    scale = min(target.width() / max(img.width(), 1),
+                target.height() / max(img.height(), 1))
+    w, h = img.width() * scale, img.height() * scale
+    painter.drawImage(QRectF(target.center().x() - w / 2.0,
+                             target.center().y() - h / 2.0, w, h), img)
+    return True
+
+
+def _draw_generic_box(painter: QPainter, comp_type: str) -> bool:
+    """A plain body sized from the symbol's pins, each pin stubbed to the
+    nearest edge - the fallback diagram for types without a dedicated
+    drawing or a copied datasheet image.
+
+    Returns False when the type declares no pins (nothing to draw around).
+    """
+    spec = SYMBOLS.get(comp_type)
+    pins = spec.get("pins") if spec else None
+    if not pins:
+        return False
+    xs = [p[1] for p in pins]
+    ys = [p[2] for p in pins]
+    minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+    # Body hugs the pin bounding box: 12 units in from the left/right pins,
+    # 14 above/below the top/bottom pins (same look as the board symbols).
+    left, right = minx + 12, maxx - 12
+    top, bottom = miny - 14, maxy + 14
+    if right - left < 40:               # keep a readable body for tight pin sets
+        cx = (left + right) / 2.0
+        left, right = cx - 20, cx + 20
+    if bottom - top < 28:
+        cy = (top + bottom) / 2.0
+        top, bottom = cy - 14, cy + 14
+    body = QRectF(left, top, right - left, bottom - top)
+
+    painter.setPen(QPen(INK, 2.0))
+    painter.setBrush(QBrush(SYMBOL_FILL))
+    painter.drawRoundedRect(body, 4, 4)
+
+    painter.setPen(QPen(INK, 1.2))
+    painter.setBrush(Qt.NoBrush)
+    for _name, x, y in pins:
+        # Stub from the pin to the nearest point on the body edge.
+        nearest = QPointF(min(max(x, body.left()), body.right()),
+                          min(max(y, body.top()), body.bottom()))
+        painter.drawLine(QPointF(x, y), nearest)
+
+    painter.setPen(QPen(LABEL_GREY))
+    painter.drawText(body, Qt.AlignCenter, spec.get("label", comp_type))
+    return True
 
 
 # --------------------------------------------------------------------------
