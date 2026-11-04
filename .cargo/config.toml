@@ -1,0 +1,13 @@
+# Build configuration for the Rust workspace.
+#
+# Default target is the GNU toolchain because this machine has no MSVC
+# linker (link.exe / Windows SDK absent) — rustup's default host triple is
+# x86_64-pc-windows-msvc and cargo fails to link without Visual Studio
+# Build Tools.  The gnu target is installed alongside and links via the
+# MSYS2/MinGW gcc already in use for this project (see docs/toolchain.md).
+#
+# If MSVC Build Tools are installed later, delete this file to return to
+# the host default.
+
+[build]
+target = "x86_64-pc-windows-gnu"

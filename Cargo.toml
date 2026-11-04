@@ -1,0 +1,23 @@
+# Workspace for the Rust core rewrite of WOWKISPICE.
+#
+# Layout decision: one library crate (wowkispice-core) holding the ported
+# policy/logic modules, plus one binary crate (parity) whose whole job is
+# diffing the Rust implementation against the Python original.  Tests live
+# inside the library crate as #[cfg(test)] modules so `cargo test` is the
+# gate, exactly as `ctest` was for the C port.
+#
+# The Qt5 GUI is C++ and is NOT part of this workspace; it will link the
+# core through the C ABI (cdylib, see [lib] crate-type in core).
+
+[workspace]
+resolver = "2"
+members = ["crates/wowkispice-core", "crates/parity"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.dev]
+# Match the flags the C port was gated under: no fused multiply-add, so
+# floating-point results stay bit-comparable with CPython.

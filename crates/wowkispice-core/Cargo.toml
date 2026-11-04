@@ -1,0 +1,15 @@
+[package]
+name = "wowkispice-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The core is policy and math: it must build with no dependencies, the way
+# the Python original depends only on the stdlib.  A dependency here would
+# become a dependency of every firmware target that links it.
+[dependencies]
+
+# cdylib + rlib: the C++/Qt5 GUI links the C ABI, tests and the parity
+# harness link the Rust API directly.
+[lib]
+crate-type = ["rlib", "cdylib"]
