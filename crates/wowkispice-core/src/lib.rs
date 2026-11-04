@@ -25,4 +25,5 @@ pub mod load_stepper;
 pub mod measurements;
 pub mod netlist;
 pub mod pycompat;
+pub mod report_generator;
 pub mod toolchain_resolver;

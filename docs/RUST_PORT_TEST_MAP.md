@@ -49,7 +49,7 @@ rows (unblock = FFI); `4` = external rows; `—` = not a test / redesign.
 | `test_solver_error_handling.py` — `TestMalformedNetlistRaises`, `TestNonConvergentAnalysisRaises`, `TestHealthyDeckStillRuns`, `TestCompletedTransientIsNotAFailure` (+ deck fixtures ~130 LOC) | 270 | 10 | `bridge.ngspice_wrapper.NgSpiceEngine` | `ngspice_wrapper` FFI layer | BLOCKED-ON-FFI | 3 | R5: bad decks must error from the captured output stream, not rc. Unblocked only when the FFI layer exists. |
 | `test_measurements.py` — `TestCursors`, `TestTraceStats`, `TestFft`, `TestBodeMaths`, `TestPowerMetrics`, `TestStepMetrics` | 233 | 27 | `bridge.measurements` | `wowkispice-core::measurements` | PURE-LOGIC | 1 | Landed: `measurements.rs` ported (27 tests), `parity_measurements` harness green (PARITY OK — 27 values). Solver-driven classes (`TestAgainstRealSolver`, `TestNoiseAndYield`, `TestDistortion`) stay Python-gated (wave 3). |
 | `test_measurements.py` — `TestAgainstRealSolver`, `TestNoiseAndYield`, `TestDistortion` (+ shared rc fixture ~52 LOC) | 205 | 9 | `bridge.analysis_runner`, `bridge.ngspice_wrapper` | `analysis_runner` + FFI | BLOCKED-ON-FFI | 3 | Noise/FFT/Bode/distortion through a real ngspice run. |
-| `test_firmware_gpio.py` — `TestIntelHex`, `TestElf`, `TestGpioProfile`, `TestLogicAnalysis` | 179 | 20 | `bridge.firmware`, `bridge.gpio_model` | `wowkispice-core::firmware`, `gpio_model` | PURE-LOGIC | 1 | HEX/ELF parsing, SPICE-card emission, logic analysis on synthetic pins. `firmware.rs` landed (SHA-256 fix + parity OK, 27/27); `gpio_model.rs` still pending. |
+| `test_firmware_gpio.py` — `TestIntelHex`, `TestElf`, `TestGpioProfile`, `TestLogicAnalysis` | 179 | 20 | `bridge.firmware`, `bridge.gpio_model` | `wowkispice-core::firmware`, `gpio_model` | PURE-LOGIC | 1 | HEX/ELF parsing, SPICE-card emission, logic analysis on synthetic pins. `firmware.rs` landed (SHA-256 fix + parity OK, 27/27); `gpio_model.rs` landed (ported with unit tests). |
 | `test_firmware_gpio.py` — `TestGpioCosimEndToEnd` | 48 | 4 | `bridge.cad_engine`, `bridge.ngspice_wrapper` | `cosim_runner` + FFI | BLOCKED-ON-FFI | 3 | GPIO pin drives real solver physics. |
 | `test_firmware_gpio.py` — `TestRealEsp32Firmware` (+ `REAL_ELF`/repo fixtures ~103 LOC) | 155 | 4 | firmware build artifact (`.pio/build/.../firmware.elf`, not committed) | `wowkispice-core::firmware` | EXTERNAL | 4 | Skips when the 3 MB ELF hasn't built. Keep skip semantics, or gate on a committed tiny fixture. **[Q5]** |
 | `test_firmware_gpio.py` — `QemuMonitorDouble` + `TestQemuGateBridge` | 112 | 4 | `bridge.qemu_monitor` (cycle_adc_and_gate, sweep_report) | `wowkispice-core::qemu_monitor` (candidate) | PURE-LOGIC | 1 | In-process double, "no process, no socket, no real QEMU" — wiring/order assertions only. |
@@ -175,6 +175,7 @@ manifests for file-touching batteries.
 | `parity_measurements` | exists (`crates/parity/src/bin/parity_measurements.rs` + `crates/parity/python/parity_measurements.py`; `PARITY OK — 27 values identical`) | `test_measurements.py` pure classes (27 tests) | `measurements` gate |
 | `parity_studio_engine` | future | `test_studio_suite.py` analytic rows, `test_sota_suite.py` analytic rows | `studio_engine` gate |
 | `parity_firmware` | exists (`crates/parity/src/bin/parity_firmware.rs` + `crates/parity/python/parity_firmware.py`; `PARITY OK — 27 values identical`) | `test_firmware_gpio.py` HEX/ELF/profile/logic classes | `firmware` gate |
+| `parity_gpio_model` | future | `test_firmware_gpio.py` GPIO classes (`TestGpioProfile`, `TestLogicAnalysis`) | `gpio_model` gate |
 | `parity_qemu_monitor` | future | `test_qemu_monitor_unit.py` protocol facts (if the file becomes pure) | `qemu_monitor` gate |
 | `parity_toolchain_resolver` | future | `test_tool_fixes.py::test_find_ngspice_honours_the_same_env_var...` | `toolchain_resolver` gate (module already ported) |
 | `parity_mock_controller` | future | `test_closed_loop_buck.py::TestThresholdsMatchFirmware` | `mock_controller` gate |
@@ -261,4 +262,5 @@ Toolchain resolver landed — `toolchain_resolver.rs` ported with 3 unit tests.
 Measurements group landed — `measurements.rs` ported (27 tests), `parity_measurements`
 harness green (PARITY OK — 27 values).
 Full core gate green: 196 tests, `*RUSTFLAGS="-D warnings"*`, zero warnings.
-Sections 3, 4, maintenance log flipped; `gpio_model` row still pending.*
+Sections 3, 4, maintenance log flipped; `gpio_model` row now landed.*
+*2026-11-05: gpio_model group landed — `gpio_model.rs` ported with unit tests. 196 tests total, `*RUSTFLAGS="-D warnings"*`, zero warnings.*
