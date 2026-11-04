@@ -9,8 +9,9 @@
  * Module layout mirrors bridge/ one-to-one so a reader can always find the
  * Python original from the Rust file name:
  *
- *   control_law  <- bridge/control_law.py
- *   netlist      <- bridge/ngspice_wrapper.py (the pure-logic portion)
+ *   control_law    <- bridge/control_law.py
+ *   netlist        <- bridge/ngspice_wrapper.py (the pure-logic portion)
+ *   serial_console <- bridge/serial_console.py
  *
  * Parity contract for each module is documented in its own header comment;
  * crates/parity holds the harness that diffs each implementation against
@@ -25,5 +26,8 @@ pub mod load_stepper;
 pub mod measurements;
 pub mod netlist;
 pub mod pycompat;
+pub mod qtest_client;
 pub mod report_generator;
+pub mod selfcheck;
+pub mod serial_console;
 pub mod toolchain_resolver;
