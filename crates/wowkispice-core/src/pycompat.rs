@@ -114,8 +114,10 @@ pub fn py_repr(x: f64) -> String {
             format!("{}.{}", int_part, frac_part)
         }
     } else {
-        // Exponential: strip the mantissa's trailing zeros outright
-        // (repr(1e-05) is '1e-05', not '1.0e-05'), signed >= 2-digit exponent.
+        // Exponential: strip the mantissa's trailing zeros but keep the
+        // point when more than one digit remains ("9.999999999999999e-06",
+        // "1.2e-05"; a single digit stays bare: "1e-05"), then a signed,
+        // at-least-2-digit exponent.
         let mut m = digits;
         while m.len() > 1 && m.ends_with('0') {
             m.pop();
@@ -123,8 +125,13 @@ pub fn py_repr(x: f64) -> String {
         if m.ends_with('.') {
             m.pop();
         }
+        let mant = if m.len() > 1 {
+            format!("{}.{}", &m[..1], &m[1..])
+        } else {
+            m.clone()
+        };
         let sign = if exp < 0 { '-' } else { '+' };
-        format!("{}e{}{:02}", m, sign, exp.abs())
+        format!("{}e{}{:02}", mant, sign, exp.abs())
     };
 
     if neg {
@@ -185,6 +192,8 @@ pub fn py_g(x: f64) -> String {
             format!("{}.{}", int_part, frac_part)
         }
     } else {
+        // Same point rule as py_repr above: "1.23456e-05" keeps the dot
+        // when more than one digit survives the strip.
         let mut m = digits;
         while m.len() > 1 && m.ends_with('0') {
             m.pop();
@@ -192,8 +201,13 @@ pub fn py_g(x: f64) -> String {
         if m.ends_with('.') {
             m.pop();
         }
+        let mant = if m.len() > 1 {
+            format!("{}.{}", &m[..1], &m[1..])
+        } else {
+            m.clone()
+        };
         let sign = if exp < 0 { '-' } else { '+' };
-        format!("{}e{}{:02}", m, sign, exp.abs())
+        format!("{}e{}{:02}", mant, sign, exp.abs())
     };
 
     if neg {
@@ -201,6 +215,38 @@ pub fn py_g(x: f64) -> String {
     } else {
         body
     }
+}
+
+/// Python's `repr(str)` for the strings this port can produce: ASCII text,
+/// escaped backslash, `\\n`/`\\r`/`\\t`, other control and DEL characters as
+/// `\\xHH`, and single quotes — except `'`-containing/`"`-free strings, which
+/// CPython renders double-quoted.  Non-ASCII printable characters pass
+/// through unchanged, the same as CPython for the common ranges.
+///
+/// Needed wherever an error message embeds `%r` of user text (first use: the
+/// netlist sanitiser's validate_cmd()).
+pub fn py_repr_str(s: &str) -> String {
+    let quote = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let mut out = String::new();
+    out.push(quote);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || (c as u32) == 0x7f => {
+                out.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c if c as u32 == quote as u32 => {
+                out.push('\\');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out.push(quote);
+    out
 }
 
 /// Python's `str.strip()`: leading/trailing whitespace.  ASCII only — the

@@ -42,8 +42,8 @@ rows (unblock = FFI); `4` = external rows; `—` = not a test / redesign.
 | `test_cosim_control.py` — `TestNetlistEmission` | 43 | 4 | `bridge.control_law`, `bridge.cad_engine` | `cosim_runner` (+`cad_engine`) | PURE-LOGIC | 2 | Pure `compile_netlist()` text assertions (`external` source, save/reload, warnings). ⚠ The `test_control_law.c` header lumps it with solver tests — inspection shows no solver call. **[Q3]** |
 | `test_cosim_control.py` — `TestCosimEndToEnd` (+ shared fixtures, ~64 LOC) | 163 | 5 | `bridge.cosim_runner`, `bridge.cad_engine` | `cosim_runner` | BLOCKED-ON-FFI | 3 | Closed-loop regulation runs through `run_cosim()` → ngspice. |
 | `test_esp32_regs.py` | 86 | 16 | `bridge.esp32_regs` | `wowkispice-core::esp32_regs` | PURE-LOGIC | 1 | Module already ported (`esp32_regs.rs`); gate can be transcribed now. |
-| `test_ngspice_sanitiser.py` (all 5 classes) | 383 | 36 | `bridge.ngspice_wrapper` (static methods) | `wowkispice-core::netlist` | PURE-LOGIC | 1 | **Netlist in flight.** Almost all tests call `_sanitise_line`/include scan statically — no DLL. Exceptions to port carefully: `test_engine_load_rejects_it_and_marker_never_appears` constructs `NgSpiceEngine` (DLL load, rejection happens pre-`ngSpice_Circ`); `TestIncludedFileContent::test_decisions_are_identical_from_a_foreign_cwd` spawns a child Python (re-point at the Rust test binary). |
-| `test_security_vectors.py` — `_MarkerCase` + `TestNetlistVectors` + `TestCommandVectors` (+ header ~73 LOC) | 278 | 11 | `bridge.ngspice_wrapper` (validate_cmd, sanitise, shadowed DLL entry points) | `wowkispice-core::netlist` | PURE-LOGIC | 1 | Security vectors 1–9; DLL entry points are shadowed, so no FFI. Complemented by `parity_netlist`. |
+| `test_ngspice_sanitiser.py` (all 5 classes) | 383 | 36 | `bridge.ngspice_wrapper` (static methods) | `wowkispice-core::netlist` | **ALREADY GATED** | 1 (done) | Rust: `crates\wowkispice-core\tests\test_netlist.rs` — 48 tests (36 from this file incl. the foreign-cwd subprocess test re-pointed at the venv Python, + the 4 security-vector validate_cmd rows + 4 RUST-ONLY deck tests + pure halves of the security rows). `parity_netlist` complements. The DLL-only `test_engine_load_rejects_it...` stays in Python; its domestic-phase and marker observable transcribed (documented in place). |
+| `test_security_vectors.py` — `_MarkerCase` + `TestNetlistVectors` + `TestCommandVectors` (+ header ~73 LOC) | 278 | 11 | `bridge.ngspice_wrapper` (validate_cmd, sanitise, shadowed DLL entry points) | `wowkispice-core::netlist` | **ALREADY GATED (pure halves)** | 1 | The validate_cmd rejections (`TestCommandVectors` 2/3/5/6/7/separators) and the legitimate-command row are in `test_netlist.rs` with the `calls == []` engine-Ffi half left in Python. Vectors 1/4/8/9 mechanically overlap the sanitiser tests above (marker/calls API is the Python-only evidence — unchanged in pytest). |
 | `test_security_vectors.py` — `TestLocalSocketBinding`, `TestTrackedFileHygiene` | 145 | 6 | `git ls-files`, source-text scans | repo hygiene (no module) | SKIP-OR-REDESIGN | — | Scans *Python* sources / tracked files. Does it rescan Rust sources, stay Python during transition, or move to CI? **[Q4]** |
 | `test_solver_error_handling.py` — `TestFailureReportClassifier`, `TestNonFiniteNeverBecomesACount` | 102 | 14 | `bridge.ngspice_wrapper._failure_report`, `bridge.control_law`, `bridge.binary_runner` | `netlist` + `control_law` (+`binary_runner::_adc_counts_from_voltage`) | PURE-LOGIC | 1 | Classifier is the netlist gate's stated target (see `netlist.h`); 14 = 10 `def test_` + 4 parametrized. |
 | `test_solver_error_handling.py` — `TestMalformedNetlistRaises`, `TestNonConvergentAnalysisRaises`, `TestHealthyDeckStillRuns`, `TestCompletedTransientIsNotAFailure` (+ deck fixtures ~130 LOC) | 270 | 10 | `bridge.ngspice_wrapper.NgSpiceEngine` | `ngspice_wrapper` FFI layer | BLOCKED-ON-FFI | 3 | R5: bad decks must error from the captured output stream, not rc. Unblocked only when the FFI layer exists. |
@@ -138,16 +138,23 @@ immediately**; the only work is porting the leaf module and transcribing its tes
   test names, greppable both ways per the C header's instruction) — and be labelled
   `RUST-ONLY ADDITION` for anything extra.
 
-**netlist — IN FLIGHT.** Python files the netlist gate is expected to cover
-(per `native\include\wowkispice\netlist.h`):
+**netlist — GREEN, 48 tests.** Gate: `crates\wowkispice-core\tests\test_netlist.rs`
+(Rust module `wowkispice-core::netlist`; green run: 48 tests, 0 failed, zero warnings —
+36 from `tests\test_ngspice_sanitiser.py` incl. the foreign-cwd subprocess test re-pointed
+at the venv Python, + 4 `TestCommandVectors` validate_cmd rows + legitimate-command row
+from `tests\test_security_vectors.py`, + 4 RUST-ONLY deck tests covering the domestic
+header/end + tstop phases that no engine-free Python test reaches directly).
 
-- `tests\test_ngspice_sanitiser.py` (whole file, 36 tests),
-- `tests\test_solver_error_handling.py::TestFailureReportClassifier` (6),
-- `tests\test_security_vectors.py` validate_cmd cases (`TestCommandVectors` + the
-  `.control`/include vectors in `TestNetlistVectors`).
-
-Known unportable-by-construction: Python's `validate_cmd()` TypeError branch
-(a C/Rust `const char *` cannot be "not a string") — document, don't fake.
+- Python files the netlist gate now covers:
+  - `tests\test_ngspice_sanitiser.py` (whole file, 36 tests),
+  - `tests\test_security_vectors.py` validate_cmd pure halves (`TestCommandVectors` +
+    the `.control`/include vectors in `TestNetlistVectors`; the `calls == []`
+    engine-FFI half stays in Python as decided).
+- Follow-up in this module's group (split out of the netlist gate, not faked):
+  `tests\test_solver_error_handling.py::TestFailureReportClassifier` (pure half).
+- Known unportable-by-construction: Python's `validate_cmd()` TypeError branch
+  (a C/Rust `const char *` cannot be "not a string") — documented in the Rust gate,
+  not faked.
 
 ---
 
@@ -155,13 +162,15 @@ Known unportable-by-construction: Python's `validate_cmd()` TypeError branch
 
 Pattern: `native\tools\parity_control_law.py` (+`.c`) — one fixed battery computed
 twice (Python vs port), **neither test suite was transcribed from it**, so it catches a
-port and its ported test being wrong together. `crates\parity\src\main.rs` will hold
-one Rust binary per module (`parity_control_law`, `parity_netlist`, ...).
+port and its ported test being wrong together. `crates\parity\src\bin\parity_<module>.rs`
+holds one Rust binary per module (`parity_control_law`, `parity_netlist`, ...); the
+Python driver lives in `crates\parity\python\parity_<module>.py` and feeds fixture
+manifests for file-touching batteries.
 
 | harness | status | complements (Python tests — do NOT duplicate) | complements (gate) |
 |---|---|---|---|
 | `parity_control_law` | **exists** (`native\tools\parity_control_law.py` + `.c`) | `test_control_law_unit.py`, `test_adc_conversion.py`, control-law classes of `test_cosim_control.py` | `native\tests\test_control_law.c`, future `crates\parity` bin |
-| `parity_netlist` | in flight (referenced by `netlist.h`; not yet on disk) | `test_ngspice_sanitiser.py`, `test_solver_error_handling.py::TestFailureReportClassifier`, `test_security_vectors.py` validate_cmd vectors | `native\src\netlist.c`, future Rust `netlist` gate |
+| `parity_netlist` | **exists** (`crates\parity\src\bin\parity_netlist.rs` + `crates\parity\python\parity_netlist.py`; green run: `PARITY OK — 112 values identical`) | `test_ngspice_sanitiser.py`, `test_solver_error_handling.py::TestFailureReportClassifier`, `test_security_vectors.py` validate_cmd vectors | `native\src\netlist.c`, future Rust `netlist` gate |
 | `parity_cad_engine` | future | `test_kicad_export.py` structure/pin rows, `test_schematic_editor.py::TestSymbolTable`/`TestBomFromGraph`, `test_cli.py::TestModelLoading` | `cad_engine` gate |
 | `parity_measurements` | future | `test_measurements.py` pure classes (27 tests) | `measurements` gate |
 | `parity_studio_engine` | future | `test_studio_suite.py` analytic rows, `test_sota_suite.py` analytic rows | `studio_engine` gate |
@@ -244,3 +253,7 @@ Rust port, it gets a parity battery that neither side saw.
 
 *Maintenance log: created 2026-11-03 by the test-map agent (analysis only, no code
 touched). Update the ALREADY GATED rows and the parity table as each module lands.*
+*2026-11-04: netlist group landed — sanitiser gate GREEN (48 tests, 48/48 + zero
+warnings; `netlist` module + `pycompat` repr fix), `parity_netlist` harness green
+(PARITY OK — 112 values). Sections 3 and 4 flipped; `firmware`/`toolchain_resolver`
+rows still in flight.*
