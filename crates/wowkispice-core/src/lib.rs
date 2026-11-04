@@ -22,6 +22,7 @@ pub mod esp32_regs;
 pub mod firmware;
 pub mod gpio_model;
 pub mod load_stepper;
+pub mod measurements;
 pub mod netlist;
 pub mod pycompat;
 pub mod toolchain_resolver;
