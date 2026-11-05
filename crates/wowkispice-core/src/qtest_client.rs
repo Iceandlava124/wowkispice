@@ -113,13 +113,10 @@ impl InnerSock {
 /// Line-oriented client for the qtest protocol.
 ///
 /// qtest is line based, but interleaves unsolicited async event lines that
-/// must be filtered out before the command response is parsed:
-///
-///     [I +0.000000] OPENED
-///     [R +0.000587] clock_step
-///     [S +0.001227] OK 100000000
-///
-/// Every reply is either ``OK ...``, ``FAIL ...`` or a bare hex blob.
+/// must be filtered out before the command response is parsed. Wire text
+/// looks like: "[I +0.000000] OPENED", "[R +0.000587] clock_step",
+/// "[S +0.001227] OK 100000000". Every reply is either ``OK ...``,
+/// ``FAIL ...`` or a bare hex blob.
 pub struct QtestClient {
     sock: InnerSock,
     buf: Vec<u8>,

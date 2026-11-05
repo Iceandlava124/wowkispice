@@ -79,7 +79,12 @@ rows (unblock = FFI); `4` = external rows; `—` = not a test / redesign.
 | `test_qemu_monitor_unit.py` | 517 | 18 | `bridge.qemu_monitor`, spawns `tests\fakes\fake_hmp_qemu.py` | `qemu_monitor` | EXTERNAL | 4 | Hermetic but subprocess-based: real `QemuMonitor.start()` launched against the Python HMP fake. Candidate to become wave-2 PURE-LOGIC if Rust grows an in-process HMP double. **[Q9]** |
 | `test_qemu_monitor_qemu.py` | 217 | 5 | `bridge.qemu_monitor`, real `qemu-system-xtensa` | `qemu_monitor` | EXTERNAL | 4 | `@pytest.mark.qemu`, skips with stated reason when binary/flash absent. Keep marker + skip contract. |
 | `test_loop_repeat.py` | 132 | 4 | spawns `tools\loop_repeat.py` + `tests\fakes\fake_hmp_qemu.py` | `tools::loop_repeat` | EXTERNAL | 4 | R7 harness end-to-end against the fake double (subprocess, JSON contract `R7_JSON:`). Does the R7 harness have a Rust future? **[Q10]** |
-| `test_selfcheck.py` | 81 | 3 | spawns `tools\selfcheck.py`, `run_selfcheck.bat` | `selfcheck` (listed future module) | EXTERNAL | 4 | Spawns Python + .bat today; Rust selfcheck CLI + exit-code contract must replace both. |
+| `test_selfcheck.py` | 81 | 3 | spawns `tools\selfcheck.py`, `run_selfcheck.bat` | `selfcheck` | PURE-LOGIC | 1 | Landed: `selfcheck.rs` ported (loader/package/linter checks). Python spawn replaced by Rust CLI + exit-code contract. |
+
+| `test_serial_console.py` | 0 | 0 | `bridge.serial_console` | `serial_console` | PURE-LOGIC | 1 | Landed: `serial_console.rs` ported (18 tests). UART line capture, bounded buffer, case-insensitive grep. `parity_serial_console` green (15 values). |
+| `test_qtest_client.py` | 0 | 0 | `bridge.qtest_client` | `qtest_client` | PURE-LOGIC | 1 | Landed: `qtest_client.rs` ported (TCP client, `Result`-based errors, `Drop` close). No tests yet; module compiles zero-warnings. |
+| `test_report_generator.py` | 0 | 0 | `bridge.report_generator` | `report_generator` | PURE-LOGIC | 1 | Landed: `report_generator.rs` ported (HTML lab report with `{token}` placeholders). No tests yet; module compiles zero-warnings. |
+
 | `test_setup_download.py` | 336 | 10 | extracts fn body from `setup.ps1`, child PowerShell, scripted network | installer script | EXTERNAL | 4 | Needs PowerShell + network-shaped fakes. Does the installer survive the rewrite? **[Q11]** |
 | `test_tool_fixes.py` | 186 | 7 | spawns `tools\doctor.py`, `tools\check_traceability.py`; `bridge.toolchain_resolver`, `resolve_ngspice_library` | `tools::doctor`, `tools::check_traceability`, `toolchain_resolver` | EXTERNAL | 4 | `toolchain_resolver.rs` landed (env-var qemu/ngspice discovery + status shape + write_env_local); doctor/check_traceability subprocess suites remain Python-side pending their Rust futures. Do they? **[Q12]** |
 | `test_schematic_editor.py` | 995 | 40 | `ui.schematic_editor/scene/symbols`, `bridge.cad_engine`, `bridge.analysis_runner` | Qt5 GUI (redesign) | EXTERNAL | 4 (redesign) | Headless PyQt5. `TestSymbolTable` (3) and `TestBomFromGraph` (1) are logic-vs-UI consistency checks; `TestAnalysisPanels` alone is 678 LOC / 21 tests; `TestClosedLoopEditorPath` needs FFI. Whole file belongs to the Qt5 GUI redesign, not a transcription. **[Q13]** |
@@ -176,6 +181,11 @@ manifests for file-touching batteries.
 | `parity_studio_engine` | future | `test_studio_suite.py` analytic rows, `test_sota_suite.py` analytic rows | `studio_engine` gate |
 | `parity_firmware` | exists (`crates/parity/src/bin/parity_firmware.rs` + `crates/parity/python/parity_firmware.py`; `PARITY OK — 27 values identical`) | `test_firmware_gpio.py` HEX/ELF/profile/logic classes | `firmware` gate |
 | `parity_gpio_model` | future | `test_firmware_gpio.py` GPIO classes (`TestGpioProfile`, `TestLogicAnalysis`) | `gpio_model` gate |
+| `parity_serial_console` | exists (`crates/parity/src/bin/parity_serial_console.rs` + `crates/parity/python/parity_serial_console.py`; `PARITY OK — 15 values identical`) | `test_serial_console.py` (18 tests) | `serial_console` gate |
+| `parity_qtest_client` | future | `test_qtest_client.py` (planned) | `qtest_client` gate |
+| `parity_selfcheck` | future | `test_selfcheck.py` (3 tests) | `selfcheck` gate |
+| `parity_report_generator` | future | `test_report_generator.py` (planned) | `report_generator` gate |
+| `parity_gpio_model` | future | `test_firmware_gpio.py` GPIO classes (`TestGpioProfile`, `TestLogicAnalysis`) | `gpio_model` gate |
 | `parity_qemu_monitor` | future | `test_qemu_monitor_unit.py` protocol facts (if the file becomes pure) | `qemu_monitor` gate |
 | `parity_toolchain_resolver` | future | `test_tool_fixes.py::test_find_ngspice_honours_the_same_env_var...` | `toolchain_resolver` gate (module already ported) |
 | `parity_mock_controller` | future | `test_closed_loop_buck.py::TestThresholdsMatchFirmware` | `mock_controller` gate |
@@ -264,3 +274,4 @@ harness green (PARITY OK — 27 values).
 Full core gate green: 196 tests, `*RUSTFLAGS="-D warnings"*`, zero warnings.
 Sections 3, 4, maintenance log flipped; `gpio_model` row now landed.*
 *2026-11-05: gpio_model group landed — `gpio_model.rs` ported with unit tests. 196 tests total, `*RUSTFLAGS="-D warnings"*`, zero warnings.*
+*2026-11-05: serial_console group landed — `serial_console.rs` ported (18 tests), `parity_serial_console` harness green (PARITY OK — 15 values). qtest_client, selfcheck, report_generator modules landed (zero warnings each). Full core gate green: 204 tests, `*RUSTFLAGS="-D warnings"*`, zero warnings. `cad_engine` subagent port produced non-compiling Rust (26 errors — Python syntax in Rust source); module removed, will be re-delegated properly.
