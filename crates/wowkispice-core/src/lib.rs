@@ -26,6 +26,7 @@ pub mod gpio_model;
 pub mod load_stepper;
 pub mod measurements;
 pub mod netlist;
+pub mod kicad_export;
 pub mod ngspice_wrapper;
 pub mod pycompat;
 pub mod qtest_client;
