@@ -896,14 +896,14 @@ pub fn parse_pin_profile(
             match v {
                 JsonVal::Str(s) => {
                     if k == "mode" {
-                        spec.mode = Some(s);
+                        spec.mode = s;
                     }
                 }
                 JsonVal::Num(n) => {
                     if k == "level" {
-                        spec.level = Some(n);
+                        spec.level = Some(n as i32);
                     } else if k == "vhigh" {
-                        spec.vhigh = Some(n);
+                        spec.vhigh = n;
                     } else if k == "freq_hz" {
                         spec.freq_hz = Some(n);
                     } else if k == "duty" {

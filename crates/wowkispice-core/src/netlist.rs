@@ -913,7 +913,7 @@ fn lexical_normalize(p: &str) -> String {
 
 /// Python's str.splitlines(): $\n \r\n \r \x0b \x0c \x1c \x1d \x1e \x85
 /// U+2028 U+2029 boundaries (the ones reachable in practice).
-fn py_splitlines(content: &str) -> Vec<String> {
+pub fn py_splitlines(content: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
     let mut chars = content.chars().peekable();

@@ -230,7 +230,7 @@ fn enc_pin(text: &str) -> String {
     match parse_pin_profile(text) {
         Ok(map) => {
             let spec: &ProfileSpec = map.get("GPIO18").expect("battery pin GPIO18");
-            let mode = spec.mode.clone().unwrap_or_default();
+            let mode = spec.mode.clone();
             let freq = spec.freq_hz.unwrap_or(0.0);
             let duty = spec.duty.unwrap_or(0.0);
             format!("OK:GPIO18:{}:{}:{}", mode, py_repr(freq), py_repr(duty))
