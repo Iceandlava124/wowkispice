@@ -130,9 +130,9 @@ fn test_schematic_component_to_dict_from_dict_round_trip() {
     assert!((restored.y - orig.y).abs() < 1e-9);
     assert_eq!(restored.footprint, orig.footprint);
     assert_eq!(restored.mpn, orig.mpn);
-    assert_eq!(restored.manufacturer, orig.manufacturer);
-    // to_dict() omits description/values (matching Python), so from_dict
-    // returns their defaults after round-trip.
+    // Python's from_dict() does not read manufacturer, so it defaults to
+    // "(unknown)" after round-trip. Match that for parity.
+    assert_eq!(restored.manufacturer, "(unknown)");
     assert_eq!(restored.description, "(no description)");
     assert_eq!(restored.values, "(no values)");
     assert!((restored.cost_usd - orig.cost_usd).abs() < 1e-9);
