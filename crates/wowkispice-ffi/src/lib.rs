@@ -128,7 +128,7 @@ mod dll_os {
     }
 }
 
-use dll_os::{dll_load, dll_unload, DllHandle};
+use dll_os::{dll_load, DllHandle};
 
 // ---------------------------------------------------------------------------
 // C types from sharedspice.h
@@ -215,12 +215,14 @@ pub type BGThreadRunning_t =
     extern "C" fn(c_uchar, c_int, *mut c_void) -> c_int;
 
 pub type GetVSRCData_t =
-    extern "C" fn(*mut c_double, c_double, *mut c_char, c_int, *mut c_void) -> c_int;
-pub type GetISRCData_t =
-    extern "C" fn(*mut c_double, c_double, *mut c_char, c_int, *mut c_void) -> c_int;
-pub type GetSyncData_t =
-    extern "C" fn(c_double, *mut c_double, c_double, c_int, c_int, c_int, *mut c_void)
+    extern "C" fn(*mut c_double, c_double, *mut c_char, c_int, *mut c_void)
     -> c_int;
+pub type GetISRCData_t =
+    extern "C" fn(*mut c_double, c_double, *mut c_char, c_int, *mut c_void)
+    -> c_int;
+pub type GetSyncData_t =
+    extern "C" fn(c_double, *mut c_double, c_double, c_int, c_int, c_int,
+                  *mut c_void) -> c_int;
 
 // ---------------------------------------------------------------------------
 // Resolved ngspice function pointers (resolved at runtime via dll_sym)
@@ -318,7 +320,9 @@ impl From<FfiError> for NgSpiceError {
             FfiError::DllSymbol(_) => NgSpiceError::DllNotLoaded,
             FfiError::Nul(e) => NgSpiceError::NulError(e),
             FfiError::NullPointer(s) => NgSpiceError::AnalysisFailed(s),
-            FfiError::SymbolNotResolved(s) => NgSpiceError::AnalysisFailed(s),
+            FfiError::SymbolNotResolved(s) => {
+                NgSpiceError::AnalysisFailed(s)
+            }
         }
     }
 }
@@ -333,8 +337,8 @@ macro_rules! resolve_fn {
     ($handle:expr, $name:literal, $t:ty) => {{
         let sym = unsafe { dll_os::dll_sym($handle, $name) }
             .map_err(|e| {
-            FfiError::DllSymbol(concat!($name, ": ").to_owned() + &e.to_string())
-        })?;
+                FfiError::DllSymbol(concat!($name, ": ").to_owned() + &e.to_string())
+            })?;
         unsafe { std::mem::transmute::<*mut c_void, $t>(sym) }
     }};
 }
@@ -355,7 +359,8 @@ fn box_userdata(
     data: Option<Box<dyn Fn(f64, Vec<(String, f64)>) + Send + Sync>>,
     progress: Option<Box<dyn Fn(f64, usize) + Send + Sync>>,
 ) -> *mut c_void {
-    Box::into_raw(Box::new(CallbackUserdata { vsrc, data, progress })) as *mut c_void
+    Box::into_raw(Box::new(CallbackUserdata { vsrc, data, progress }))
+        as *mut c_void
 }
 
 fn unbox_userdata<'a>(ptr: *mut c_void) -> Option<&'a CallbackUserdata> {
@@ -517,6 +522,7 @@ pub struct NgSpiceFfi {
     unlock_realloc: Option<NgSpiceUnlockReallocFn>,
     reset: Option<NgSpiceResetFn>,
     userdata: *mut c_void,
+    /// Whether ngSpice_Init has been called successfully.
     initialized: bool,
 }
 
@@ -548,7 +554,8 @@ impl NgSpiceFfi {
                 resolve_fn!(handle, "ngSpice_Command", NgSpiceCommandFn);
             let get_vec_info =
                 resolve_fn!(handle, "ngGet_Vec_Info", NgGetVecInfoFn);
-            let circ = resolve_fn!(handle, "ngSpice_Circ", NgSpiceCircFn);
+            let circ =
+                resolve_fn!(handle, "ngSpice_Circ", NgSpiceCircFn);
             let cur_plot =
                 resolve_fn!(handle, "ngSpice_CurPlot", NgSpiceCurPlotFn);
             let all_plots =
@@ -562,14 +569,13 @@ impl NgSpiceFfi {
             let nospinit =
                 resolve_fn!(handle, "ngSpice_nospinit", NgSpiceNoSPIInitFn);
             let nospiceinit =
-                resolve_fn!(handle, "ngSpice_nospiceinit",
-                            NgSpiceNoSpiceInitFn);
+                resolve_fn!(handle, "ngSpice_nospiceinit", NgSpiceNoSpiceInitFn);
             let lock_realloc =
                 resolve_fn!(handle, "ngSpice_LockRealloc",
-                            NgSpiceLockReallocFn);
+                    NgSpiceLockReallocFn);
             let unlock_realloc =
                 resolve_fn!(handle, "ngSpice_UnlockRealloc",
-                            NgSpiceUnlockReallocFn);
+                    NgSpiceUnlockReallocFn);
             let reset_fn =
                 resolve_fn!(handle, "ngSpice_Reset", NgSpiceResetFn);
 
@@ -613,27 +619,27 @@ impl NgSpiceFfi {
         };
 
         let ud = box_userdata(vsrc, data, progress);
-            self.userdata = ud;
+        self.userdata = ud;
 
-            let rc = init(
-                sendchar_trampoline,
-                sendstat_trampoline,
-                controlled_exit_trampoline,
-                senddata_trampoline,
-                sendinitdata_trampoline,
-                bgthreadrunning_trampoline,
-                ud,
-            );
-            if rc != 0 {
-                // ngSpice_Init failed - clean up userdata
-                take_userdata(ud);
-                self.userdata = ptr::null_mut();
-                return Err(NgSpiceError::AnalysisFailed(format!(
-                    "ngSpice_Init returned {rc}"
-                )));
-            }
-            self.initialized = true;
-            Ok(())
+        let rc = init(
+            sendchar_trampoline,
+            sendstat_trampoline,
+            controlled_exit_trampoline,
+            senddata_trampoline,
+            sendinitdata_trampoline,
+            bgthreadrunning_trampoline,
+            ud,
+        );
+        if rc != 0 {
+            // ngSpice_Init failed - clean up userdata
+            take_userdata(ud);
+            self.userdata = ptr::null_mut();
+            return Err(NgSpiceError::AnalysisFailed(format!(
+                "ngSpice_Init returned {rc}"
+            )));
+        }
+        self.initialized = true;
+        Ok(())
     }
 
     /// Execute an ngspice command string.
@@ -647,7 +653,7 @@ impl NgSpiceFfi {
             ));
         };
         let c_cmd = CString::new(command).map_err(NgSpiceError::NulError)?;
-        let rc = command_fn(c_cmd.as_ptr() as *mut c_char);
+        let rc = unsafe { command_fn(c_cmd.as_ptr() as *mut c_char) };
         if rc != 0 {
             return Err(NgSpiceError::AnalysisFailed(format!(
                 "ngSpice_Command returned {rc}"
@@ -660,7 +666,7 @@ impl NgSpiceFfi {
     ///
     /// The deck is passed as a null-terminated array of C strings to
     /// `ngSpice_Circ`.
-    pub fn load_circuit(&mut self, lines: &[String]) -> NgSpiceResult<()> {
+    pub fn load_circuit(&mut self, lines: &[&str]) -> NgSpiceResult<()> {
         if !self.initialized {
             return Err(NgSpiceError::DllNotLoaded);
         }
@@ -671,12 +677,10 @@ impl NgSpiceFfi {
         };
 
         // Build the null-terminated array of C strings.
-        let mut c_strings: Vec<CString> = Vec::new();
-        for line in lines {
-            c_strings.push(CString::new(line.as_str()).map_err(
-                NgSpiceError::NulError,
-            )?);
-        }
+        let mut c_strings: Vec<CString> = lines
+            .iter()
+            .map(|line| CString::new(*line).map_err(NgSpiceError::NulError))
+            .collect::<Result<Vec<CString>, _>>()?;
         c_strings.push(CString::new("").unwrap()); // NULL terminator
 
         let mut ptrs: Vec<*mut c_char> =
@@ -703,12 +707,12 @@ impl NgSpiceFfi {
             ));
         };
         let ptr = cur_plot();
-            if ptr.is_null() {
-                return Err(NgSpiceError::AnalysisFailed(
-                    "ngSpice_CurPlot returned null".to_string(),
-                ));
-            }
-            Ok(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().to_string())
+        if ptr.is_null() {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngSpice_CurPlot returned null".to_string(),
+            ));
+        }
+        Ok(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().to_string())
     }
 
     /// Get all plot names.
@@ -722,24 +726,24 @@ impl NgSpiceFfi {
             ));
         };
         let ptr = all_plots();
-            if ptr.is_null() {
-                return Err(NgSpiceError::AnalysisFailed(
-                    "ngSpice_AllPlots returned null".to_string(),
-                ));
+        if ptr.is_null() {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngSpice_AllPlots returned null".to_string(),
+            ));
+        }
+        let mut plots = Vec::new();
+        let mut i = 0;
+        loop {
+            let name_ptr = unsafe { *ptr.add(i) };
+            if name_ptr.is_null() {
+                break;
             }
-            let mut plots = Vec::new();
-            let mut i = 0;
-            loop {
-                let name_ptr = unsafe { *ptr.add(i) };
-                if name_ptr.is_null() {
-                    break;
-                }
-                plots.push(unsafe {
-                    CStr::from_ptr(name_ptr).to_string_lossy().to_string()
-                });
-                i += 1;
-            }
-            Ok(plots)
+            plots.push(unsafe {
+                CStr::from_ptr(name_ptr).to_string_lossy().to_string()
+            });
+            i += 1;
+        }
+        Ok(plots)
     }
 
     /// Reset ngspice.
@@ -820,6 +824,33 @@ impl NgSpiceFfi {
         self.cmd(&format!("alter {source_name} = {voltage}"))?;
         Ok(())
     }
+
+    /// Get the last sample of a real vector.
+    ///
+    /// Efficient for callbacks - returns just the last value instead of
+    /// copying the entire vector.
+    pub fn get_last_sample(&self, vec_name: &str) -> NgSpiceResult<f64> {
+        if !self.initialized {
+            return Err(NgSpiceError::DllNotLoaded);
+        }
+        let Some(get_vec_info) = self.get_vec_info else {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngGet_Vec_Info".to_string(),
+            ));
+        };
+        let c_name = CString::new(vec_name).map_err(NgSpiceError::NulError)?;
+        let info = unsafe { get_vec_info(c_name.as_ptr() as *mut c_char) };
+        if info.is_null() {
+            return Err(NgSpiceError::AnalysisFailed(format!(
+                "vector {vec_name} not found"
+            )));
+        }
+        let info = unsafe { &*info };
+        if info.v_length <= 0 || info.v_realdata.is_null() {
+            return Ok(0.0);
+        }
+        Ok(unsafe { *info.v_realdata.add(info.v_length as usize - 1) })
+    }
 }
 
 impl Drop for NgSpiceFfi {
@@ -827,11 +858,18 @@ impl Drop for NgSpiceFfi {
         if !self.userdata.is_null() {
             take_userdata(self.userdata);
         }
-        unsafe {
-            dll_unload(self.dll);
-        }
+        // Don't unload the DLL - ngspice may have allocated memory that
+        // the OS will clean up on process exit. Freeing the DLL while
+        // ngspice state is still live causes heap corruption.
     }
 }
+
+// ---------------------------------------------------------------------------
+// cosim_runner module
+// ---------------------------------------------------------------------------
+
+pub mod cosim_runner;
+pub use cosim_runner::*;
 
 // ---------------------------------------------------------------------------
 #[cfg(test)]
@@ -846,7 +884,6 @@ mod tests {
     #[test]
     fn test_ffi_loads_dll_and_resolves_symbols() {
         // This test verifies the ngspice DLL loads and all symbols resolve.
-        // It will fail if the DLL is missing or a symbol is not found.
         match NgSpiceFfi::new() {
             Ok(engine) => {
                 // Verify all function pointers are resolved
@@ -885,16 +922,16 @@ mod tests {
             .expect("ngSpice_Init should succeed");
 
         // Load a simple RC circuit: 1V step into 1k resistor + 1uF cap
-        let deck = vec![
-            "* RC step response test".to_string(),
-            "V1 in 0 PWL(0 0 1n 1)".to_string(),
-            "R1 in out 1k".to_string(),
-            "C1 out 0 1u IC=0".to_string(),
-            ".tran 1u 10m uic".to_string(),
-            ".end".to_string(),
+        let deck: &[&str] = &[
+            "* RC step response test",
+            "V1 in 0 PWL(0 0 1n 1)",
+            "R1 in out 1k",
+            "C1 out 0 1u IC=0",
+            ".tran 1u 10m uic",
+            ".end",
         ];
         engine
-            .load_circuit(&deck)
+            .load_circuit(deck)
             .expect("ngSpice_Circ should succeed");
 
         // Run the simulation
