@@ -755,6 +755,71 @@ impl NgSpiceFfi {
         let rc = reset_fn();
         Ok(rc)
     }
+
+    /// Get a real vector as a list of f64 values.
+    pub fn get_vector_array(&self, vec_name: &str) -> NgSpiceResult<Vec<f64>> {
+        if !self.initialized {
+            return Err(NgSpiceError::DllNotLoaded);
+        }
+        let Some(get_vec_info) = self.get_vec_info else {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngGet_Vec_Info".to_string(),
+            ));
+        };
+        let c_name = CString::new(vec_name).map_err(NgSpiceError::NulError)?;
+        let info = unsafe { get_vec_info(c_name.as_ptr() as *mut c_char) };
+        if info.is_null() {
+            return Err(NgSpiceError::AnalysisFailed(format!(
+                "vector {vec_name} not found"
+            )));
+        }
+        let info = unsafe { &*info };
+        let mut out = Vec::with_capacity(info.v_length as usize);
+        for i in 0..info.v_length as usize {
+            out.push(unsafe { *info.v_realdata.add(i) });
+        }
+        Ok(out)
+    }
+
+    /// Get a vector as (real, imaginary) parts.
+    pub fn get_vector_complex(
+        &self,
+        vec_name: &str,
+    ) -> NgSpiceResult<(Vec<f64>, Vec<f64>)> {
+        if !self.initialized {
+            return Err(NgSpiceError::DllNotLoaded);
+        }
+        let Some(get_vec_info) = self.get_vec_info else {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngGet_Vec_Info".to_string(),
+            ));
+        };
+        let c_name = CString::new(vec_name).map_err(NgSpiceError::NulError)?;
+        let info = unsafe { get_vec_info(c_name.as_ptr() as *mut c_char) };
+        if info.is_null() {
+            return Err(NgSpiceError::AnalysisFailed(format!(
+                "vector {vec_name} not found"
+            )));
+        }
+        let info = unsafe { &*info };
+        let mut real = Vec::with_capacity(info.v_length as usize);
+        let mut imag = Vec::with_capacity(info.v_length as usize);
+        for i in 0..info.v_length as usize {
+            real.push(unsafe { *info.v_realdata.add(i) });
+            imag.push(unsafe { info.v_compdata.add(i).read().cx_imag });
+        }
+        Ok((real, imag))
+    }
+
+    /// Alter a source voltage via the `alter` command.
+    pub fn alter_source_voltage(
+        &mut self,
+        source_name: &str,
+        voltage: f64,
+    ) -> NgSpiceResult<()> {
+        self.cmd(&format!("alter {source_name} = {voltage}"))?;
+        Ok(())
+    }
 }
 
 impl Drop for NgSpiceFfi {
@@ -780,15 +845,8 @@ mod tests {
 
     #[test]
     fn test_ffi_loads_dll_and_resolves_symbols() {
-        // Debug: check what resolve_ngspice_library returns
-        let (path, tried) =
-            wowkispice_core::ngspice_wrapper::resolve_ngspice_library(None);
-        eprintln!("DEBUG: resolve_ngspice_library returned: {:?}", path);
-        eprintln!("DEBUG: tried paths: {:?}", tried);
-        if let Some(p) = &path {
-            eprintln!("DEBUG: path exists: {}", std::path::Path::new(p).exists());
-        }
-
+        // This test verifies the ngspice DLL loads and all symbols resolve.
+        // It will fail if the DLL is missing or a symbol is not found.
         match NgSpiceFfi::new() {
             Ok(engine) => {
                 // Verify all function pointers are resolved
@@ -810,5 +868,60 @@ mod tests {
             }
             Err(e) => panic!("ngspice DLL load failed: {e}"),
         }
+    }
+
+    #[test]
+    fn test_ffi_end_to_end_run_rc_circuit() {
+        // End-to-end smoke test: load a simple RC circuit, run it,
+        // and read back the output voltage.
+        let mut engine = match NgSpiceFfi::new() {
+            Ok(e) => e,
+            Err(e) => panic!("ngspice DLL load failed: {e}"),
+        };
+
+        // ngSpice_Init requires callbacks; pass no-op closures.
+        engine
+            .init(None, None, None)
+            .expect("ngSpice_Init should succeed");
+
+        // Load a simple RC circuit: 1V step into 1k resistor + 1uF cap
+        let deck = vec![
+            "* RC step response test".to_string(),
+            "V1 in 0 PWL(0 0 1n 1)".to_string(),
+            "R1 in out 1k".to_string(),
+            "C1 out 0 1u IC=0".to_string(),
+            ".tran 1u 10m uic".to_string(),
+            ".end".to_string(),
+        ];
+        engine
+            .load_circuit(&deck)
+            .expect("ngSpice_Circ should succeed");
+
+        // Run the simulation
+        engine.cmd("run").expect("ngSpice_Command 'run' should succeed");
+
+        // Read back the time and output vectors
+        let time = engine
+            .get_vector_array("time")
+            .expect("get_vector_array('time') should succeed");
+        let vout = engine
+            .get_vector_array("v(out)")
+            .expect("get_vector_array('v(out)') should succeed");
+
+        // Verify we got data
+        assert!(!time.is_empty(), "time vector should not be empty");
+        assert!(!vout.is_empty(), "v(out) vector should not be empty");
+        assert_eq!(
+            time.len(),
+            vout.len(),
+            "time and v(out) should have same length"
+        );
+
+        // Final output should be close to 1V (step response settles)
+        let final_vout = *vout.last().unwrap();
+        assert!(
+            final_vout > 0.9 && final_vout <= 1.0,
+            "final v(out) should be ~1.0V, got {final_vout}"
+        );
     }
 }
