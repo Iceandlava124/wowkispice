@@ -987,7 +987,7 @@ impl SchematicNetlistEngine {
             .collect()
     }
 
-    fn _resolve_nets(
+    pub fn _resolve_nets(
         &self,
     ) -> (BTreeMap<Node, String>, Vec<String>) {
         // Union-find over (comp_id, pin) endpoints. Wires merge endpoints;
