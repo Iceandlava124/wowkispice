@@ -280,7 +280,10 @@ pub fn spice_seconds(token: &str) -> Option<f64> {
 
 /// The Windows ngspice.dll that ships alongside the repo, if present.
 fn bundled_dll_path() -> String {
-    let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("wowkispice-core must live two levels below the repo root");
     base_dir.join("tools").join("ngspice_dll").join("Spice64_dll").join("dll-vs").join("ngspice.dll").to_string_lossy().to_string()
 }
 

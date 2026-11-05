@@ -3,16 +3,17 @@
  *
  * Dependency-free (apart from wowkispice-core) bindings to libngspice /
  * ngspice.dll, hand-written from the checked-in sharedspice.h.  DLL loading
- * is done with raw OS FFI (LoadLibrary/GetProcAddress on Windows,
- * dlopen/dlsym on Linux) so no `libloading` or `libc` crate is needed.
+ * and symbol resolution are done at runtime with raw OS FFI
+ * (LoadLibrary/GetProcAddress on Windows, dlopen/dlsym on Linux) so no
+ * `libloading` or `libc` crate is needed, and no ngspice.lib is required at
+ * link time.
  *
- * This is the skeleton FFI layer: DLL loading and symbol resolution work,
- * callback trampolines are declared with the correct signatures, and the
- * high-level NgSpiceFfi struct owns the DLL handle.  Full per-callback
- * wiring is added incrementally as each solver feature is brought up.
+ * All ngspice function symbols are resolved lazily on first use.  Callback
+ * trampolines bridge ngspice's C function-pointer callbacks to Rust closures
+ * stored in the userdata pointer.
  */
 
-#![allow(non_camel_case_types, dead_code)]
+#![allow(non_camel_case_types, dead_code, unused_unsafe)]
 
 use std::ffi::{c_void, CStr, CString};
 use std::fmt;
@@ -40,12 +41,20 @@ mod dll_os {
             lpProcName: *const c_char,
         ) -> *mut c_void;
         pub fn FreeLibrary(hModule: *mut c_void) -> c_int;
+        pub fn SetDllDirectoryA(lpPathName: *const c_char) -> c_int;
     }
 
     pub(crate) type DllHandle = *mut c_void;
 
     pub(crate) unsafe fn dll_load(path: &str) -> Result<DllHandle, String> {
         let c_path = CString::new(path).map_err(|e| e.to_string())?;
+        // Add the DLL's directory to the search path so its dependencies
+        // (libomp140.dll, samplerate.dll, sndfile.dll, ...) are found.
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            let c_parent = CString::new(parent.to_string_lossy().to_string())
+                .unwrap_or_default();
+            SetDllDirectoryA(c_parent.as_ptr());
+        }
         let handle = LoadLibraryExA(c_path.as_ptr(), ptr::null_mut(), 0);
         if handle.is_null() {
             Err(format!("LoadLibraryExA failed for {}", path))
@@ -214,42 +223,57 @@ pub type GetSyncData_t =
     -> c_int;
 
 // ---------------------------------------------------------------------------
-// ngspice function declarations
+// Resolved ngspice function pointers (resolved at runtime via dll_sym)
 // ---------------------------------------------------------------------------
 
-extern "C" {
-    pub fn ngSpice_Init(
-        printfcn: SendChar_t,
-        statfcn: SendStat_t,
-        ngexit: ControlledExit_t,
-        sdata: SendData_t,
-        sinitdata: SendInitData_t,
-        bgtrun: BGThreadRunning_t,
-        userData: *mut c_void,
-    ) -> c_int;
+/// Function pointer type for ngSpice_Init.
+type NgSpiceInitFn =
+    extern "C" fn(SendChar_t, SendStat_t, ControlledExit_t, SendData_t,
+                  SendInitData_t, BGThreadRunning_t, *mut c_void) -> c_int;
 
-    pub fn ngSpice_Init_Sync(
-        vsrcdat: GetVSRCData_t,
-        isrcdat: GetISRCData_t,
-        syncdat: GetSyncData_t,
-        ident: *mut c_int,
-        userData: *mut c_void,
-    ) -> c_int;
+/// Function pointer type for ngSpice_Init_Sync.
+type NgSpiceInitSyncFn =
+    extern "C" fn(GetVSRCData_t, GetISRCData_t, GetSyncData_t, *mut c_int,
+                  *mut c_void) -> c_int;
 
-    pub fn ngSpice_Command(command: *mut c_char) -> c_int;
-    pub fn ngGet_Vec_Info(vecname: *mut c_char) -> *mut NgVectorInfo;
-    pub fn ngSpice_Circ(circarray: *mut *mut c_char) -> c_int;
-    pub fn ngSpice_CurPlot() -> *mut c_char;
-    pub fn ngSpice_AllPlots() -> *mut *mut c_char;
-    pub fn ngSpice_AllVecs(plotname: *mut c_char) -> *mut *mut c_char;
-    pub fn ngSpice_running() -> c_uchar;
-    pub fn ngSpice_SetBkpt(time: c_double) -> c_uchar;
-    pub fn ngSpice_nospinit() -> c_int;
-    pub fn ngSpice_nospiceinit() -> c_int;
-    pub fn ngSpice_LockRealloc() -> c_int;
-    pub fn ngSpice_UnlockRealloc() -> c_int;
-    pub fn ngSpice_Reset() -> c_int;
-}
+/// Function pointer type for ngSpice_Command.
+type NgSpiceCommandFn = extern "C" fn(*mut c_char) -> c_int;
+
+/// Function pointer type for ngGet_Vec_Info.
+type NgGetVecInfoFn = extern "C" fn(*mut c_char) -> *mut NgVectorInfo;
+
+/// Function pointer type for ngSpice_Circ.
+type NgSpiceCircFn = extern "C" fn(*mut *mut c_char) -> c_int;
+
+/// Function pointer type for ngSpice_CurPlot.
+type NgSpiceCurPlotFn = extern "C" fn() -> *mut c_char;
+
+/// Function pointer type for ngSpice_AllPlots.
+type NgSpiceAllPlotsFn = extern "C" fn() -> *mut *mut c_char;
+
+/// Function pointer type for ngSpice_AllVecs.
+type NgSpiceAllVecsFn = extern "C" fn(*mut c_char) -> *mut *mut c_char;
+
+/// Function pointer type for ngSpice_running.
+type NgSpiceRunningFn = extern "C" fn() -> c_uchar;
+
+/// Function pointer type for ngSpice_SetBkpt.
+type NgSpiceSetBkptFn = extern "C" fn(c_double) -> c_uchar;
+
+/// Function pointer type for ngSpice_nospinit.
+type NgSpiceNoSPIInitFn = extern "C" fn() -> c_int;
+
+/// Function pointer type for ngSpice_nospiceinit.
+type NgSpiceNoSpiceInitFn = extern "C" fn() -> c_int;
+
+/// Function pointer type for ngSpice_LockRealloc.
+type NgSpiceLockReallocFn = extern "C" fn() -> c_int;
+
+/// Function pointer type for ngSpice_UnlockRealloc.
+type NgSpiceUnlockReallocFn = extern "C" fn() -> c_int;
+
+/// Function pointer type for ngSpice_Reset.
+type NgSpiceResetFn = extern "C" fn() -> c_int;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -262,6 +286,7 @@ pub enum FfiError {
     DllSymbol(String),
     Nul(std::ffi::NulError),
     NullPointer(String),
+    SymbolNotResolved(String),
 }
 
 impl fmt::Display for FfiError {
@@ -271,6 +296,9 @@ impl fmt::Display for FfiError {
             FfiError::DllSymbol(s) => write!(f, "DLL symbol missing: {s}"),
             FfiError::Nul(e) => write!(f, "NUL error: {e}"),
             FfiError::NullPointer(s) => write!(f, "null pointer: {s}"),
+            FfiError::SymbolNotResolved(s) => {
+                write!(f, "symbol not resolved: {s}")
+            }
         }
     }
 }
@@ -290,11 +318,26 @@ impl From<FfiError> for NgSpiceError {
             FfiError::DllSymbol(_) => NgSpiceError::DllNotLoaded,
             FfiError::Nul(e) => NgSpiceError::NulError(e),
             FfiError::NullPointer(s) => NgSpiceError::AnalysisFailed(s),
+            FfiError::SymbolNotResolved(s) => NgSpiceError::AnalysisFailed(s),
         }
     }
 }
 
 pub type FfiResult<T> = Result<T, FfiError>;
+
+// ---------------------------------------------------------------------------
+// Helper: resolve a symbol and transmute to the desired function type
+// ---------------------------------------------------------------------------
+
+macro_rules! resolve_fn {
+    ($handle:expr, $name:literal, $t:ty) => {{
+        let sym = unsafe { dll_os::dll_sym($handle, $name) }
+            .map_err(|e| {
+            FfiError::DllSymbol(concat!($name, ": ").to_owned() + &e.to_string())
+        })?;
+        unsafe { std::mem::transmute::<*mut c_void, $t>(sym) }
+    }};
+}
 
 // ---------------------------------------------------------------------------
 // Callback userdata bridge
@@ -332,7 +375,7 @@ fn take_userdata(ptr: *mut c_void) -> Option<Box<CallbackUserdata>> {
 }
 
 // ---------------------------------------------------------------------------
-// Callback trampolines (signatures match sharedspice.h; bodies are stubs)
+// Callback trampolines
 // ---------------------------------------------------------------------------
 
 extern "C" fn sendchar_trampoline(
@@ -362,11 +405,29 @@ extern "C" fn controlled_exit_trampoline(
 }
 
 extern "C" fn senddata_trampoline(
-    _values: *mut NgVecValuesAll,
+    values: *mut NgVecValuesAll,
     _count: c_int,
     _id: c_int,
-    _userdata: *mut c_void,
+    userdata: *mut c_void,
 ) -> c_int {
+    let ud = match unbox_userdata(userdata) {
+        Some(u) => u,
+        None => return 0,
+    };
+    let Some(ref data_cb) = ud.data else { return 0 };
+
+    let values_all = unsafe { &*values };
+    let mut map = Vec::with_capacity(values_all.veccount as usize);
+    for i in 0..values_all.veccount as usize {
+        let vec_ptr = unsafe { *values_all.vecsa.add(i) };
+        if vec_ptr.is_null() {
+            continue;
+        }
+        let vec = unsafe { &*vec_ptr };
+        let name = unsafe { CStr::from_ptr(vec.name) }.to_string_lossy().to_string();
+        map.push((name, vec.creal));
+    }
+    data_cb(0.0, map);
     0
 }
 
@@ -387,13 +448,24 @@ extern "C" fn bgthreadrunning_trampoline(
 }
 
 extern "C" fn getvsrcdata_trampoline(
-    _ret: *mut c_double,
-    _time: c_double,
-    _name: *mut c_char,
+    ret: *mut c_double,
+    time: c_double,
+    name: *mut c_char,
     _id: c_int,
-    _userdata: *mut c_void,
+    userdata: *mut c_void,
 ) -> c_int {
-    -1
+    let ud = match unbox_userdata(userdata) {
+        Some(u) => u,
+        None => return -1,
+    };
+    let Some(ref vsrc_cb) = ud.vsrc else { return -1 };
+
+    let node = unsafe { CStr::from_ptr(name) }.to_string_lossy().to_string();
+    let value = vsrc_cb(time, &node);
+    unsafe {
+        *ret = value;
+    }
+    0
 }
 
 extern "C" fn getisrcdata_trampoline(
@@ -424,18 +496,32 @@ extern "C" fn getsyncdata_trampoline(
 
 /// High-level interface to libngspice / ngspice.dll backed by the real DLL.
 ///
-/// Unlike `wowkispice-core::ngspice_wrapper::NgSpiceEngine` (which is a
-/// stub that returns `DllNotLoaded`), this struct actually loads the DLL
-/// and wires up the FFI callbacks.
+/// All symbols are resolved at runtime via `dll_sym`; no link-time
+/// dependency on ngspice.lib is required.
 pub struct NgSpiceFfi {
     dll: DllHandle,
+    /// Resolved function pointers.
+    init: Option<NgSpiceInitFn>,
+    init_sync: Option<NgSpiceInitSyncFn>,
+    command: Option<NgSpiceCommandFn>,
+    get_vec_info: Option<NgGetVecInfoFn>,
+    circ: Option<NgSpiceCircFn>,
+    cur_plot: Option<NgSpiceCurPlotFn>,
+    all_plots: Option<NgSpiceAllPlotsFn>,
+    all_vecs: Option<NgSpiceAllVecsFn>,
+    running: Option<NgSpiceRunningFn>,
+    set_bkpt: Option<NgSpiceSetBkptFn>,
+    nospinit: Option<NgSpiceNoSPIInitFn>,
+    nospiceinit: Option<NgSpiceNoSpiceInitFn>,
+    lock_realloc: Option<NgSpiceLockReallocFn>,
+    unlock_realloc: Option<NgSpiceUnlockReallocFn>,
+    reset: Option<NgSpiceResetFn>,
     userdata: *mut c_void,
-    /// Whether ngSpice_Init has been called successfully.
     initialized: bool,
 }
 
 impl NgSpiceFfi {
-    /// Load the ngspice library and create the engine handle.
+    /// Load the ngspice library and resolve all symbols.
     ///
     /// Uses the same resolution order as
     /// `wowkispice-core::ngspice_wrapper::resolve_ngspice_library`.
@@ -446,7 +532,7 @@ impl NgSpiceFfi {
             wowkispice_core::ngspice_wrapper::resolve_ngspice_library(None);
         let dll_path = match dll_path {
             Some(p) => p,
-            None => return Err(NgSpiceError::MissingDLL),
+            None => return Err(NgSpiceError::DllNotLoaded),
         };
 
         unsafe {
@@ -454,8 +540,56 @@ impl NgSpiceFfi {
                 NgSpiceError::AnalysisFailed(format!("DLL load failed: {e}"))
             })?;
 
+            // Resolve all required symbols
+            let init = resolve_fn!(handle, "ngSpice_Init", NgSpiceInitFn);
+            let init_sync =
+                resolve_fn!(handle, "ngSpice_Init_Sync", NgSpiceInitSyncFn);
+            let command =
+                resolve_fn!(handle, "ngSpice_Command", NgSpiceCommandFn);
+            let get_vec_info =
+                resolve_fn!(handle, "ngGet_Vec_Info", NgGetVecInfoFn);
+            let circ = resolve_fn!(handle, "ngSpice_Circ", NgSpiceCircFn);
+            let cur_plot =
+                resolve_fn!(handle, "ngSpice_CurPlot", NgSpiceCurPlotFn);
+            let all_plots =
+                resolve_fn!(handle, "ngSpice_AllPlots", NgSpiceAllPlotsFn);
+            let all_vecs =
+                resolve_fn!(handle, "ngSpice_AllVecs", NgSpiceAllVecsFn);
+            let running =
+                resolve_fn!(handle, "ngSpice_running", NgSpiceRunningFn);
+            let set_bkpt =
+                resolve_fn!(handle, "ngSpice_SetBkpt", NgSpiceSetBkptFn);
+            let nospinit =
+                resolve_fn!(handle, "ngSpice_nospinit", NgSpiceNoSPIInitFn);
+            let nospiceinit =
+                resolve_fn!(handle, "ngSpice_nospiceinit",
+                            NgSpiceNoSpiceInitFn);
+            let lock_realloc =
+                resolve_fn!(handle, "ngSpice_LockRealloc",
+                            NgSpiceLockReallocFn);
+            let unlock_realloc =
+                resolve_fn!(handle, "ngSpice_UnlockRealloc",
+                            NgSpiceUnlockReallocFn);
+            let reset_fn =
+                resolve_fn!(handle, "ngSpice_Reset", NgSpiceResetFn);
+
             Ok(Self {
                 dll: handle,
+                init: Some(init),
+                init_sync: Some(init_sync),
+                command: Some(command),
+                get_vec_info: Some(get_vec_info),
+                circ: Some(circ),
+                cur_plot: Some(cur_plot),
+                all_plots: Some(all_plots),
+                all_vecs: Some(all_vecs),
+                running: Some(running),
+                set_bkpt: Some(set_bkpt),
+                nospinit: Some(nospinit),
+                nospiceinit: Some(nospiceinit),
+                lock_realloc: Some(lock_realloc),
+                unlock_realloc: Some(unlock_realloc),
+                reset: Some(reset_fn),
                 userdata: ptr::null_mut(),
                 initialized: false,
             })
@@ -472,12 +606,16 @@ impl NgSpiceFfi {
         data: Option<Box<dyn Fn(f64, Vec<(String, f64)>) + Send + Sync>>,
         progress: Option<Box<dyn Fn(f64, usize) + Send + Sync>>,
     ) -> NgSpiceResult<()> {
-        unsafe {
-            let ud =
-                box_userdata(vsrc, data, progress);
+        let Some(init) = self.init else {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngSpice_Init not resolved".to_string(),
+            ));
+        };
+
+        let ud = box_userdata(vsrc, data, progress);
             self.userdata = ud;
 
-            let rc = ngSpice_Init(
+            let rc = init(
                 sendchar_trampoline,
                 sendstat_trampoline,
                 controlled_exit_trampoline,
@@ -496,7 +634,6 @@ impl NgSpiceFfi {
             }
             self.initialized = true;
             Ok(())
-        }
     }
 
     /// Execute an ngspice command string.
@@ -504,8 +641,13 @@ impl NgSpiceFfi {
         if !self.initialized {
             return Err(NgSpiceError::DllNotLoaded);
         }
+        let Some(command_fn) = self.command else {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngSpice_Command not resolved".to_string(),
+            ));
+        };
         let c_cmd = CString::new(command).map_err(NgSpiceError::NulError)?;
-        let rc = unsafe { ngSpice_Command(c_cmd.as_ptr() as *mut c_char) };
+        let rc = command_fn(c_cmd.as_ptr() as *mut c_char);
         if rc != 0 {
             return Err(NgSpiceError::AnalysisFailed(format!(
                 "ngSpice_Command returned {rc}"
@@ -522,11 +664,18 @@ impl NgSpiceFfi {
         if !self.initialized {
             return Err(NgSpiceError::DllNotLoaded);
         }
+        let Some(circ) = self.circ else {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngSpice_Circ".to_string(),
+            ));
+        };
 
         // Build the null-terminated array of C strings.
         let mut c_strings: Vec<CString> = Vec::new();
         for line in lines {
-            c_strings.push(CString::new(line.as_str()).map_err(NgSpiceError::NulError)?);
+            c_strings.push(CString::new(line.as_str()).map_err(
+                NgSpiceError::NulError,
+            )?);
         }
         c_strings.push(CString::new("").unwrap()); // NULL terminator
 
@@ -534,7 +683,7 @@ impl NgSpiceFfi {
             c_strings.iter().map(|s| s.as_ptr() as *mut c_char).collect();
         ptrs.push(ptr::null_mut());
 
-        let rc = unsafe { ngSpice_Circ(ptrs.as_mut_ptr()) };
+        let rc = circ(ptrs.as_mut_ptr());
         if rc != 0 {
             return Err(NgSpiceError::AnalysisFailed(format!(
                 "ngSpice_Circ returned {rc}"
@@ -548,13 +697,18 @@ impl NgSpiceFfi {
         if !self.initialized {
             return Err(NgSpiceError::DllNotLoaded);
         }
-        let ptr = unsafe { ngSpice_CurPlot() };
-        if ptr.is_null() {
+        let Some(cur_plot) = self.cur_plot else {
             return Err(NgSpiceError::AnalysisFailed(
-                "ngSpice_CurPlot returned null".to_string(),
+                "ngSpice_CurPlot".to_string(),
             ));
-        }
-        Ok(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().to_string())
+        };
+        let ptr = cur_plot();
+            if ptr.is_null() {
+                return Err(NgSpiceError::AnalysisFailed(
+                    "ngSpice_CurPlot returned null".to_string(),
+                ));
+            }
+            Ok(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().to_string())
     }
 
     /// Get all plot names.
@@ -562,23 +716,30 @@ impl NgSpiceFfi {
         if !self.initialized {
             return Err(NgSpiceError::DllNotLoaded);
         }
-        let ptr = unsafe { ngSpice_AllPlots() };
-        if ptr.is_null() {
+        let Some(all_plots) = self.all_plots else {
             return Err(NgSpiceError::AnalysisFailed(
-                "ngSpice_AllPlots returned null".to_string(),
+                "ngSpice_AllPlots".to_string(),
             ));
-        }
-        let mut plots = Vec::new();
-        let mut i = 0;
-        loop {
-            let name_ptr = unsafe { *ptr.add(i) };
-            if name_ptr.is_null() {
-                break;
+        };
+        let ptr = all_plots();
+            if ptr.is_null() {
+                return Err(NgSpiceError::AnalysisFailed(
+                    "ngSpice_AllPlots returned null".to_string(),
+                ));
             }
-            plots.push(unsafe { CStr::from_ptr(name_ptr) }.to_string_lossy().to_string());
-            i += 1;
-        }
-        Ok(plots)
+            let mut plots = Vec::new();
+            let mut i = 0;
+            loop {
+                let name_ptr = unsafe { *ptr.add(i) };
+                if name_ptr.is_null() {
+                    break;
+                }
+                plots.push(unsafe {
+                    CStr::from_ptr(name_ptr).to_string_lossy().to_string()
+                });
+                i += 1;
+            }
+            Ok(plots)
     }
 
     /// Reset ngspice.
@@ -586,7 +747,12 @@ impl NgSpiceFfi {
         if !self.initialized {
             return Err(NgSpiceError::DllNotLoaded);
         }
-        let rc = unsafe { ngSpice_Reset() };
+        let Some(reset_fn) = self.reset else {
+            return Err(NgSpiceError::AnalysisFailed(
+                "ngSpice_Reset".to_string(),
+            ));
+        };
+        let rc = reset_fn();
         Ok(rc)
     }
 }
@@ -605,8 +771,44 @@ impl Drop for NgSpiceFfi {
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_ffi_module_compiles() {
         assert!(true);
+    }
+
+    #[test]
+    fn test_ffi_loads_dll_and_resolves_symbols() {
+        // Debug: check what resolve_ngspice_library returns
+        let (path, tried) =
+            wowkispice_core::ngspice_wrapper::resolve_ngspice_library(None);
+        eprintln!("DEBUG: resolve_ngspice_library returned: {:?}", path);
+        eprintln!("DEBUG: tried paths: {:?}", tried);
+        if let Some(p) = &path {
+            eprintln!("DEBUG: path exists: {}", std::path::Path::new(p).exists());
+        }
+
+        match NgSpiceFfi::new() {
+            Ok(engine) => {
+                // Verify all function pointers are resolved
+                assert!(engine.init.is_some());
+                assert!(engine.init_sync.is_some());
+                assert!(engine.command.is_some());
+                assert!(engine.get_vec_info.is_some());
+                assert!(engine.circ.is_some());
+                assert!(engine.cur_plot.is_some());
+                assert!(engine.all_plots.is_some());
+                assert!(engine.all_vecs.is_some());
+                assert!(engine.running.is_some());
+                assert!(engine.set_bkpt.is_some());
+                assert!(engine.nospinit.is_some());
+                assert!(engine.nospiceinit.is_some());
+                assert!(engine.lock_realloc.is_some());
+                assert!(engine.unlock_realloc.is_some());
+                assert!(engine.reset.is_some());
+            }
+            Err(e) => panic!("ngspice DLL load failed: {e}"),
+        }
     }
 }
