@@ -40,7 +40,7 @@ pub type Metrics = BTreeMap<String, MetricValue>;
 
 /// Lookup a numeric metric with a fallback default, mirroring
 /// `metrics.get(key, default)`.
-fn metric_f64(metrics: &Metrics, key: &str, default: f64) -> f64 {
+pub fn metric_f64(metrics: &Metrics, key: &str, default: f64) -> f64 {
     match metrics.get(key) {
         Some(MetricValue::F64(v)) => *v,
         _ => default,
@@ -48,7 +48,7 @@ fn metric_f64(metrics: &Metrics, key: &str, default: f64) -> f64 {
 }
 
 /// Lookup a string metric with a fallback default.
-fn metric_str<'a>(metrics: &'a Metrics, key: &str, default: &'a str) -> &'a str {
+pub fn metric_str<'a>(metrics: &'a Metrics, key: &str, default: &'a str) -> &'a str {
     match metrics.get(key) {
         Some(MetricValue::Str(s)) => s.as_str(),
         _ => default,
@@ -56,16 +56,16 @@ fn metric_str<'a>(metrics: &'a Metrics, key: &str, default: &'a str) -> &'a str 
 }
 
 /// Format helpers mirroring Python `f"{v:.Nf}"` (fixed-point output).
-fn fmt1(v: f64) -> String {
+pub fn fmt1(v: f64) -> String {
     format!("{:.1}", v)
 }
-fn fmt2(v: f64) -> String {
+pub fn fmt2(v: f64) -> String {
     format!("{:.2}", v)
 }
-fn fmt3(v: f64) -> String {
+pub fn fmt3(v: f64) -> String {
     format!("{:.3}", v)
 }
-fn fmt4(v: f64) -> String {
+pub fn fmt4(v: f64) -> String {
     format!("{:.4}", v)
 }
 
@@ -74,7 +74,7 @@ fn fmt4(v: f64) -> String {
 ///
 /// Uses `SystemTime` plus a manual civil-calendar conversion (Howard
 /// Hinnant's `civil_from_days`) so no `chrono` crate is needed.
-fn utc_now_str() -> String {
+pub fn utc_now_str() -> String {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(d) => {
             let secs = d.as_secs() as i64;
@@ -95,7 +95,7 @@ fn utc_now_str() -> String {
 
 /// Convert days since 1970-01-01 to `(year, month, day)` in the proleptic
 /// Gregorian calendar. Howard Hinnant's `civil_from_days` algorithm.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
+pub fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719468;
     // Floor division by 146097. Rust `/` truncates toward zero, so the
     // `z - 146096` adjustment makes the negative branch round down, matching

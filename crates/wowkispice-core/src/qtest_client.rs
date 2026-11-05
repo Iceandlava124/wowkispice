@@ -303,18 +303,21 @@ impl QtestClient {
     }
 
     pub fn readl(&mut self, addr: u64) -> Result<u32, QtestError> {
-        u32::from_str_radix(&self._ok_value(&format!("readl 0x{:x}", addr))?, 16)
-            .map_err(|e| QtestError(e.to_string()))
+        let raw = &self._ok_value(&format!("readl 0x{:x}", addr))?;
+        let raw = raw.strip_prefix("0x").unwrap_or(raw);
+        u32::from_str_radix(raw, 16).map_err(|e| QtestError(e.to_string()))
     }
 
     pub fn readw(&mut self, addr: u64) -> Result<u16, QtestError> {
-        u16::from_str_radix(&self._ok_value(&format!("readw 0x{:x}", addr))?, 16)
-            .map_err(|e| QtestError(e.to_string()))
+        let raw = &self._ok_value(&format!("readw 0x{:x}", addr))?;
+        let raw = raw.strip_prefix("0x").unwrap_or(raw);
+        u16::from_str_radix(raw, 16).map_err(|e| QtestError(e.to_string()))
     }
 
     pub fn readq(&mut self, addr: u64) -> Result<u64, QtestError> {
-        u64::from_str_radix(&self._ok_value(&format!("readq 0x{:x}", addr))?, 16)
-            .map_err(|e| QtestError(e.to_string()))
+        let raw = &self._ok_value(&format!("readq 0x{:x}", addr))?;
+        let raw = raw.strip_prefix("0x").unwrap_or(raw);
+        u64::from_str_radix(raw, 16).map_err(|e| QtestError(e.to_string()))
     }
 
     pub fn writel(&mut self, addr: u64, value: u32) -> Result<(), QtestError> {
@@ -374,7 +377,7 @@ impl Drop for QtestClient {
     }
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
+pub fn hex_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for &b in bytes {
         out.push_str(&format!("{:02x}", b));
@@ -382,7 +385,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn hex_decode(s: &str) -> Result<Vec<u8>, QtestError> {
+pub fn hex_decode(s: &str) -> Result<Vec<u8>, QtestError> {
     let s: String = s.chars().filter(|c| !c.is_ascii_whitespace()).collect();
     if s.len() % 2 != 0 {
         return Err(QtestError(format!("odd-length hex string: {:?}", s)));
