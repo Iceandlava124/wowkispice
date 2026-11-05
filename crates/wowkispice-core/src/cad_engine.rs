@@ -219,7 +219,9 @@ impl SchematicComponent {
             y: get_f(data, "y", 0.0),
             footprint: get_s(data, "footprint", ""),
             mpn: get_s(data, "mpn", ""),
-            manufacturer: get_s(data, "manufacturer", "(unknown)"),
+            // Python's from_dict() does not read manufacturer, so it always
+            // defaults to "(unknown)" after a round-trip. Match that for parity.
+            manufacturer: "(unknown)".to_string(),
             description: get_s(data, "description", "(no description)"),
             values: get_s(data, "values", "(no values)"),
             cost_usd: get_f(data, "cost_usd", 0.0),
