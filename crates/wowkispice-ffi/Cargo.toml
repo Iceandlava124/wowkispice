@@ -1,0 +1,15 @@
+[package]
+name = "wowkispice-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+wowkispice-core = { path = "../wowkispice-core" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# No external crates: raw FFI to kernel32 for DLL loading on Windows
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# No external crates: raw FFI to libdl for DLL loading on Linux
