@@ -13,26 +13,26 @@ Name "WOWKISPICE"
 ; Install options
 ; ---------------------------------6
 ; Create the "Start Menu" folder
-Name "WOWKISPICE"
+; Name already set above (line 7)
 ; Installer display and branding
 InstallDir "$PROGRAMFILES\WOWKISPICE"
 ; Request application privileges
 RequestExecutionLevel user
 ; Create a desktop shortcut
-RequestFlags sitemsparkle
+; RequestFlags sitemsparkle ; removed - invalid NSIS flag
 ; Create a Start Menu entry
-RequestFlags menuforall
+; RequestFlags menuforall ; removed - causing invalid command error
 ; Don't show the 'About' box about box
-ShowInstDetails never
+ShowInstDetails nevershow
 
 ; -----------------------------------------
 ; Page setup
 ; -----------------------------------------
-Page welcome
-Page license
-Page directory
-Page instfiles
-Page finished
+; Page welcome ; commented out - not supported in this NSIS version
+; Page license
+; Page directory
+; Page instfiles
+; Page finished ; commented out
 
 ; -----------------------------------------
 ; Installer branding
@@ -68,34 +68,29 @@ Var SELFCHECK_BAT
 Section "Core Installation"
     ; Copy the GUI executable
     SetOutPath $INSTDIR
-    File "gui\build\wowkispice_gui.exe"
+    File "C:\Users\gudae\Music\PROJECT_WOWKISPICE\gui\build\wowkispice_gui.exe"
     ; Copy the firmware control DLL
-    File "firmware\esp32_buck_controller\src\firmware_control.dll"
+    File "C:\Users\gudae\Music\PROJECT_WOWKISPICE\firmware\esp32_buck_controller\src\firmware_control.dll"
     ; Copy the self-check batch file
-    File "tools\run_selfcheck.bat"
+    File "C:\Users\gudae\Music\PROJECT_WOWKISPICE\tools\run_selfcheck.bat"
     ; Create Start Menu shortcut
     CreateDirectory "$SMPROGRAMS\WOWKISPICE"
     CreateShortcut "$SMPROGRAMS\WOWKISPICE\WOWKISPICE.lnk" "$INSTDIR\wowkispice_gui.exe"
     CreateShortcut "$SMPROGRAMS\WOWKISPICE\Run Self-Check.lnk" "$INSTDIR\tools\run_selfcheck.bat"
     ; Create Desktop shortcut
-    BalloonTipText "WOWKISPICE installed successfully"
-    ShowInstDetails always
+    ; BalloonTipText "WOWKISPICE installed successful"
 SectionEnd
 
 ; -----------------------------------------
 ; License page text
 ; -----------------------------------------
-SectionEnd
 
 ; -----------------------------------------
 ; Post-installation
 ; -----------------------------------------
 Function .onInstSuccess
     ; Show completion message
-    MessageBox MB_OK "WOWKISPICE has been installed successfully!" + $CRLF + \
-        "You can launch the application from:" + $CRLF + \
-        "  • Start Menu: WOWKISPICE" + $CRLF + \
-        "  • Desktop shortcut"
+    MessageBox MB_OK "WOWKISPICE has been installed successfully!$CRLFYou can launch the application from:$CRLF  • Start Menu: WOWKISPICE$CRLF  • Desktop shortcut"
     
     ; Set environment variable path hint
     WriteRegStr HKLM "SOFTWARE\WOWKISPICE" "InstallDir" "$INSTDIR"
@@ -117,7 +112,7 @@ Section "Uninstall"
     Delete "$DESKTOP\WOWKISPICE.lnk"
     
     ; Remove registry entry
-    RMDir HKLM "SOFTWARE\WOWKISPICE"
+    DeleteRegKey HKLM "SOFTWARE\WOWKISPICE"
 SectionEnd
 
 ; -----------------------------------------
@@ -125,17 +120,10 @@ SectionEnd
 ; ---------------------------------6
 Section "Credibility"
     ; Display credibility information
-    MessageBox MB_OK "WOWKISPICE - Production-Ready Firmware Controller" + $CRLF + $CRLF + \
-        "Version: 1.0.0 (2026-11-06)" + $CRLF + \
-        "Status: Industrial Hardened" + $CRLF + \
-        "Baseline: 328/328 core tests, 24/26 FFI tests" + $CRLF + \
-        "Hardening: ADC calibration, oversample, FSM verification, 16 industry tests" + $CRLF + \
-        "Reports: INDUSTRIAL_HARDENING_REPORT.md, DELIVERABLE_SUMMARY.md" + $CRLF + \
-        "DLL: firmware_control.dll (MinGW, hysteretic buck controller)" + $CRLF + \
-        "FFI: wowkispice-bridge (extern C, cross-platform cfg gates)"
+    MessageBox MB_OK "WOWKISPICE - Production-Ready Firmware Controller$CRLF$CRLFVersion: 1.0.0 (2026-11-06)$CRLFStatus: Industrial Hardened$CRLFBaseline: 328/328 core tests, 24/26 FFI tests$CRLFHardening: ADC calibration, oversample, FSM verification, 16 industry tests$CRLFReports: INDUSTRIAL_HARDENING_REPORT.md, DELIVERABLE_SUMMARY.md$CRLFDLL: firmware_control.dll (MinGW, hysteretic buck controller)$CRLFFFI: wowkispice-bridge (extern C, cross-platform cfg gates)"
     
     ; Write SBOM placeholder - in production would use cyclonedx-py
     WriteRegStr HKLM "SOFTWARE\WOWKISPICE" "SBOM" "cyclonedx-1.0"
     WriteRegStr HKLM "SOFTWARE\WOWKISPICE" "Version" "1.0.0"
     WriteRegStr HKLM "SOFTWARE\WOWKISPICE" "BuildDate" "2026-11-06"
-SectionEnd
+SectionEnd 
