@@ -18,6 +18,7 @@
  * Python over a shared battery.
  */
 
+pub mod analysis_runner;
 pub mod cad_engine;
 pub mod control_law;
 pub mod esp32_regs;

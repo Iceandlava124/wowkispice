@@ -110,7 +110,10 @@ class _RecordingMonitor(object):
 
     def __init__(self, qemu=None, machine=None, **kw):
         self.injected = []
+        self.gate_reads = 0
         self.gate = True
+        self.adc_error = None
+        self.gate_error = None
 
     def _reader_loop(self):
         return
@@ -119,9 +122,14 @@ class _RecordingMonitor(object):
         return
 
     def set_adc1_value(self, counts):
+        if self.adc_error is not None:
+            raise self.adc_error
         self.injected.append(int(counts))
 
     def read_gate(self):
+        self.gate_reads += 1
+        if self.gate_error is not None:
+            raise self.gate_error
         return self.gate
 
     def stop(self):
@@ -152,7 +160,8 @@ def _forced_3v3_graph():
     return g
 
 
-def _run_with_fake_monitor(pin_specs=None):
+def _run_with_fake_monitor(pin_specs=None, monitor_cls=_RecordingMonitor,
+                           **run_kwargs):
     """Run run_binary_cosim end-to-end with a fake firmware + fake monitor.
 
     Returns (run, monitor). The monitor is patched at binary_runner's own
@@ -162,7 +171,7 @@ def _run_with_fake_monitor(pin_specs=None):
     real = binary_runner.QemuMonitor
 
     def factory(*a, **kw):
-        m = _RecordingMonitor(*a, **kw)
+        m = monitor_cls(*a, **kw)
         holder["mon"] = m
         return m
 
@@ -175,13 +184,14 @@ def _run_with_fake_monitor(pin_specs=None):
             qcmd = os.path.join(td, "fake-qemu.cmd")
             with open(qcmd, "w") as fh:
                 fh.write("@echo off\r\nexit /b 0\r\n")
+            kwargs = dict(duration_ms=0.1, sync_poll_interval=0.001,
+                          sync_poll_timeout=0.05)
+            kwargs.update(run_kwargs)
             run = binary_runner.run_binary_cosim(
                 graph,
                 pin_specs if pin_specs is not None
                 else {"GPIO18": {"sense_net": "vout"}},
-                firmware_image=fw, qemu=qcmd,
-                duration_ms=0.1, sync_poll_interval=0.001,
-                sync_poll_timeout=0.05)
+                firmware_image=fw, qemu=qcmd, **kwargs)
     finally:
         binary_runner.QemuMonitor = real
     return run, holder.get("mon")
@@ -306,6 +316,96 @@ class TestGateFlipVoltagePath(unittest.TestCase):
         self.assertEqual(by_v["counts"]["low"],
                          by_c["counts"]["low"],
                          "voltage path and counts path disagree")
+
+
+class _RecordingStepper(object):
+    """Minimal load-stepper double: records the sim times it was asked to
+    apply a load step at, and can fail on demand."""
+
+    def __init__(self, fail=False):
+        self.times = []
+        self.fail = fail
+
+    def check_and_apply(self, t):
+        self.times.append(float(t))
+        if self.fail:
+            raise RuntimeError("load step table exhausted")
+
+
+class TestProgressAndLoadStepping(unittest.TestCase):
+    def test_progress_callback_fires_once_per_timestep(self):
+        calls = []
+        step = _RecordingStepper()
+        run, _mon = _run_with_fake_monitor(
+            progress_callback=lambda t, n: calls.append(t),
+            load_stepper=step)
+        self.assertGreater(run.callback_hits, 0)
+        self.assertTrue(calls, "the progress callback never ran")
+        # Two stacked hooks (the pre-fix shape) call the progress callback
+        # twice for every load-stepper check. One hook means they agree.
+        self.assertEqual(len(calls), len(step.times),
+                         "progress and load stepping saw different steps")
+
+    def test_load_stepper_is_invoked_during_the_solve(self):
+        step = _RecordingStepper()
+        run, _mon = _run_with_fake_monitor(load_stepper=step)
+        self.assertGreater(run.callback_hits, 0)
+        self.assertTrue(step.times, "check_and_apply was never called")
+        if run.time:
+            self.assertLessEqual(max(step.times), run.time[-1] + 1e-12)
+
+    def test_a_failing_load_stepper_is_surfaced(self):
+        step = _RecordingStepper(fail=True)
+        run, _mon = _run_with_fake_monitor(load_stepper=step)
+        self.assertTrue(
+            any("load stepper failed" in w for w in run.warnings),
+            "a load-step failure was swallowed: %r" % run.warnings)
+
+
+class TestSyncModes(unittest.TestCase):
+    def test_adaptive_mode_polls_the_gate_until_it_settles(self):
+        run, mon = _run_with_fake_monitor()
+        self.assertGreater(run.callback_hits, 0)
+        # _read_until_stable needs three matching reads after the first one.
+        self.assertGreaterEqual(mon.gate_reads, 3 * run.callback_hits)
+
+    def test_fixed_mode_reads_the_gate_once_per_callback(self):
+        run, mon = _run_with_fake_monitor(sync_mode="fixed",
+                                          sync_poll_timeout=0.0)
+        self.assertGreater(run.callback_hits, 0)
+        self.assertEqual(mon.gate_reads, run.callback_hits,
+                         "fixed mode must not poll until stable")
+
+    def test_unknown_sync_mode_warns_and_falls_back_to_adaptive(self):
+        run, mon = _run_with_fake_monitor(sync_mode="warp-speed")
+        self.assertTrue(
+            any("unknown sync_mode" in w for w in run.warnings),
+            "the unknown mode was accepted silently")
+        self.assertGreaterEqual(mon.gate_reads, 3 * run.callback_hits)
+
+    def test_monitor_failures_are_reported_not_swallowed(self):
+        broken = _RecordingMonitor()
+        broken.adc_error = OSError("HMP write failed")
+        run, mon = _run_with_fake_monitor(
+            monitor_cls=lambda *a, **k: broken)
+        self.assertEqual(mon, broken)
+        self.assertGreater(run.callback_hits, 0)
+        self.assertTrue(
+            any("sync errors" in w and "HMP write failed" in w
+                for w in run.warnings),
+            "monitor failures were swallowed: %r" % run.warnings)
+
+
+class TestAbortState(unittest.TestCase):
+    def test_stop_flag_marks_the_run_aborted(self):
+        run, _mon = _run_with_fake_monitor(
+            stop_flag=lambda: True)
+        self.assertTrue(run.aborted,
+                        "the binary run never recorded the abort")
+
+    def test_a_normal_run_is_not_aborted(self):
+        run, _mon = _run_with_fake_monitor()
+        self.assertFalse(run.aborted)
 
 
 if __name__ == "__main__":

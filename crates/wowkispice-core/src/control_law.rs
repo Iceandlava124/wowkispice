@@ -457,6 +457,7 @@ pub struct LawStats {
 /// to report a run honestly, and differ only in decide().  The kind-specific
 /// fields simply sit unused for the other kind (Python would not even have
 /// them on the instance).
+#[derive(Clone)]
 pub struct ControlLaw {
     pub spec: LawSpec,
     pub pin: String,

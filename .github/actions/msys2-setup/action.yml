@@ -1,0 +1,28 @@
+name: MSYS2 UCRT64 Setup
+description: 'Configures MSYS2 environment variables for Rust builds'
+inputs:
+  msys2-channel:
+    description: 'MSYS2 channel (default: ucrt64)'
+    default: 'ucrt64'
+    required: false
+outputs:
+  msys2-dir:
+    description: 'Path to MSYS2 bin directory'
+    value: '{{_msys2-dir}}'
+runs:
+  using: 'bash'
+  args: []
+steps:
+  - name: Install MSYS2 UCRT64 tools
+    run: |
+      echo "Setting up MSYS2 UCRT64 environment"
+      # Windows-latest runner already has gcc, cmake, ninja
+      # Just ensure PATH includes the right tools
+      echo "MSYS2 channel: ${{ inputs.msys2-channel }}"
+      echo "::set-output name=msys2-dir::/usr/${{ inputs.msys2-channel }}"
+  - name: Verify Build Tools
+    run: |
+      echo "Checking build tools..."
+      gcc --version || echo "gcc not found"
+      cmake --version || echo "cmake not found"
+      ninja --version || echo "ninja not found"

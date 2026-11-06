@@ -92,3 +92,5 @@ Legend:
 | `esp32_sens` model | EML (patched QEMU) | `tools/qemu-patch/` |
 | `bridge/esp32_regs.py` addresses | data (transcribed from ESP-IDF 6.1.0 `soc` headers) | `bridge/esp32_regs.py` |
 | golden traces | data (to be versioned) | documented in `docs/time-sync.md` |
+| `firmware_control.dll` / `.so` / `.dylib` | FFI bridge (cross-platform) | `firmware/esp32_buck_controller/src/buck_controller_tick.c` |
+| `buck_controller_tick_ext()` | calibrated/oversample path | Added in industrial hardening Phase 3 |

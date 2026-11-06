@@ -16,6 +16,11 @@ dist/
 *.pyd
 *.dll
 
+# Rust workspace (crates/) build artifacts
+/target/
+crates/*/target/
+Cargo.lock
+
 # ESP32 firmware binaries (pinned in docs/toolchain.md)
 firmware/esp32_buck_controller/.pio/build/
 firmware/esp32_buck_controller/*.bin
@@ -66,6 +71,13 @@ tmp/
 
 # pytest
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local vendored tool data / locks (setup.ps1 uses pip + requirements.txt)
+.cloud-attachments/
+uv.lock
 
 # Editor
 .vim/

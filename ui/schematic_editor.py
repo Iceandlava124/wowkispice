@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bridge import control_law
 from bridge import gpio_model
 from bridge import serial_console
+from bridge import binary_runner
 from bridge.cad_engine import (SchematicComponent, SchematicNetlistEngine,
                                is_mcu)
 from bridge.ngspice_wrapper import NgSpiceEngine
@@ -4031,24 +4032,53 @@ class SchematicEditor(QMainWindow):
                 self.log(f"ERROR: cannot start ngspice: {exc}")
                 return
 
-        self.log("=== closed-loop co-simulation ===")
-        for pin, spec in laws.items():
-            self.log(f"  {pin}: {control_law.describe_law(spec)}")
+        use_binary = os.environ.get("WOSP_USE_BINARY_COSIM", "").strip().lower() in ("1", "true", "yes", "on")
+        run = None
+        aborted = False
+        if use_binary:
+            self.log("=== closed-loop co-simulation (REAL FIRMWARE BINARY) ===")
+            for pin, spec in laws.items():
+                self.log(f"  {pin}: real firmware from QEMU")
+            pin_specs = {}
+            for pin, spec in laws.items():
+                sense_net = spec.get("sense_net") or spec.get("sense")
+                pin_specs[pin] = {"sense_net": sense_net}
+            try:
+                self._begin_run(self.effective_duration_ms())
+                run = binary_runner.run_binary_cosim(
+                    self.model, pin_specs,
+                    vin=self.vin_box.value(),
+                    tstep_us=self.effective_tstep_us(),
+                    duration_ms=self.effective_duration_ms(),
+                    progress_callback=self._on_progress,
+                    stop_flag=lambda: self._abort)
+            except Exception as exc:
+                self.log(f"ERROR: binary cosim failed: {exc}")
+                return
+            finally:
+                if run is not None:
+                    aborted = getattr(run, "aborted", False)
+                self._end_run()
+        else:
+            self.log("=== closed-loop co-simulation ===")
+            for pin, spec in laws.items():
+                self.log(f"  {pin}: {control_law.describe_law(spec)}")
 
-        try:
-            self._begin_run(self.effective_duration_ms())
-            run = cosim_runner.run_cosim(
-                self.model, laws,
-                vin=self.vin_box.value(), tstep_us=self.effective_tstep_us(),
-                duration_ms=self.effective_duration_ms(), engine=self.ng,
-                progress_callback=self._on_progress,
-                stop_flag=lambda: self._abort)
-        except Exception as exc:
-            self.log(f"ERROR: closed-loop run failed: {exc}")
-            return
-        finally:
-            aborted = run.aborted if "run" in dir() else False
-            self._end_run()
+            try:
+                self._begin_run(self.effective_duration_ms())
+                run = cosim_runner.run_cosim(
+                    self.model, laws,
+                    vin=self.vin_box.value(), tstep_us=self.effective_tstep_us(),
+                    duration_ms=self.effective_duration_ms(), engine=self.ng,
+                    progress_callback=self._on_progress,
+                    stop_flag=lambda: self._abort)
+            except Exception as exc:
+                self.log(f"ERROR: closed-loop run failed: {exc}")
+                return
+            finally:
+                if run is not None:
+                    aborted = getattr(run, "aborted", False)
+                self._end_run()
 
         if aborted:
             self.log("Closed-loop run stopped early at the user's request.")

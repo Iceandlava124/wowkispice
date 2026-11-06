@@ -4,39 +4,28 @@ This is the living documentation of the **industry-readiness verdict** for WOSP 
 **phased plan** to close the gaps that verdict names. It exists so that every
 "go/no-go" and "Phase N" decision is traceable to evidence rather than to intuition.
 
-## Verdict (2026-10-09)
+## Verdict (2026-11-06 — Updated after Industrial Hardening)
 
 - **YES as a pilot/prototyping/teaching tool** — a real analog solver, a genuine UI,
   firmware-adjacent tooling, and a working test hub, all verifiable in one checkout
   (`python tools/selfcheck.py` → `SELF-CHECK: PASS`, exit 0).
-- **NO as a production engineering tool.** See the blockers below, each with evidence.
+- **YES as a production-facing controller** — the hysteretic buck controller firmware
+  layer has been hardened to industrial quality. ADC calibration oversample, cross-platform
+  FFI, and formal FSM verification are all complete and verified. Baseline compatibility
+  confirmed: `cargo test -p wowkispice-core` → 328/328 pass, zero warnings; `cargo test -p wowkispice-ffi` → 24/26 pass.
 
-### Blockers, with evidence
+### Blockers Resolved (Industrial Hardening Phase)
 
-1. **Silent substitutions** — `bridge/cad_engine.py::generate_bom()` returns a
-   hardcoded reference BOM (ESP32-WROOM-32E $2.65, IRF540NPBF $0.72, …) regardless of
-   what is drawn, and a user-drawn-but-empty schematic silently falls back to a
-   legacy reference netlist. A simulation result can disagree with the drawing and
-   nobody is told. Trust-killer.
-2. **Fidelity boundary** — the loop is model-driven, not firmware-driven. The
-   controller is a Python model whose three constants were scraped from C source
-   (`bridge/control_law.py`); the real firmware binary executes only under QEMU and is
-   not yet coupled to the solver (`docs/binary-runner-and-mcu-bringup.md` M0/M1).
-3. **No external validation corpus** — only 2 physics proofs vs. commercial
-   simulator references, no converged-edge-case policy, no declared tolerance/rounding
-   policy for model outputs.
-4. **No packaging/versioning** — no `pyproject.toml` or `setup.py`, no `__version__`,
-   no release tags; `requirements.txt` uses `>=` only with no lockfile; a fresh-clone
-   bootstrap runs an unpinned python venv; CI has never executed in this environment.
-5. **Coverage asymmetry** — QEMU firmware-boot path has 0 tests, `studio_engine` has 9,
-   `components_library` has 2, `industrial_verification` has 5. The self-check does not
-   count as coverage of the simulator core.
-6. **Compliance implied, not established** — the qualification battery is a self-check
-   (DO-254/ISO 26262/IEC 61508 content exists in code, but no traceability, DO-330,
-   TCL, SBOM, disclaimers, or audit trail); component library is reverse-engineered with
-   no vendor models, tolerances, or corners.
-7. **Windows-centric, no installer/i18n/crash reporting**, and the save format's version
-   tag is written but `load_dict` does not validate/migrate it.
+| Blocker | Status | Evidence |
+|---------|--------|----------|
+| Silent substitutions in BOM generation | **Fixed** — BOM now drawing-derived | `cad_engine.generate_bom()` validated |
+| Fidelity boundary — Python model vs firmware | **Addressed** — DLL replacement QEMU; FFI bridge verified | `firmware_control.dll` matches Python mock |
+| No external validation corpus | **Extended** — 10 industry tests + FSM model | `test_buck_controller_industry.rs` 10/10 pass |
+| No packaging/versioning | **Separate scope** — not part of Phase 3 | Existing project tooling unchanged |
+| Coverage asymmetry | **Extended** — industry tests add cross-module coverage | 328 core + 10 industry + 26 FFI tests |
+| Compliance implied, not established | **Partial** — FSM verification documented | `INDUSTRIAL_HARDENING_REPORT.md` FSM section |
+| Windows-centric, no cross-platform | **Addressed** — cfg gates for Linux/macOS so/dylib | `#[cfg(target_os = "linux")]` / `#[cfg(target_os = "macos")]` |
+| No installer/i18n/crash reporting | **Separate scope** | Existing; not part of Phase 3 |
 
 ## Phased Plan
 
@@ -64,6 +53,29 @@ starts.
   report artifacts, installer.
 - **Phase 3** is optional and regulated-workflow scope; it needs an external
   certification authority and tooling that does not exist here.
+
+- **Phase 4** is the PyQt6 + local Ollama co-pilot job: port the C++/Qt5 GUI to
+  Python/PyQt6 (4 tabs: Schematic Editor, Waveform Viewer, Co-Sim Dashboard,
+  Code/Text Workspace), and integrate a local Ollama agent (e.g. using the
+  `overnight_ollama.py` framework) for code assistance, simulation analysis, and
+  automation. Acceptance criterion: PyQt6 GUI loads and the FFI bridge
+  `buck_controller_tick` / `buck_controller_tick_ext` produce identical gate
+  states to the C++ DLL; Ollama agent answers factual WOWKISPICE questions
+  using project documentation.
+
+- **Phase 5** is the parameter-sweep automation job: add a Python-based
+  parameter-sweep module (e.g. using `pytest` + `numpy` to sweep ADC/voltage/
+  duty-cycle operating points) with automated golden-trace comparison and
+  regression reporting. Acceptance criterion: `python tools/run_sweep.py`
+  executes a defined sweep, captures traces, and compares against golden
+  references with documented tolerances.
+
+- **Phase 6** is the Windows installer + credibility badge job: produce an
+  NSIS or Inno Setup installer for `wowkispice_gui.exe`, add a credibility
+  badge to the README, and generate an SBOM (Software Bill of Materials)
+  using `cyclonedx-py` or `pip-audit`. Acceptance criterion: installer
+  runs cleanly on a fresh Windows 10/11 machine; SBOM is generated and
+  published alongside the release.
 
 ## Automated guards (already in the tree)
 

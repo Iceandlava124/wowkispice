@@ -79,8 +79,10 @@ def run_binary_cosim(
     machine: str = "esp32",
     tstep_us: float = 0.5,
     duration_ms: float = 5.0,
+    vin: float = 12.0,
     progress_callback=None,
     stop_flag=None,
+    load_stepper=None,
     vref: float = 3.3,
     adc_bits: int = 12,
     sync_mode: str = "adaptive",
@@ -99,7 +101,7 @@ def run_binary_cosim(
         qemu = os.environ.get("WOSP_QEMU")
     
     lines, nets, netlist_warnings = model.compile_netlist(
-        vin=12.0, tstep_us=tstep_us, duration_ms=duration_ms)
+        vin=vin, tstep_us=tstep_us, duration_ms=duration_ms)
     run.netlist = list(lines)
     run.nets = list(nets)
     run.warnings.extend(netlist_warnings)
@@ -185,8 +187,22 @@ def run_binary_cosim(
         return run
     
     try:
-        state = {"hits": 0, "sync_errors": 0, "sync_latency_total": 0.0}
-        
+        mode = (sync_mode or "adaptive").strip().lower()
+        if mode in ("off", "none"):
+            mode = "none"
+        elif mode not in ("adaptive", "fixed"):
+            run.warnings.append(
+                f"unknown sync_mode {sync_mode!r}; using adaptive polling")
+            mode = "adaptive"
+
+        state = {"hits": 0, "sync_errors": 0, "sync_latency_total": 0.0,
+                 "sync_error_messages": []}
+
+        def _record_sync_error(where: str, exc: Exception) -> None:
+            state["sync_errors"] += 1
+            if len(state["sync_error_messages"]) < 5:
+                state["sync_error_messages"].append(f"{where}: {exc}")
+
         def sense(net: str) -> float:
             ptr = engine.lib.ngGet_Vec_Info(net.encode("utf-8"))
             if not ptr:
@@ -197,84 +213,81 @@ def run_binary_cosim(
             if info.v_length <= 0 or not info.v_realdata:
                 return 0.0
             return float(info.v_realdata[info.v_length - 1])
-        
+
         def callback(time_s: float, source_name: str) -> float:
             state["hits"] += 1
-            state["sync_errors"] = state.get("sync_errors", 0)
             for pin_name, spec in pin_specs.items():
                 sense_net = spec.get("sense_net") or spec.get("sense")
                 if not sense_net:
                     continue
                 v_sense = sense(sense_net)
                 divider = float(spec.get("divider", 0.5))
-                adc_counts = _adc_counts_from_voltage(v_sense, vref=vref, divider=divider, adc_bits=adc_bits)
-                # Adaptive synchronization: inject ADC and wait for firmware to process
+                adc_counts = _adc_counts_from_voltage(
+                    v_sense, vref=vref, divider=divider, adc_bits=adc_bits)
+
+                # Inject the sample, then wait for the firmware to act on it.
+                # The gate read is what makes this a closed loop: returning
+                # the injected value would just echo the circuit.
                 t0 = time.monotonic()
                 try:
                     mon.set_adc1_value(adc_counts)
                 except Exception as exc:
-                    state["sync_errors"] += 1
-                    if state["sync_errors"] <= 10:  # Avoid spamming warnings
-                        pass
-                # Wait for firmware to sample and make decision using read-until-stable
-                gate = _read_until_stable(mon, timeout=sync_poll_timeout, poll_interval=sync_poll_interval)
-                sync_latency = time.monotonic() - t0
-                state["sync_latency_total"] += sync_latency
+                    _record_sync_error("set_adc1_value", exc)
+                    return 0.0
+
+                if mode == "adaptive":
+                    gate = _read_until_stable(
+                        mon, timeout=sync_poll_timeout,
+                        poll_interval=sync_poll_interval)
+                else:
+                    if mode == "fixed" and sync_poll_timeout > 0:
+                        time.sleep(sync_poll_timeout)
+                    try:
+                        gate = mon.read_gate()
+                    except Exception as exc:
+                        _record_sync_error("read_gate", exc)
+                        gate = None
+
+                state["sync_latency_total"] += time.monotonic() - t0
                 if gate is None:
                     return 0.0
-                try:
-                    return 3.3 if gate else 0.0
-                except Exception as exc:
-                    state["sync_errors"] += 1
-                    return 0.0
+                return 3.3 if gate else 0.0
             return 0.0
-        
+
         engine.set_vsrc_callback(callback)
-        if progress_callback is not None or stop_flag is not None:
+        # One hook for all three concerns. Two stacked hooks used to call the
+        # progress callback twice per timestep.
+        if (progress_callback is not None or stop_flag is not None
+                or load_stepper is not None):
             def hook(t, n):
+                if load_stepper is not None:
+                    try:
+                        load_stepper.check_and_apply(t)
+                    except Exception as exc:
+                        # A failed load step changes the circuit being solved,
+                        # so say so instead of hiding it.
+                        if len(run.warnings) < 100:
+                            run.warnings.append(f"load stepper failed: {exc}")
                 if progress_callback is not None:
                     progress_callback(t, n)
                 if stop_flag is not None and stop_flag():
                     engine.request_stop()
             engine.progress_callback = hook
-        # Load stepping support
-        load_stepper = None
-        try:
-            # Check if passed via kwargs style
-            pass
-        except Exception:
-            pass
-        
-        if progress_callback is not None or load_stepper is not None:
-            orig_hook = engine.progress_callback
-            def hook(t, n):
-                if load_stepper is not None:
-                    try:
-                        load_stepper.check_and_apply(t)
-                    except Exception:
-                        pass
-                if orig_hook is not None:
-                    try:
-                        orig_hook(t, n)
-                    except Exception:
-                        pass
-                if progress_callback is not None:
-                    try:
-                        progress_callback(t, n)
-                    except Exception:
-                        pass
-            engine.progress_callback = hook
-        
+
         engine.load_circuit(run.netlist)
         engine.cmd("run")
+        run.callback_hits = state["hits"]
+        run.aborted = bool(getattr(engine, "_stop_requested", False))
         run.time = engine.get_vector_array("time")
         for net in run.nets:
             values = engine.get_vector_array(net)
             if values:
                 run.traces[net] = values
-        run.callback_hits = state["hits"]
-        if state.get("sync_errors", 0) > 0:
-            run.warnings.append(f"sync errors: {state['sync_errors']} monitor communication failures")
+        if state["sync_errors"] > 0:
+            detail = "; ".join(state["sync_error_messages"])
+            run.warnings.append(
+                f"sync errors: {state['sync_errors']} monitor "
+                f"communication failures ({detail})")
         # Report average sync latency
         if state.get("hits", 0) > 0:
             avg_latency = state["sync_latency_total"] / state["hits"]

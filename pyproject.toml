@@ -5,28 +5,32 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wosp"
 version = "1.0.0"
-description = "WOSP: mixed-signal emulator + ESP32 firmware-in-the-loop reference harness"
+description = "WOWKISPICE: mixed-signal virtual laboratory for power electronics"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
-authors = [{name = "WOSP contributors"}]
-keywords = ["esp32", "ngspice", "qemu", "embedded", "co-simulation"]
+authors = [{name = "WOWKISPICE contributors"}]
+keywords = ["mixed-signal", "power-electronics", "ngspice", "ESP32", "co-simulation", "Qt5"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
+    "Intended Audience :: Developers and Engineering Teams",
     "License :: OSI Approved :: Apache Software License",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Electrical Engineering",
 ]
 dependencies = [
     "numpy>=1.26.0",
     "matplotlib>=3.8.0",
     "pypdf>=4.0.0",
     "pytest>=8.0.0",
-    "PyQt5>=5.15.0",
+    "PyQt6>=6.6.0",
     "pyqtgraph>=0.13.0",
     "scipy>=1.11.0",
     "pytest-timeout>=2.3.0",
@@ -43,13 +47,25 @@ dev = [
 
 [project.scripts]
 wosp-check = "bridge.selfcheck:main"
+wosp = "tools.cli:main"
+wosp-gui = "gui:main"
 
 [tool.setuptools.packages.find]
-include = ["bridge*"]
+include = ["bridge*", "tools*", "gui*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 timeout = 30
 markers = [
-    "qemu: real-QEMU contract tests (qemu-system-xtensa required)",
+    "qemu: real-QEMU contract tests (qemu-system-xtesa required)",
+    "hysteretic: hysteretic controller DLL test",
+    "firmware: firmware parsing and analysis tests",
 ]
+
+# Bridge extra for FFI
+[project.extras]
+ffi = ["wowkispice-ffi"]
+
+# Windowed GUI app on Windows
+[tool.setuptools]
+gui-modules = ["gui"]

@@ -14,6 +14,8 @@ import sys
 import threading
 import time
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -484,6 +486,94 @@ class TestPinMapAndSerialPanels(unittest.TestCase):
         self.win.clear_serial()
         self.assertEqual(self.win.serial_view.toPlainText(), "")
         self.assertEqual(self.win._serial.count, 0)
+
+
+class TestBinaryCosimBranch(unittest.TestCase):
+    """WOSP_USE_BINARY_COSIM must route the editor through the firmware path.
+
+    The QEMU half is replaced with a synthetic CosimRun: this pins the UI
+    wiring (which kwargs are passed, how warnings and aborts are surfaced,
+    and that a launcher exception cannot leave run/aborted unbound).
+    """
+
+    def setUp(self):
+        self.win = SchematicEditor()
+        self.win.model.load_dict(arduino_circuit().to_dict())
+        self.win.scene.rebuild()
+        self.win.ng = SimpleNamespace(
+            _stop_requested=False, timestep_count=0, progress_callback=None)
+
+    def tearDown(self):
+        self.win.close()
+
+    @staticmethod
+    def _fake_run(aborted=False):
+        from bridge.cosim_runner import CosimRun
+        run = CosimRun()
+        run.time = [0.0, 0.0005, 0.001]
+        run.traces = {"led": [0.0, 3.3, 3.3]}
+        run.nets = ["led"]
+        run.netlist = ["* firmware-in-the-loop run"]
+        run.callback_hits = 3
+        run.aborted = aborted
+        run.warnings = ["synthetic warning"]
+        return run
+
+    def test_binary_mode_passes_the_model_and_uses_the_returned_run(self):
+        from bridge import binary_runner
+        run = self._fake_run()
+        seen = {}
+
+        def fake(model, pin_specs, **kwargs):
+            seen["model"] = model
+            seen["pin_specs"] = pin_specs
+            seen["kwargs"] = kwargs
+            return run
+
+        with mock.patch.dict(os.environ, {"WOSP_USE_BINARY_COSIM": "1"}), \
+                mock.patch.object(binary_runner, "run_binary_cosim",
+                                  side_effect=fake):
+            self.win.run_closed_loop({"D5": {"sense_net": "led"}})
+
+        self.assertIs(seen["model"], self.win.model)
+        self.assertEqual(seen["pin_specs"], {"D5": {"sense_net": "led"}})
+        self.assertEqual(seen["kwargs"]["vin"], 12.0)
+        self.assertIn("REAL FIRMWARE BINARY",
+                      self.win.console.toPlainText())
+        self.assertIn("* firmware-in-the-loop run",
+                      self.win.netlist_view.toPlainText())
+        self.assertEqual(self.win._last_traces["led"], [0.0, 3.3, 3.3])
+        self.assertFalse(self.win._running)
+        self.assertEqual(self.win.progress.value(), 100)
+
+    def test_binary_warning_reaches_the_console(self):
+        from bridge import binary_runner
+        with mock.patch.dict(os.environ, {"WOSP_USE_BINARY_COSIM": "1"}), \
+                mock.patch.object(binary_runner, "run_binary_cosim",
+                                  return_value=self._fake_run()):
+            self.win.run_closed_loop({"D5": {"sense_net": "led"}})
+        self.assertIn("synthetic warning", self.win.console.toPlainText())
+
+    def test_binary_abort_is_reported(self):
+        from bridge import binary_runner
+        with mock.patch.dict(os.environ, {"WOSP_USE_BINARY_COSIM": "1"}), \
+                mock.patch.object(binary_runner, "run_binary_cosim",
+                                  return_value=self._fake_run(aborted=True)):
+            self.win.run_closed_loop({"D5": {"sense_net": "led"}})
+        self.assertIn("stopped early", self.win.console.toPlainText())
+
+    def test_launcher_exception_does_not_leave_run_unbound(self):
+        from bridge import binary_runner
+        with mock.patch.dict(os.environ, {"WOSP_USE_BINARY_COSIM": "1"}), \
+                mock.patch.object(binary_runner, "run_binary_cosim",
+                                  side_effect=RuntimeError("no emulator")):
+            self.win.run_closed_loop({"D5": {"sense_net": "led"}})
+        # The old finally block read `run` before assignment and raised a
+        # NameError that masked this message.
+        self.assertIn("ERROR: binary cosim failed: no emulator",
+                      self.win.console.toPlainText())
+        self.assertFalse(self.win._running)
+        self.assertFalse(self.win.stop_button.isEnabled())
 
 
 if __name__ == "__main__":

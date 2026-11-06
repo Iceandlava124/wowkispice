@@ -261,15 +261,16 @@
     - **atexit/process-kill in bridge/qemu_monitor.py**: Separate code in qemu_monitor.py handles cleanup on Python exit; cleanup_qemu.py is standalone
     - **Critical**: Does NOT kill unrelated processes; PID tracking needed for orphan detection
 
-34. `tools/cli.py` - headless CLI (new)
+34. `tools/cli.py` - headless CLI
     - **Apparent job**: J8 ROADMAP PHASE 2 (CLI, P2)
-    - **Tracked**: no (untracked)
-    - **Size**: 11195 bytes
-    - **Line-ending changes**: Real changes (Python CLI script)
-    - **PyQt import**: PROVEDLY does NOT import PyQt - uses argparse only, imports bridge modules directly
+    - **Tracked**: yes
+    - **Size**: ~13 KB
+    - **PyQt import**: No - argparse only; imports bridge/tools modules
     - **Commands**: cosim-binary, test-gate-flip, doctor, golden-trace (capture/compare), version
-    - **JSON output mode**: --output flag for cosim-binary
-    - **Prove no PyQt import**: Subprocess import check confirms no PyQt dependency
+    - **JSON output mode**: --output flag for cosim-binary; golden compare/capture write/read via `tools/golden_trace`
+    - **Entry point**: `pyproject.toml` `wosp = "tools.cli:main"`
+    - **Tests**: `tests/test_cli.py`
+    - **Docs**: `docs/time-sync.md`, `docs/ARCHITECTURE_LOOP.md`, `docs/WINDOWS_QEMU_BUILD.md` tracked alongside it
 
 35. `tools/doctor.py` - environment doctor
     - **Apparent job**: J7 ROADMAP PHASE 1 (doctor, tool qualification)

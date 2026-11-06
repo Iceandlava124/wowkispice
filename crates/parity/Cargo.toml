@@ -7,3 +7,4 @@ publish = false
 
 [dependencies]
 wowkispice-core = { path = "../wowkispice-core" }
+wowkispice-ffi = { path = "../wowkispice-ffi" }
