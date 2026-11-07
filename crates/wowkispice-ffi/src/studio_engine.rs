@@ -1220,9 +1220,14 @@ mod tests {
     }
 
     #[test]
-    fn test_run_simulation_no_dll() {
+    fn test_run_simulation_returns_error_without_required_symbol() {
+        let _guard = crate::NGSPICE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut engine = StudioSimulationEngine::new();
         let result = engine.run_simulation(5.0, 0.5, 12.0, 3.30, 5.0, 47.0, 100.0);
-        assert!(result.is_err()); // DLL not available
+        // The bundled build lacks ngGetVSRCData; the call must fail cleanly
+        // rather than corrupt state.
+        assert!(result.is_err());
     }
 }

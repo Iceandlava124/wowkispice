@@ -8,6 +8,8 @@
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QValueAxis>
 
+using namespace QtCharts;
+
 CosimDashboard::CosimDashboard(QWidget *parent)
     : QWidget(parent)
 {
@@ -113,10 +115,10 @@ CosimDashboard::CosimDashboard(QWidget *parent)
     chart->setTitle("Bode Plot - Magnitude vs Frequency");
     chart->legend()->hide();
     QValueAxis *magnAxis = new QValueAxis();
-    magnAxis->setLabelFormat('f', 2);
+    magnAxis->setLabelFormat("%.2f");
     magnAxis->setTitleText("Magnitude (dB)");
     QValueAxis *freqAxis = new QValueAxis();
-    freqAxis->setLabelFormat('f', 2);
+    freqAxis->setLabelFormat("%.2f");
     freqAxis->setTitleText("Frequency (Hz)");
     chart->addAxis(magnAxis, Qt::AlignLeft);
     chart->addAxis(freqAxis, Qt::AlignBottom);
@@ -135,7 +137,11 @@ CosimDashboard::CosimDashboard(QWidget *parent)
     // Connections
     connect(m_runBtn, &QPushButton::clicked, this, &CosimDashboard::runSimulation);
     connect(m_stopBtn, &QPushButton::clicked, this, &CosimDashboard::stopSimulation);
-    connect(m_sweepBtn, &QPushButton::clicked, this, &CosimDashboard::startParameterSweep);
+    connect(m_sweepBtn, &QPushButton::clicked, this, [this] {
+        startParameterSweep(m_sweepParam->currentIndex(), m_sweepStart->value(),
+                            m_sweepStop->value(), m_sweepSteps->value(),
+                            m_sweepDelay->value());
+    });
 }
 
 void CosimDashboard::addLaw(const QString &pin, double targetV, double hystV,
@@ -215,13 +221,12 @@ void CosimDashboard::startParameterSweep(int sweepType, int start, int stop, int
 {
     qDebug() << "Starting parameter sweep type" << sweepType
              << "range" << start << "to" << stop << steps << "steps";
+    Q_UNUSED(delayMs);
 
     m_sweepResults->setRowCount(0);
 
     // Determine what to sweep based on m_sweepParam selection
     QString paramName;
-    int minVal = start;
-    int maxVal = stop;
     int stepCount = steps;
 
     if (m_sweepParam->currentIndex() == 0) {  // ADC Counts
@@ -265,8 +270,9 @@ void CosimDashboard::startParameterSweep(int sweepType, int start, int stop, int
     QMap<QString, QMap<QString, double>> results;
     for (int i = 0; i <= stepCount; ++i) {
         QMap<QString, double> stepResults;
-        stepResults["adc"] = m_sweepStart + (int)((double)(m_sweepStop - m_sweepStart) * i / steps);
-        stepResults["gate"] = (m_sweepStart + (int)((double)(m_sweepStop - m_sweepStart) * i / steps) < 1995) ? 1.0 : 0.0;
+        int adc = start + (int)((double)(stop - start) * i / steps);
+        stepResults["adc"] = adc;
+        stepResults["gate"] = (adc < 1995) ? 1.0 : 0.0;
         results[QString::number(i)] = stepResults;
     }
     emit sweepProgress(0, results);

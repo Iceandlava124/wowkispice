@@ -1,83 +1,76 @@
 # Architecture
 
-One page (plus diagrams). The intent is to describe what the system *does*
-today and what is automatic versus manual, not to describe a dream state.
+One page describing what the system does today and what is automatic versus
+legacy. Every path below is traceable to a file in this checkout.
 
 ---
 
-## Component map
+## Shipped component map
 
 ```
 +----------------------------------------------------------------------+
-|  controller (what runs the loop)                                      |
-|  - bridge/control_law.py      : hysteretic thresholds, ADC counts    |
-|  - bridge/ngspice_wrapper.py  : ngspice.dll / libngspice bindings    |
-|  - bridge/qemu_monitor.py     : HMP qom-set xp reads/writes          |
-|  - bridge/qemu_orchestrator.py: boot, console log, monitor session   |
-|  - bridge/firmware.py         : parse .elf/.hex, SHA-256, metadata   |
+|  C++/Qt5 GUI  (gui/)                                                  |
+|   schematic_editor / waveform_viewer / cosim_dashboard / code_workspace|
 +----------------------------------------------------------------------+
-        |          |          |              |
-        v          v          v              v
-   ngspice   QEMU (esp32_sens)  ESP32    serial console
-   netlist   patched: esp32_sens (executed binary, boot test)
-   solver    SAR ADC + GPIO OUT ( modelled )  ( ROM->bootloader->app_main)
-        |          |          |              |
-        +----------+----------+              |
-                   |  ADC count (12-bit)      |
-                   |  <- qom-set adc1-value   |
-                   |  -> xp GPIO_OUT (18)     |
-                   |      gate decision       |
-                   +----------> closed loop <+
+                     |  C ABI / Rust API
+                     v
++----------------------------------------------------------------------+
+|  crates/wowkispice-ffi                                                |
+|   NgSpiceFfi        : runtime LoadLibraryExA/dlopen + 15 C symbols    |
+|   cosim_runner.rs   : per-timestep loop over ngspice callbacks        |
+|   mock_controller.rs: hysteretic controller law (1995/2030 counts)   |
+|   studio_engine.rs  : waveform/UART helpers                           |
++----------------------------------------------------------------------+
+                     |                         ^
+                     v                         |
++----------------------------------------------------------------------+  |
+|  crates/wowkispice-core  (no external deps)                           |  |
+|   control_law, netlist sanitiser, cad_engine, measurements,           |  |
+|   analysis_runner, kicad_export, report_generator, firmware parsers   |  |
++----------------------------------------------------------------------+  |
+                     |                                                    |
+                     v                                                    |
+            tools/ngspice_dll/.../ngspice.dll  ----------------------------+
+                     (solve; callbacks return the gate voltage)
 ```
-
-The loop, as it actually is today, is two independent tracks that share the
-same numbers:
-
-1. **`bridge/ngspice_wrapper.py` → `bridge/control_law.py` (automatic).** A
-   netlist that lives in the repo or a user file is handed to ngspice, the
-   solver runs, and the Python bridge converts the results into counts with
-   the same mapping the firmware uses (`bridge/control_law._to_counts`).
-   Nothing here touches QEMU. This is the *analog engine* and it is real.
-
-2. **`bridge/qemu_orchestrator.py` + `bridge/qemu_monitor.py` (manual).** The
-   firmware binary boots under the *patched* QEMU, `app_main()` runs, and
-   the host pushes an ADC sample with `qom-set
-   /machine/peripheral/sens adc1-value N` and reads the latched GPIO18 gate
-   decision back with `xp /1wx 0x3FF44004`. **This track has zero
-   bi-directional coupling to ngspice today** — `cosim_runner.py` and the
-   `probe_memory()` helpers document the gap. It is a *verification* of the
-   firmware, not the co-simulation loop.
-
-The coupling is now automatic via `bridge/binary_runner.py`:
-
-* ngspice solver results drive ADC injection into the firmware running in QEMU via `QemuMonitor`;
-* firmware gate state (read from GPIO registers) drives the ngspice external voltage source each timestep;
-* the loop runs in lockstep with the solver callbacks.
 
 ---
 
-## Data flow (as it is today)
+## The loop as it actually runs
 
-```
-ngspice netlist ──> ngspice (solve) ──> bridge/ngspice_wrapper.py
-                                                       │
-                                                       ▼
-                                              control_law.py  (_to_counts)
-                                                       │
-                                                       ▼
-                                              (controller model output)
+`crates/wowkispice-ffi/src/cosim_runner.rs` registers ngspice callbacks. On every
+`GetVSRCData` callback it:
 
-ESP32 firmware ──> QEMU (esp32_sens patched) ──> host ADC injection
-     |                                        (manual, qom-set)
-     └──> console UART (boot markers) ◀──────────┘
-```
+1. reads the sense net's most recently accepted sample from the live plot;
+2. hands that value to the controller law (`ControlLaw` from
+   `wowkispice-core::control_law`, or `MockESP32BuckController`);
+3. quantises to 12-bit ADC counts and applies the hysteresis thresholds;
+4. returns the gate voltage for that instant to the solver.
 
-Legend:
+`mock_controller.rs` states its constants are **derived from**
+`firmware/esp32_buck_controller/src/main.c` (ADC_LOW_THRESHOLD 1995,
+ADC_HIGH_THRESHOLD 2030), not chosen by hand. The parity is tested at the logic
+level in `crates/wowkispice-core/tests/test_buck_controller_hysteresis.rs` and
+`test_buck_controller_industry.rs`.
 
-* **Automatic** – the path from netlist to numbers that needs no human in
-  the loop once the files are in place.
-* **Manual** – a human (or an operator script) acts at that point; the
-  robot never does it on its own.
+This path is automatic and single-process. There is no QEMU process, no Python
+IPC, and no serial console in it.
+
+---
+
+## What is legacy, and what is merely an artifact
+
+| Item | Status | Evidence |
+|---|---|---|
+| QEMU co-simulation (`bridge/qemu_orchestrator.py`, `bridge/qemu_monitor.py`, `tools/qemu-patch/`) | **Legacy / deprecated.** Not used by the shipped Rust or GUI code. | `grep -rn "qemu" crates gui` matches only `toolchain_resolver.rs` (diagnostic discovery) and `firmware.rs` comments. |
+| `tools/qualify_qemu.py`, `bridge/esp32_regs.py` | Legacy tooling retained for historical QEMU work. | Present, but not on the shipped path. |
+| `firmware_control.dll` (and the `.so`/`.dylib` build targets) | **Built artifact, not wired.** Exports `buck_controller_tick` / `_ext`; no Rust, GUI, or Python code loads it. | `grep -rn "firmware_control\|buck_controller_tick" crates gui bridge` finds only tests and C sources. |
+| `bridge/` (Python) | Parity contract and legacy modules. | The Rust modules mirror these 1:1; `crates/parity` diffs them. |
+| `ui/` (PyQt5) | Legacy editor, mined for feature inventory. | Not the shipping GUI. |
+
+The earlier architecture (Python bridge plus patched QEMU driving the firmware)
+is documented in `QEMU_REPLACEMENT_STATUS.md` and `docs/STATE.md`. It is history,
+not the current co-simulation path.
 
 ---
 
@@ -85,12 +78,10 @@ Legend:
 
 | Item | Kind | Where |
 |---|---|---|
-| ngspice netlist + `.tran/.dc/.ac` directives | data | repo `circuits/`, user files |
-| ngspice solver | engine | `tools/ngspice` (Windows DLL 47), system ngspice |
-| `control_law.py` constants | model (calibrated, real counts) | `bridge/control_law.py` |
-| firmware `main.c` thresholds | model (raw counts, uncalibrated) | `firmware/src/main.c` |
-| `esp32_sens` model | EML (patched QEMU) | `tools/qemu-patch/` |
-| `bridge/esp32_regs.py` addresses | data (transcribed from ESP-IDF 6.1.0 `soc` headers) | `bridge/esp32_regs.py` |
-| golden traces | data (to be versioned) | documented in `docs/time-sync.md` |
-| `firmware_control.dll` / `.so` / `.dylib` | FFI bridge (cross-platform) | `firmware/esp32_buck_controller/src/buck_controller_tick.c` |
-| `buck_controller_tick_ext()` | calibrated/oversample path | Added in industrial hardening Phase 3 |
+| ngspice netlist + `.tran/.dc/.ac` | data | `circuits/`, user files |
+| ngspice solver | engine | `tools/ngspice` (DLL 47) or system ngspice |
+| `control_law` constants | model (derived from firmware source) | `crates/wowkispice-core/src/control_law.rs` |
+| firmware thresholds | model (raw counts) | `firmware/esp32_buck_controller/src/main.c` |
+| `mock_controller.rs` law | model (Rust port, constants from main.c) | `crates/wowkispice-ffi/src/mock_controller.rs` |
+| `firmware_control.dll` | built artifact (not loaded by shipped code) | `firmware/esp32_buck_controller/src/` |
+| golden traces | data | `tests/golden/` |

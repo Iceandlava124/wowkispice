@@ -9,10 +9,12 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QSpinBox>
-#include <QtWidgets.QFrame>
+#include <QtWidgets/QComboBox>
+#include <QtWidgets/QFrame>
 #include <QtCore/QMap>
 #include <QtCore/QString>
 #include <QtCore/QVector>
+#include <QtCharts/QChartView>
 
 class CosimDashboard : public QWidget {
     Q_OBJECT
@@ -68,6 +70,7 @@ private:
     QMap<QString, double> m_senseV;
 
     // Bode analysis
+    QtCharts::QChartView *m_bodeChartView = nullptr;
     QByteArray m_bodeFrequencyData;
     QByteArray m_bodeMagnitudeData;
     QByteArray m_bodePhaseData;

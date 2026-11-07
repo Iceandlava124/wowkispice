@@ -567,32 +567,32 @@ print("ALL_CHECKS_PASSED")
 fn test_vector2_shell_command_is_rejected() {
     // "shell echo PWNED> <marker>" — msg names the verb and the allowlist;
     // rejected by validate_cmd("shell ...") on its verb alone.
-    let msg = expect_err_cmd("shell echo PWNED> C:\\Users\\gudae\\...\\marker_v2.txt");
+    let msg = expect_err_cmd("shell echo PWNED> <USERPROFILE>\\...\\marker_v2.txt");
     assert!(msg.contains("shell"));
     assert!(msg.contains("allowlist"));
 }
 
 #[test]
 fn test_vector3_source_command_is_rejected_blind() {
-    let msg = expect_err_cmd("source \"C:\\Users\\gudae\\...\\payload_v3.cir\"");
+    let msg = expect_err_cmd("source \"<USERPROFILE>\\...\\payload_v3.cir\"");
     assert!(msg.contains("source"));
 }
 
 #[test]
 fn test_vector5_write_cannot_create_a_file() {
-    let msg = expect_err_cmd("write \"C:\\Users\\gudae\\...\\payload_v5_out\" v(out)");
+    let msg = expect_err_cmd("write \"<USERPROFILE>\\...\\payload_v5_out\" v(out)");
     assert!(msg.contains("write"));
 }
 
 #[test]
 fn test_vector6_wrdata_cannot_create_a_file() {
-    let msg = expect_err_cmd("wrdata \"C:\\Users\\gudae\\...\\payload_v6_out\" v(out)");
+    let msg = expect_err_cmd("wrdata \"<USERPROFILE>\\...\\payload_v6_out\" v(out)");
     assert!(msg.contains("wrdata"));
 }
 
 #[test]
 fn test_vector7_hardcopy_cannot_create_a_file() {
-    let msg = expect_err_cmd("hardcopy \"C:\\Users\\gudae\\...\\payload_v7_out\" v(out)");
+    let msg = expect_err_cmd("hardcopy \"<USERPROFILE>\\...\\payload_v7_out\" v(out)");
     assert!(msg.contains("hardcopy"));
 }
 

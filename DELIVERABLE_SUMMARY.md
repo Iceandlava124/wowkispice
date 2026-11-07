@@ -1,139 +1,89 @@
 # WOWKISPICE Deliverable Summary
 
-## Plan Items Completed
+Phase numbers in this file follow **`ROADMAP.md`**, the single canonical plan.
+This document reports what was delivered per phase; it does not define its own
+numbering.
 
-### P6: C++/Qt5 GUI
-- `wowkispice_gui.exe` compiled with CMake/Ninja under MSYS2
-- Zero warnings with `-Wall -Wextra -Werror -pedantic`
-- 4-tab interface: Schematic Editor, Waveform Viewer, Co-Sim Dashboard, Code/Text Workspace
-- GUI launched and running
+## Measured baseline (2026-11-07)
 
-### P7: Suite Unification
-- **Rust core** (`wowkispice-core`): 325+3 unit tests across 12 modules, zero `cargo test -D warnings` failures
-- **FFI crate** (`wowkispice-ffi`): Hand-written `extern "C"` bridge to `ngspice.dll`; 24/26 tests pass (2 pre-existing DLL-load environment issues, documented)
-- **Parity harnesses**: 3 modules with Rust+Python drivers printing `PARITY OK — N values identical`
-- **Python test suite**: All `tests/*.py` gating preserved; FFI-only halves documented as reduction
-- **Qt5 GUI**: all 4 tabs verified working
-
-### P8: Docker
-- Docker Desktop daemon running
-- `docker info` verified: Docker Desktop 4.98.0, 8 images, 0 containers, WSL2 backend
-- Final deliverable image ready
-
-## Key Deliverables
-
-| File | Description |
+| Check | Result |
 |---|---|
-| `BASELINE_REPORT.md` | Test outputs, GUI verification, performance baseline, DLL-load failure notes |
-| `FFI_CONSOLIDATION_REPORT.md` | Diff matrix, frozen FFI API signature, Python driver replacement status, performance speedup |
-| `QEMU_REPLACEMENT_STATUS.md` | DLL path won; hysteresis tests match Python mock; legacy QEMU documentation; updated status |
-| `crates/wowkispice-core/` | Rust dependency-free core (328 tests including 3 new hysteresis tests, zero warnings) |
-| `crates/wowkispice-ffi/` | FFI bridge to ngspice.dll via `LoadLibraryExA`/`dlopen`; 15 symbols resolved via `resolve_fn!` macro |
-| `crates/parity/` | Cross-implementation diff harnesses (Rust vs Python) per module |
-| `gui/` | C++/Qt5 GUI with 4-tab QTabWidget widget, CMake/Ninja build, zero warnings |
-| `wowkispice_gui.exe` | Built and running Windows executable with 4 tabs |
-| `firmware/esp32_buck_controller/src/buck_controller_tick.c` | Extern "C" function for hysteretic controller |
-| `firmware/esp32_buck_controller/src/firmware_control.dll` | Compiled DLL (24121 bytes) via x86_64-w64-mingw32-gcc |
-| `crates/wowkispice-core/tests/test_buck_controller_hysteresis.rs` | 3 new tests: hysteresis low->ON, high->OFF, low->ON again; full sequence matches Python mock; ADC conversion verification |
+| `cargo test -p wowkispice-core` | **334 passed, 0 failed, 0 warnings** |
+| `cargo test -p wowkispice-ffi` | **27 passed, 0 failed** — DLL loading fixed via `LOAD_WITH_ALTERED_SEARCH_PATH` flag |
+| `run_selfcheck.bat` (clean shell) | **SELF-CHECK: PASS**, exit 0; **547 passed, 4 skipped, 0 failed** in 229.43 s |
+| Installer | `installer/wowkispice_installer.exe` exists (NSIS PE32, 124,773 bytes); `.nsi` is a placeholder template; clean install **unverified** |
+| Co-simulation | Rust `cosim_runner` + ngspice + controller model; QEMU legacy |
+| Controller DLL | `firmware/esp32_buck_controller/src/firmware_control.dll` (24,891 bytes, exports `buck_controller_tick`); **not loaded by shipped code**. Repo-root `firmware_control.dll` is a stale 24,121-byte copy |
 
-## Test Results Summary
-- `cargo test -p wowkispice-core`: 328/328 pass (325 original + 3 new hysteresis), zero warnings
-- `cargo test -p wowkispice-ffi`: 24/26 pass (2 DLL-load env failures, documented)
-- All `tests/*.py` parity drivers gating and producing `PARITY OK`
-- `cargo build -p parity`: zero warnings
-- `wowkispice_gui.exe`: compiles cleanly, shows all 4 tabs
+## Delivered by canonical phase
 
-## Roadmap Progress
+### Phase 0 — Foundation: COMPLETE
 
-| Phase | Status |
-|---|---|
-| Phase 0 baseline | ✅ Complete (BASELINE_REPORT.md) |
-| Phase 1 FFI bridge consolidation | ✅ Complete (FFI_CONSOLIDATION_REPORT.md) |
-| Phase 2 QEMU replacement | ✅ Complete (DLL path; QEMU_REPLACEMENT_STATUS.md) |
-| Phase 3+ Industrial Hardening | ✅ Complete (INDUSTRIAL_HARDENING_REPORT.md) |
-| Phase 4 PyQt6 + local Ollama co-pilot | ⏭️ Skipped — C++ Qt5 GUI already verified (4 tabs, zero warnings); industrial hardening complete without Python GUI |
-| Phase 5 parameter-sweep automation | ✅ Completed — 6 new industry tests added (adc_half_scale, adc_lower_mid, adc_upper_mid, persistence_1000_ticks, noise_jitter_5, boundary_re_entrant); all 16/16 pass; baseline 328 core tests still pass |
-| Phase 6 Windows installer + credibility badge | ⏳ In progress |
+- `crates/wowkispice-core`: Rust, dependency-free, 17 modules mirroring `bridge/` 1:1.
+- `crates/wowkispice-ffi`: hand-written `extern "C"` ngspice binding via `LoadLibraryExA`/`dlopen`; 15 symbols resolved lazily (14 required; `ngGetVSRCData` optional).
+- `crates/parity`: Rust-vs-Python diff harnesses; three modules print `PARITY OK`.
+- `gui/`: C++/Qt5, four views (`schematic_editor`, `waveform_viewer`, `cosim_dashboard`, `code_workspace`); clean rebuild verified 2026-11-07, exit 0, 0 warnings. Requires Qt5 Charts.
+- Controller logic parity: Rust reproduces firmware thresholds 1995/2030 and matches the Python mock (`test_buck_controller_hysteresis.rs`, `test_buck_controller_industry.rs`).
+- QEMU retired from the shipped path (`QEMU_REPLACEMENT_STATUS.md`, `docs/architecture.md`).
+- `firmware_control.dll` built from `buck_controller_tick.c` as an artifact.
 
-## "Done" Criteria Met
-- BASELINE_REPORT.md exists, accurate, verified ✅
-- FFI_CONSOLIDATION_REPORT.md exists; run_tests.py exits 0 with new FFI bridge; diff matrix shows <5% output difference on shared tests ✅
-- QEMU_REPLACEMENT_STATUS.md exists; firmware_control.dll or Wasm prototype runs hysteretic controller identically to Python mock in single-process loop; QEMU modules documented as legacy ✅
-- Not started: Phase 4 (PyQt6/Co-Pilot), Phase 5 (sweep automation)
+Key reports: `BASELINE_REPORT.md`, `FFI_CONSOLIDATION_REPORT.md`,
+`QEMU_REPLACEMENT_STATUS.md`, `INDUSTRIAL_HARDENING_REPORT.md`.
 
-## Industrial Hardening
+### Phase 1 — Reproducible environment: COMPLETE (Windows)
 
-### Phase 3+ — What Changed, What's Production-Ready
+- `setup.ps1` (venv, requirements, ngspice DLL, `.env.local`, cleanup/fetch/doctor).
+- `run_selfcheck.bat` invokes the venv interpreter directly; `tools/selfcheck.py` re-executes under it from another `python`.
+- Gate failure propagation verified: broken quick suite → exit 1; unknown flag → exit 2.
+- `tools/setup.sh` / `tools/run_selfcheck.sh` exist for POSIX; unverified on Linux/macOS.
+- Docker build/run recorded 2026-11-06; not re-verified (`docker info` exits 1; daemon not running).
 
-#### ADC Calibration Layer
-- **New API**: `buck_controller_tick_ext(adc_counts, calibrated_voltage_mv, oversample_n, gpio_out)` — optional calibrated path with raw→voltage conversion
-- **Calibration fallback**: Nominal Vref=3.3V conversion when eFuse calibration unavailable; graceful degradation matching firmware runtime behavior
-- **Backward compat**: `buck_controller_tick(adc_counts, &gpio)` unchanged; existing users unaffected
-- **Exports**: `firmware_control.dll` + `firmware_control.so` + `firmware_control.dylib` all export new functions
+### Phase 2 — Deterministic & regression-testable: COMPLETE
 
-#### Oversampling & Noise Reduction
-- **Parameter**: `buck_controller_tick(adc_counts, oversample_n, gpio_out)`
-- **Contract**: "Caller MUST average N samples before passing to tick() if oversample_n > 1. When oversample_n == 1, behavior is identical to current."
-- **Verified paths**: oversample_n=1 (fast path) and oversample_n=16 (noise-reduced path)
+- Golden-trace framework and reference data (`tools/golden_trace.py`, `tests/golden/`).
+- Sync contract measured and documented (`docs/time-sync.md`): flip 20.3–20.8 ms, HMP RTT ≤10.5 ms, 30/30 flips (recorded).
+- Fault-injection battery; several cases are mocks, stated as such.
+- Headless CLI (`tools/cli.py`) with five commands.
+- Fixed `tools/loop_repeat.py` measurement granularity (4 → 6 decimals) this pass; test passes 5/5 standalone and in the full gate.
 
-#### Cross-Platform FFI
-- **Windows**: `firmware_control.dll` (MinGW, compiled with -Wall -Wextra -Werror)
-- **Linux**: `firmware_control.so` (gcc -shared -fPIC, cfg gate `#[cfg(target_os = "linux")]`)
-- **macOS arm64**: `firmware_control.dylib` (clang -shared -arch arm64, cfg gate `#[cfg(target_os = "macos")]`)
-- **All three platforms** export identical function signatures: `buck_controller_tick` + `buck_controller_tick_ext`
+### Phase 3 — Professionalize: IN PROGRESS
 
-#### Formal FSM Verification
-- Hysteretic controller modeled as FSM: GATE_OFF ↔ GATE_ON with hysteresis band [1995, 2030]
-- 10 industry tests verify: boundary points, hysteresis hold, noise rejection, persistence, edge cases
-- All properties match the FSM transition table necessary and sufficient conditions
+- `tools/check_traceability.py`: 14 requirements / 16 marked tests, fails on zero rows/tests.
+- `docs/requirements.md` includes all 14 rows; CO-05 and CO-10 marked as legacy QEMU.
+- CI workflow exists but **has not run on a runner**.
+- Packaging partial: `wosp-check` and `wosp` entry points are valid; `wosp-gui` targets a missing `gui:main`. Open: logging, release process.
 
-#### Exhaustive Test Suite
-- **10 industry tests** added to `crates/wowkispice-core/tests/test_buck_controller_industry.rs`:
-  - Boundary scans at 1993, 1995, 1997, 2030, 2031, 2032, 0, 4095
-  - Persistence across 100 tick alternation
-  - Noise jitter rejection (±10 counts within hysteresis band)
-  - ADC min/max edge cases
-- All 10 tests pass; baseline 328 core tests still pass; FFI 24/26 pass
+### Phase 4 — Validation & sign-off: IN PROGRESS
 
-#### Deliverables Updated
-- `INDUSTRIAL_HARDENING_REPORT.md` — new: calibration status, oversample contract, verified platforms, change from baseline
-- `DELIVERABLE_SUMMARY.md` — updated: "Industrial Hardening" section documenting Phase 3+ changes
-- `crates/wowkispice-core/tests/test_buck_controller_industry.rs` — 10 new tests, all pass
-- `firmware/esp32_buck_controller/src/buck_controller_tick.c` — `buck_controller_tick_ext()` + calibration/oversample; original `buck_controller_tick()` unchanged
+- Core 334/0/0; full gate 547/4/0; hysteresis tests pass.
+- Open: fresh-clone run, Docker fresh build, golden sign-off, full doc review.
 
-### Baseline Compatibility Verified
-- `cargo test -p wowkispice-core` → 328/328 pass, zero warnings ✅
-- `cargo test -p wowkispice-ffi` → 24/26 pass (2 pre-existing DLL-load env failures) ✅
-- `buck_controller_tick(1500, &gpio)` still produces `gpio=true` as in baseline ✅
+### Phase 5 — Product hardening & distribution: NOT STARTED
 
-## Phase 4: PyQt6 + Local Ollama Co-Pilot — Planning
+- Installer artifact exists but is not reproducible from the checked-in `.nsi` (literal `<USERPROFILE>` paths, no `OutFile`/pages, `makensis` absent) and is unverified on a clean machine.
+- Open: SBOM, save-format migration, parameter-sweep tool, POSIX verification, i18n/a11y, crash reporting.
 
-### Goal
-Port/update the C++/Qt5 GUI to PyQt6, and integrate a local Ollama co-pilot agent for code assistance, analysis, and automation within WOWKISPICE.
+### Phase 6 — Optional regulated workflows: NOT STARTED
 
-### Acceptance Criteria (when `python tools/selfcheck.py` and Python test suites pass)
-1. **PyQt6 GUI**: A working Python/PyQt6 window with 4 tabs matching the C++ GUI: Schematic Editor, Waveform Viewer, Co-Sim Dashboard, Code/Text Workspace
-2. **DLL FFI bridge**: The PyQt6 GUI can load and call `firmware_control.dll`/`firmware_control.so` via `wowkispice-ffi` Rust crate, with `buck_controller_tick` and `buck_controller_tick_ext` functioning identically to the C++ counterpart
-3. **Ollama co-pilot**: A functional Ollama agent integration (using the `overnight_ollama.py` framework or similar) that can answer project questions, suggest code changes, or analyze simulation results — running locally against `ollama serve`
-4. **No baseline breakage**: `cargo test -p wowkispice-core` → 328/328 pass, zero warnings; `cargo test -p wowkispice-ffi` → 24/26 pass
+- DO-330-style traceability, pilot checklist, release-note evidence. Optional external scope.
 
-### Work Plan
-| Task | Owner | Notes |
-|------|-------|-------|
-| 4a: Verify PyQt6 availability and basic window | Python lead | Check if PyQt6 can be installed in venv; create basic QMainWindow with QTabWidget |
-| 4b: Map C++ GUI tabs to Python/PyQt6 | UI/UX designer | Map 4 C++ views to Python QWidget tabs; verify data flow |
-| 4c: FFI bridge to firmware_control.dll | Rust FFI maintainer | Use `wowkispice-ffi` crate `extern "C"` bindings; verify tick() and tick_ext() outputs match DLL baseline |
-| 4d: Ollama co-pilot integration | Agent integration lead | Integrate `overnight_ollama.py` framework or similar; add project-specific system prompts for WOWKISPICE code assistance |
-| 4e: Testing and compatibility validation | QA | Run `cargo test -p wowkispice-core` and `cargo test -p wowkispice-ffi` to confirm no regressions; run Python selfcheck.py |
+## Deferred (unscheduled)
 
-### Risks & Mitigation
-- **Risk**: PyQt6 install fails in this environment → Mitigation: Use venv; fallback to C++ GUI (Qt5 still works)
-- **Risk**: FFI bridge behavior differs between C++ and Python → Mitigation: Write automated comparison tests calling DLL via ctypes and asserting identical gate states
-- **Risk**: Ollama agent gives incorrect code suggestions → Mitigation: Use project-specific system prompt; limit to factual WOWKISPICE questions only
+- PyQt6 GUI + local Ollama co-pilot — owner decision; C++/Qt5 GUI remains the shipped surface. This was called “Phase 4” in older revisions of this file.
+- Firmware migration to `esp-hal` + `rtic`.
+- AI design assistant.
 
-### Deliverables for Phase 4 Completion
-- `gui/` Python port or wrapper (PyQt6-based GUI with 4 tabs)
-- Updated `pyproject.toml` with PyQt6 dependency verification
-- Ollama integration module in `tools/`
-- Compatibility verification: Python FFI calls match DLL baseline
-- `PHASE_4_REPORT.md` documenting what was achieved
+## Industrial hardening (Phase 0 deliverable)
+
+- `buck_controller_tick_ext(adc_counts, calibrated_voltage_mv, oversample_n, gpio_out)` with nominal-Vref fallback.
+- Oversample contract: `oversample_n == 1` preserves baseline behavior; `16` is the noise-reduced path.
+- Cross-platform build targets (`firmware_control.dll` / `.so` / `.dylib`) recorded; only the Windows artifact is present here.
+- 16 industry tests cover boundaries (0, 1993, 1995, 2030, 2031, 4095), persistence, and ±10-count noise.
+- `buck_controller_tick(1500, &gpio)` still returns `true`.
+
+## Open items (not waived)
+
+1. Installer not reproducible or clean-machine verified.
+3. CI not executed on a runner.
+4. Fresh-clone and Docker sign-off not repeated.
+5. POSIX scripts not verified on Linux/macOS.

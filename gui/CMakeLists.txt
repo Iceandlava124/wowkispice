@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Find Qt5
-find_package(Qt5 COMPONENTS Core Widgets Gui PrintSupport REQUIRED)
+find_package(Qt5 COMPONENTS Core Widgets Gui PrintSupport Charts REQUIRED)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -35,10 +35,7 @@ target_link_libraries(wowkispice_gui PRIVATE
     Qt5::Widgets
     Qt5::Gui
     Qt5::PrintSupport
-)
-
-target_compile_definitions(wowkispice_gui PRIVATE
-    QT_NO_KEYWORDS
+    Qt5::Charts
 )
 
 if(MSVC)

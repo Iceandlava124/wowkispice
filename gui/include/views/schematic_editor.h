@@ -36,9 +36,6 @@ signals:
 
 private slots:
     void onAddComponent(const QString &type, qreal x, qreal y);
-    importWAVStimulus(const QString &filePath);
-    void runBodeAnalysis();
-    void showModelManagementDialog();
 
 private:
     QGraphicsScene *m_scene;
@@ -47,7 +44,6 @@ private:
     QMap<QString, QString> m_componentModels;  // stored model names per component
 
     void importWAVStimulus(const QString &filePath);
-    void runBodeAnalysis();
     void showModelManagementDialog();
     QString resolveModelForType(const QString &type);
 };

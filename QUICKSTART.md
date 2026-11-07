@@ -43,7 +43,7 @@ You should see a 4-tab window:
 # Rust core tests (328 pass, zero warnings)
 cargo test -p wowkispice-core
 
-# FFI bridge tests (24/26 pass, 2 env failures documented)
+# FFI bridge tests (27/27 pass)
 cargo test -p wowkispice-ffi
 
 # Parity harnesses (Rust vs Python comparison)

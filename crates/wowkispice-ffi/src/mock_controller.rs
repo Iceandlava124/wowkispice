@@ -362,8 +362,13 @@ mod tests {
     }
 
     #[test]
-    fn test_closed_loop_result_no_dll() {
-        // NgSpiceFfi::new() will fail without the DLL - that's expected.
+    fn test_closed_loop_returns_error_without_required_symbol() {
+        let _guard = crate::NGSPICE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // The bundled ngspice build does not export ngGetVSRCData, so this
+        // path reports an error instead of running. Load/resolve is covered by
+        // test_ffi_loads_dll_and_resolves_symbols.
         let result = run_closed_loop_simulation(5.0, 0.5);
         assert!(result.is_err());
     }

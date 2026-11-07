@@ -68,11 +68,11 @@ Var SELFCHECK_BAT
 Section "Core Installation"
     ; Copy the GUI executable
     SetOutPath $INSTDIR
-    File "C:\Users\gudae\Music\PROJECT_WOWKISPICE\gui\build\wowkispice_gui.exe"
+    File "<USERPROFILE>\Music\PROJECT_WOWKISPICE\gui\build\wowkispice_gui.exe"
     ; Copy the firmware control DLL
-    File "C:\Users\gudae\Music\PROJECT_WOWKISPICE\firmware\esp32_buck_controller\src\firmware_control.dll"
+    File "<USERPROFILE>\Music\PROJECT_WOWKISPICE\firmware\esp32_buck_controller\src\firmware_control.dll"
     ; Copy the self-check batch file
-    File "C:\Users\gudae\Music\PROJECT_WOWKISPICE\tools\run_selfcheck.bat"
+    File "<USERPROFILE>\Music\PROJECT_WOWKISPICE\tools\run_selfcheck.bat"
     ; Create Start Menu shortcut
     CreateDirectory "$SMPROGRAMS\WOWKISPICE"
     CreateShortcut "$SMPROGRAMS\WOWKISPICE\WOWKISPICE.lnk" "$INSTDIR\wowkispice_gui.exe"

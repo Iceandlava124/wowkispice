@@ -3,6 +3,7 @@
 #include <QtWidgets/QGraphicsRectItem>
 #include <QtWidgets/QGraphicsSimpleTextItem>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QInputDialog>
 #include <QtWidgets/QMessageBox>
 #include <QtCore/QDebug>
 #include <QtCore/QStringLiteral>
@@ -177,5 +178,3 @@ void SchematicEditor::importWAVStimulus(const QString &filePath)
         "arbitrary waveform sources.\n"
         "The converted voltage source will be placed at cursor position.");
 }
-
-#include "../moc/schematic_editor.moc"

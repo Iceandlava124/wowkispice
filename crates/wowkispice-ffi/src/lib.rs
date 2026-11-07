@@ -22,6 +22,10 @@ use std::ptr;
 use std::sync::Mutex;
 use wowkispice_core::ngspice_wrapper::{NgSpiceError, NgSpiceResult};
 
+// ngspice keeps process-global state; tests that drive it must not overlap.
+#[cfg(test)]
+pub(crate) static NGSPICE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // ---------------------------------------------------------------------------
 // DLL loading (raw OS FFI, no external crates)
 // ---------------------------------------------------------------------------
@@ -42,15 +46,26 @@ mod dll_os {
             lpProcName: *const c_char,
         ) -> *mut c_void;
         pub fn FreeLibrary(hModule: *mut c_void) -> c_int;
+        pub fn GetLastError() -> u32;
     }
+
+    // Search the DLL's own directory for its dependencies. Python's ctypes
+    // loads with this flag; plain LoadLibraryExA(..., 0) fails with error 126
+    // because ngspice.dll's sibling DLLs are not on PATH.
+    const LOAD_WITH_ALTERED_SEARCH_PATH: c_int = 0x0000_0008;
 
     pub(crate) type DllHandle = *mut c_void;
 
     pub(crate) unsafe fn dll_load(path: &str) -> Result<DllHandle, String> {
         let c_path = CString::new(path).map_err(|e| e.to_string())?;
-        let handle = LoadLibraryExA(c_path.as_ptr(), ptr::null_mut(), 0);
+        let handle = LoadLibraryExA(
+            c_path.as_ptr(),
+            ptr::null_mut(),
+            LOAD_WITH_ALTERED_SEARCH_PATH,
+        );
         if handle.is_null() {
-            Err(format!("LoadLibraryExA failed for {}", path))
+            let err = GetLastError();
+            Err(format!("LoadLibraryExA failed for {} (error {})", path, err))
         } else {
             Ok(handle)
         }
@@ -273,7 +288,9 @@ impl From<FfiError> for NgSpiceError {
     fn from(e: FfiError) -> Self {
         match e {
             FfiError::DllLoad(_) => NgSpiceError::DllNotLoaded,
-            FfiError::DllSymbol(_) => NgSpiceError::DllNotLoaded,
+            FfiError::DllSymbol(s) => {
+                NgSpiceError::AnalysisFailed(format!("DLL symbol not resolved: {s}"))
+            }
             FfiError::Nul(e) => NgSpiceError::NulError(e),
             FfiError::NullPointer(s) => NgSpiceError::AnalysisFailed(s),
             FfiError::SymbolNotResolved(s) => NgSpiceError::AnalysisFailed(s),
@@ -502,8 +519,12 @@ impl NgSpiceFfi {
                 resolve_fn!(handle, "ngSpice_Command", NgSpiceCommandFn);
             let get_vec_info =
                 resolve_fn!(handle, "ngGet_Vec_Info", NgGetVecInfoFn);
-            let get_vsrc_data =
-                resolve_fn!(handle, "ngGetVSRCData", GetVSRCData_t);
+            // Not every ngspice build exports this; the field is Option and
+            // callers already treat it as optional.
+            let get_vsrc_data: Option<GetVSRCData_t> =
+                dll_os::dll_sym(handle, "ngGetVSRCData").ok().map(|sym| unsafe {
+                    std::mem::transmute::<*mut c_void, GetVSRCData_t>(sym)
+                });
             let circ =
                 resolve_fn!(handle, "ngSpice_Circ", NgSpiceCircFn);
             let cur_plot =
@@ -535,7 +556,7 @@ impl NgSpiceFfi {
                 init_sync: Some(init_sync),
                 command: Some(command),
                 get_vec_info: Some(get_vec_info),
-                get_vsrc_data: Some(get_vsrc_data),
+                get_vsrc_data,
                 circ: Some(circ),
                 cur_plot: Some(cur_plot),
                 all_plots: Some(all_plots),
@@ -858,6 +879,7 @@ mod tests {
 
     #[test]
     fn test_ffi_loads_dll_and_resolves_symbols() {
+        let _guard = crate::NGSPICE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // This test verifies the ngspice DLL loads and all symbols resolve.
         match NgSpiceFfi::new() {
             Ok(engine) => {
@@ -884,6 +906,7 @@ mod tests {
 
     #[test]
     fn test_ffi_end_to_end_run_rc_circuit() {
+        let _guard = crate::NGSPICE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // End-to-end smoke test: load a simple RC circuit, run it,
         // and read back the output voltage.
         let mut engine = match NgSpiceFfi::new() {

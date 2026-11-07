@@ -4,7 +4,7 @@ This is the honest map of the repo as it exists now. Read it as a product shape,
 
 ## In one line
 
-A Windows-first power-electronics tool that combines a real `libngspice` solver, a Qt5-shaped schematic editor, and a controller workflow whose decision logic comes from real firmware source. The compiled firmware now runs inside the simulation loop through an `extern "C"` DLL, eliminating the QEMU dependency.
+A Windows-first power-electronics tool that combines a real `libngspice` solver, a Qt5-shaped schematic editor, and a controller workflow whose decision logic comes from real firmware source. The shipped co-simulation path is single-process: Rust `cosim_runner` drives ngspice in lockstep with a controller model whose thresholds match the firmware. QEMU is legacy and no longer part of that path.
 
 ## The strongest slice today
 
@@ -23,19 +23,19 @@ That slice is coherent and test-backed. The rest of the repo is either supportin
 
 ### Works and is test-backed
 
-- The ngspice C-API bridge (`wowkispice-ffi`): 24/26 tests pass; 2 pre-existing DLL-load environment issues documented (VC++ runtime, not code bugs).
+- The ngspice C-API bridge (`wowkispice-ffi`): 27/27 tests pass. The prior two DLL-load failures were a real load-flag bug, fixed with `LOAD_WITH_ALTERED_SEARCH_PATH`; `ngGetVSRCData` is optional because the bundled build omits it.
 - The Qt5 C++ GUI: `wowkispice_gui.exe` compiles with `-Wall -Wextra -Werror`; 4 tabs (Schematic Editor, Waveform Viewer, Co-Sim Dashboard, Code/Text Workspace) — zero warnings.
-- Closed-loop co-simulation: Rust core drives the hysteretic controller DLL at each timestep; gate flip thresholds (1995/2030) match the Python mock exactly.
+- Closed-loop co-simulation: Rust `cosim_runner` applies a hysteretic controller law at each timestep; its gate thresholds (1995/2030) are derived from the firmware source and tested against the Python mock.
 - Firmware image parsing and control-constant import from source (Intel HEX/ELF parsers in `crates/wowkispice-core`).
-- The automatic co-simulation loop: the Rust solver calls `buck_controller_tick` from `firmware_control.dll` at each timestep, passing the ngspice-sampled ADC value, and captures the GPIO state.
+- The automatic co-simulation loop lives in `crates/wowkispice-ffi/src/cosim_runner.rs` + `mock_controller.rs`: the sense net is sampled each timestep, quantised to ADC counts, passed through the hysteretic law, and the resulting gate voltage drives the solver. `firmware_control.dll` exists and exports `buck_controller_tick`, but no shipped code path loads it (verified by grep over `crates/` and `gui/`).
 - GPIO pin profiles and the pin map view.
-- A self-check gate and a large test suite: 328/328 Rust tests pass, zero warnings.
+- A self-check gate and a large test suite: 334 Rust tests pass, zero warnings (measured 2026-11-07).
 - Parity harnesses: 3 modules with Rust+Python drivers printing `PARITY OK — N values identical`.
 
 ### Works, but only manual (no longer the only path)
 
-- The old QEMU+Python co-simulation loop is now superseded by the single-process Rust+DLL path.
-- Running the compiled firmware under patched Espressif QEMU and watching it boot and control a buck — **deprecated**: the DLL path is the standard.
+- The old QEMU+Python co-simulation loop is superseded by the single-process Rust+ngspice path. QEMU remains only in legacy Python modules, tests, and `toolchain_resolver`.
+- Running the compiled firmware under patched Espressif QEMU and watching it boot and control a buck — **deprecated**: QEMU is not the shipped path.
 - Injecting analog values into that firmware by hand through a QEMU monitor command — **deprecated**.
 - Reading the gate state back by hand — **deprecated**.
 
@@ -43,7 +43,7 @@ That slice is coherent and test-backed. The rest of the repo is either supportin
 
 - PyQt6 upgrade and local Ollama co-pilot (Phase 4 of roadmap).
 - Parameter-sweep automation via `rayon` (Phase 5).
-- Polished Windows installer with "honest boundaries" credibility badge (Phase 6).
+- Reproducible Windows installer. An artifact exists at `installer/wowkispice_installer.exe`, but the checked-in `.nsi` is a placeholder template and clean-machine installation is unverified.
 - Firmware migration to `esp-hal` + `rtic` Rust embedded framework (continuous improvement).
 
 ### Intentionally not claimed
@@ -51,7 +51,7 @@ That slice is coherent and test-backed. The rest of the repo is either supportin
 - This is not a calibrated measurement instrument.
 - This is not a vendor-validated component library.
 - This is not a certified or production release yet.
-- The hysteresis controller DLL is the new standard; QEMU is deprecated but still available for historical reference.
+- The hysteretic controller *logic* is the standard; the `firmware_control.dll` artifact is not loaded by shipped code. QEMU is deprecated and retained for historical reference only.
 
 ## Why those boundaries matter
 
@@ -61,7 +61,7 @@ Industry-facing tools win by being clear about their limits. The interesting par
 
 1. PyQt6 upgrade + local Ollama co-pilot (Phase 4).
 2. Parameter-sweep automation via `rayon` (Phase 5).
-3. Windows installer ("honest boundaries") (Phase 6).
+3. Reproducible Windows installer — artifact exists, build/install still unverified (Phase 6).
 4. Firmware migration to `esp-hal` + `rtic` (continuous improvement).
 
 ## Where the internal notes live

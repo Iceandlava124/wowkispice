@@ -22,7 +22,7 @@
 - **License source**: The source archive `qemu-esp_develop_9.2.2_20260417-src.tar.xz` would contain COPYING licensing files; the prebuilt binary archive does not ship license texts
 
 ### 3. TRANSPORT TEST (Stock QEMU + QemuMonitor on Windows)
-- **Environment**: WOSP_QEMU set to `C:\Users\gudae\Music\qemu-build-win\qemu\bin\qemu-system-xtensa.exe`
+- **Environment**: WOSP_QEMU set to `<QEMU_BUILD_ROOT>\qemu\bin\qemu-system-xtensa.exe`
 - **QemuMonitor.start()**: ✅ QEMU started successfully with `-display none -machine esp32 -monitor stdio -serial none`
 - **HMP Commands** (all via `_hmp()`):
   - `info version` → `9.2.2esp_develop_9.2.2_20260417`
@@ -33,7 +33,7 @@
 - **Transport verdict**: ✅ **stdio transport OK** — no pipe errors, no ANSI/CRLF parsing problems, no prompt never-seen condition
 
 ### 4. CONTRACT TESTS (`tests/test_qemu_monitor_qemu.py`)
-- **Command**: `WOSP_QEMU="C:\Users\gudae\Music\qemu-build-win\qemu\bin\qemu-system-xtensa.exe" python -m pytest tests/test_qemu_monitor_qemu.py -q`
+- **Command**: `WOSP_QEMU="C:\qemu-build-win\qemu\bin\qemu-system-xtensa.exe" python -m pytest tests/test_qemu_monitor_qemu.py -q`
 - **Results**:
   - `test_qemu_monitor_rejects_missing_binary`: ✅ **PASSED**
   - `test_qemu_monitor_can_inject_adc_and_read_gate_real_qemu`: ❌ **FAILED** — `QemuMonitorError: monitor rejected 'qom-set /machine/peripheral/sens adc1-value 2012': Error: Device '/machine/peripheral/sens' not found`
@@ -64,7 +64,7 @@
    - `libalsa`, `libpulse` (default audio path, even with `--disable-spice`)
    - `python3` (for project scripts; **do not use MSYS2's python for the repo venv**)
 
-2. Clone `https://github.com/espressif/qemu.git` at tag `esp-develop-9.2.2-20260417` into `C:\Users\gudae\Music\qemu-build-win` with `git config core.autocrlf false`
+2. Clone `https://github.com/espressif/qemu.git` at tag `esp-develop-9.2.2-20260417` into `C:\qemu-build-win` with `git config core.autocrlf false`
 
 3. Apply patches `tools/qemu-patch/0001` then `0002` in order
 
@@ -105,7 +105,7 @@
 | **Time estimate** | ~2-3 hours build time on typical hardware | Community MSYS2 guide |
 | **Disk estimate** | ~2-3 GB total install + build output | Community MSYS2 guide |
 | **Environment** | UCRT64 shell (mingw64) | MSYS2 documentation |
-| **WOSP_QEMU binary path** | `C:\Users\gudae\Music\qemu-build-win\qemu\bin\qemu-system-xtensa.exe` | Stage 1 verified binary |
+| **WOSP_QEMU binary path** | `<QEMU_BUILD_ROOT>\qemu\bin\qemu-system-xtensa.exe` | Stage 1 verified binary |
 
 **Owner decision needed**: `approve` or `decline` the MSYS2 package install list above.
 

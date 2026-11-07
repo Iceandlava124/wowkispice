@@ -1,7 +1,7 @@
 # RUST_PORT_TEST_MAP.md — test-suite porting map (Python → Rust)
 
 **Purpose.** Every file in `tests\*.py` (38 files, 10,557 LOC, 550 collected tests at
-baseline 546 passed / 4 skipped) must eventually gate the Rust rewrite. This document
+baseline 547 passed / 4 skipped) must eventually gate the Rust rewrite. This document
 maps each test file — and each separable class group inside mixed-concern files — to
 the Rust module that will own it, classifies the porting difficulty, and numbers the
 waves so the suite can be ported module-by-module instead of file-by-file.

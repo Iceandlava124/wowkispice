@@ -160,7 +160,10 @@ def one_run(qemu, index):
                 rec["callbacks"]["gate_reads"] += 1
                 rec["gate_states"].append([value, gate])
                 if gate is expected:
-                    flip_s = round(time.monotonic() - t_inject, 4)
+                    # 6 decimals: a first-poll flip can take well under 0.1 ms,
+                    # and rounding to 4 decimals turned a real measurement into
+                    # 0.0 (test_loop_repeat asserts flip_s > 0).
+                    flip_s = round(time.monotonic() - t_inject, 6)
                     break
                 time.sleep(POLL)
             rec["flips"].append({"adc": value, "expected": expected,

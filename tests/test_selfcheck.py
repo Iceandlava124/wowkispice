@@ -37,6 +37,32 @@ class TestSelfcheck(unittest.TestCase):
             self.assertIn(stage, output,
                           f"self-check output never mentions {stage!r}")
 
+    def test_non_venv_python_reexecutes_into_the_project_venv(self):
+        """The gate must not depend on whichever python is on PATH.
+
+        Starting tools/selfcheck.py with the base interpreter (the one the
+        venv was created from) must re-exec under .venv and still pass. This
+        is the path a reader takes when they run `python tools/selfcheck.py`
+        from a clean shell, which is what earlier failures got wrong.
+        """
+        base = getattr(sys, "_base_executable", "")
+        if (not base or not os.path.isfile(base)
+                or os.path.samefile(base, sys.executable)):
+            self.skipTest("no distinct base interpreter available")
+        env = dict(os.environ)
+        env.pop("VIRTUAL_ENV", None)
+        env.pop("WOSP_SELFCHECK_REEXEC", None)
+        env["WOSP_SETTINGS_DIR"] = tempfile.mkdtemp(prefix="wosp-reexec-")
+        env.setdefault("QT_QPA_PLATFORM", "offscreen")
+        proc = subprocess.run(
+            [base, SELFCHECK, "--quick"],
+            cwd=REPO, env=env, capture_output=True, text=True, timeout=300)
+        output = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, output[-2000:])
+        self.assertIn("using the project interpreter:", output)
+        self.assertIn(os.path.join(REPO, ".venv"), output)
+        self.assertIn("SELF-CHECK: PASS", output)
+
     @pytest.mark.timeout(120)
     @unittest.skipUnless(sys.platform == "win32",
                          "run_selfcheck.bat is Windows-only")

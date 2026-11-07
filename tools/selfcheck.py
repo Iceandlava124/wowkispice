@@ -27,8 +27,48 @@ import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNNER = os.path.join(REPO, "tools", "run_tests.py")
-VENV_PYTHON = os.path.join(REPO, ".venv", "Scripts", "python.exe")
 DEFAULT_TIMEOUT = 1800.0
+
+
+def repo_venv_python():
+    """Return the project virtualenv interpreter, or None.
+
+    A Windows-created venv uses Scripts/python.exe even when the shell is
+    MSYS2/Git Bash, so both layouts are checked.
+    """
+    for parts in (("Scripts", "python.exe"), ("bin", "python")):
+        candidate = os.path.join(REPO, ".venv", *parts)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _same_file(a, b):
+    try:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(
+            os.path.realpath(b))
+    except OSError:
+        return False
+
+
+def _reexec_in_repo_venv():
+    """Run this script under the repo's .venv interpreter when one exists.
+
+    The self-check is documented as the first command a reader runs; it must
+    not depend on whichever ``python`` the shell happens to have on PATH.
+    Returns the child's exit status when a re-exec happened, else None.
+    """
+    if os.environ.get("WOSP_SELFCHECK_REEXEC") == "1":
+        return None
+    venv = repo_venv_python()
+    if venv is None or _same_file(sys.executable, venv):
+        return None
+    env = dict(os.environ)
+    env["WOSP_SELFCHECK_REEXEC"] = "1"
+    print("using the project interpreter: %s" % venv, flush=True)
+    proc = subprocess.run([venv, os.path.abspath(__file__), *sys.argv[1:]],
+                          env=env)
+    return proc.returncode
 DEPENDENCIES = ("numpy", "matplotlib", "pyqtgraph", "pypdf", "pytest", "PyQt5")
 
 fails = []
@@ -58,10 +98,19 @@ def check_interpreter():
         print("        need Python >= 3.10; the verified target is 3.12")
         return
     report("ok", "interpreter", detail)
-    if not venv and os.path.exists(VENV_PYTHON):
-        report("warn", "interpreter",
-               "the repo's .venv exists - prefer run_selfcheck.bat, or "
-               ".venv\\Scripts\\python.exe tools\\selfcheck.py")
+    if not venv:
+        report("fail", "interpreter",
+               "no project interpreter: .venv is missing")
+        print("        run setup.ps1 (Windows) or tools/setup.sh once, then "
+              "re-run this check")
+        return
+    expected = repo_venv_python()
+    if expected is not None and not _same_file(sys.executable, expected):
+        report("fail", "interpreter",
+               "running %s, but the repo's .venv is %s"
+               % (sys.executable, expected))
+        print("        re-run through the venv; this check re-execs "
+              "automatically when started with another python")
 
 
 # --------------------------------------------------------------------------
@@ -83,7 +132,8 @@ def check_dependencies():
             versions.append(name)
     if missing:
         report("fail", "dependencies", "missing: " + ", ".join(missing))
-        print("        install with: python -m pip install -r requirements.txt")
+        print("        install with: %s -m pip install -r requirements.txt"
+              % sys.executable)
         print("        (or run setup.ps1 / setup.sh once)")
         return
     report("ok", "dependencies", ", ".join(versions))
@@ -256,6 +306,10 @@ def main(argv=None):
                         help="seconds allowed for the test-runner check "
                              "(default 1800)")
     args = parser.parse_args(argv)
+
+    reexec_status = _reexec_in_repo_venv()
+    if reexec_status is not None:
+        return reexec_status
 
     print("WOSP environment self-check")
     print("=" * 34)

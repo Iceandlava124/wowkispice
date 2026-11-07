@@ -23,27 +23,27 @@ place instead of asking the repo.
 | A12 | Industrial qualification battery (DO-254/ISO 26262/IEC 61508 style) | `bridge/industrial_verification.py` | `test_industrial_verification.py` (5), `test_sota_suite.py` (7) |
 | A13 | UART decode from captured trace (8N1 stimuli verified: `0x4F 0x4B 0x0A`) | `bridge/studio_engine.py`, `bridge/serial_console.py`, `ui/schematic_editor.py` | `test_studio_suite.py` (9) + `test_schematic_editor.py` |
 | A14 | Waveform analysis: cursors, FFT, Bode + phase/gain margin, waveform stats, noise, distortion, Monte Carlo, step metrics, timing diagram, AWG, I-V Curve Tracer, PV/MPPT | `bridge/measurements.py`, `bridge/analysis_runner.py`, `bridge/studio_engine.py` | `test_measurements.py` (36), `test_ui_parity.py` (12) |
-| A15 | ngspice DLL load gate for any fresh machine | `tools/selfcheck.py` + `run_selfcheck.bat` | `python tools/selfcheck.py` → `SELF-CHECK: PASS`, exit 0 |
-| A16 | Full test suite (17 suites, 309 tests) | `tools/run_tests.py` | `python tools/run_tests.py` → 309 passed, exit 0 |
-| A17 | Firmware boots in patched Espressif QEMU through ROM, bootloader, `app_main()` | `bridge/qemu_orchestrator.py`, `tools/qemu-patch/` | Manual boot runs: 900 000 samples / 90 s, zero panics |
-| A18 | GET/ADC injection gate measurement under patched QEMU | `bridge/esp32_regs.py`, `bridge/qemu_orchestrator.py` | Manual `qom-set /machine/peripheral/sens adc1-value N` → gate ON → OFF at 3456 |
+| A15 | ngspice DLL load gate for any fresh machine | `tools/selfcheck.py` + `run_selfcheck.bat` | Measured 2026-11-07: `run_selfcheck.bat` → `SELF-CHECK: PASS`, exit 0; it resolves the project venv interpreter itself |
+| A16 | Full test suite | `tools/run_tests.py` | Measured 2026-11-07: 547 passed, 4 skipped, 0 failed in 229.43 s, exit 0 |
+| A17 | *(legacy, deprecated)* Firmware boot in patched Espressif QEMU through ROM, bootloader, `app_main()` | `bridge/qemu_orchestrator.py`, `tools/qemu-patch/` | Historical manual runs recorded; **not part of the shipped co-simulation path** |
+| A18 | *(legacy, deprecated)* ADC injection gate measurement under patched QEMU | `bridge/esp32_regs.py`, `bridge/qemu_orchestrator.py` | Historical manual `qom-set` runs; **superseded by the Rust `cosim_runner` path** |
 
 ## Band B — Works today but only manual, not automated
 
 | # | Capability | Files | How it currently works | Why it is manual | What would automate it |
 |---|---|---|---|---|---|
-| B1 | Inject analog values into the emulated firmware's ADC | `tools/qemu-patch/`, `bridge/qemu_orchestrator.py` | Human opens the QEMU monitor and runs `qom-set /machine/peripheral/sens adc1-value N` | No host-side automation exists; the patch exposes a QOM property but nobody reads/writes it from Python | New `bridge/qemu_monitor.py` (QMP/HMP): scripted injection + gate readback (this is M0 of `docs/binary-runner-and-mcu-bringup.md`) |
-| B2 | Read the latched gate level out of QEMU into ngspice | `bridge/esp32_regs.py` | Physical read `xp /1wx 0x3FF44004` via HMP console | No QEMU harness reads it back | Add a read-only QOM property (preferred path in M0) |
-| B3 | Run the real firmware as the closed-loop controller | `bridge/binary_runner.py`, `bridge/cosim_runner.py` | Automatic coupling via QEMU monitor - ADC injection from ngspice, gate readback to drive solver | Implemented | M1 complete |
-| B4 | Add a new MCU and test it beside the others | `bridge/gpio_model.py`, `bridge/control_law.py`, `tools/qemu-patch/` | One-off manual port | No checklist + no per-MCU test row | M2 bring-up checklist + profile table (binary-runner doc §6) |
+| B1 | *(legacy, deprecated)* Inject analog values into the emulated firmware's ADC | `tools/qemu-patch/`, `bridge/qemu_orchestrator.py` | Historical manual `qom-set` through the QEMU monitor | QEMU is no longer the shipped path; the Rust loop reads the sense net directly | Not applicable unless QEMU work is revived |
+| B2 | *(legacy, deprecated)* Read the latched gate level out of QEMU into ngspice | `bridge/esp32_regs.py` | Historical manual `xp /1wx 0x3FF44004` | Superseded by `cosim_runner.rs` callbacks | Not applicable |
+| B3 | *(legacy, deprecated)* Run the real firmware as the closed-loop controller | `bridge/binary_runner.py`, `bridge/cosim_runner.py` | Historical QEMU coupling; shipped loop uses a Rust controller model instead | No shipped code loads `firmware_control.dll` | Wire the DLL if firmware-in-the-loop is required |
+| B4 | Add a new MCU and test it beside the others | `bridge/gpio_model.py`, `bridge/control_law.py` | One-off manual port | No checklist + no per-MCU test row | Bring-up checklist + profile table |
 
 ## Band C — Planned / not started (no code path to execution)
 
 | # | Capability | Files | Contract / source |
 |---|---|---|---|
-| C1 | Binary runner closed loop (M1) — firmware drives the solver | `bridge/binary_runner.py` | Implemented - `run_binary_cosim(model, pin_specs, *, firmware_image, qemu, machine="esp32", tstep_us=0.5, duration_ms=5.0, progress_callback=None, stop_flag=None)` |
+| C1 | *(legacy, deprecated)* QEMU binary runner closed loop — firmware drives the solver | `bridge/binary_runner.py` | Historical implementation; not on the shipped path and not loaded by Rust/GUI code |
 | C2 | GUI integration of B1/B2/B3 (auto-bridge, real HIL) | `ui/schematic_editor.py` handlers (`run_simulation`, `run_closed_loop`, …) | M2 wiring in binary-runner doc; currently only declared-law F2 exists |
-| C3 | New-MCU bring-up harness (one checklist row + one test row) | `bridge/gpio_model.py`, `bridge/control_law.py`, `tools/qemu-patch/`, `docs/binary-runner-and-mcu-bringup.md` §6 | Register map → regs module → QEMU device patch → firmware project → pin/law wiring → tests |
+| C3 | *(legacy, deprecated)* New-MCU QEMU bring-up harness | `bridge/gpio_model.py`, `bridge/control_law.py`, `tools/qemu-patch/`, `docs/binary-runner-and-mcu-bringup.md` §6 | Historical contract; not on the shipped path |
 | C4 | Auto-sync netlist with schematic (live, not Reset/Import buttons) | `ui/schematic_editor.py` (Netlist dock) | Named open; current sync is manual Reset/Import |
 | C5 | Net↔trace highlight (click a net, see its trace) | `ui/schematic_editor.py`, `bridge/measurements.py` | Named open |
 | C6 | Editable design templates / unified Preferences | `ui/schematic_editor.py` | Named open |
@@ -57,10 +57,8 @@ place instead of asking the repo.
 
 - **Band A** is what a user can point, click, simulate, and export today, and what a
   test proves about it. Nothing here needs a human or a terminal.
-- **Band B** works, but every use of it touches a human inside the loop (a QEMU monitor
-  command) or a human-written controller. Those are the highest-value automation
-  targets; M0 (B1/B2) is the minimum step to make the firmware "responsive to the
-  circuit" end to end.
+- **Band B** entries are legacy QEMU work that required a human in the loop. They are
+  retained for history and are not on the shipped Rust/ngspice path.
 - **Band C** is just names: nothing exists to execute. Anything in Band C is at
   `UNVERIFIED` in `docs/systems-map.md`, never `CONFIRMED WORKING`.
 
