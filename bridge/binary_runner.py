@@ -214,7 +214,32 @@ def run_binary_cosim(
                 return 0.0
             return float(info.v_realdata[info.v_length - 1])
 
+        # hook is defined before callback so callback can invoke it directly.
+        # engine.run_transient(callback=callback) calls callback on every
+        # timestep on all platforms, but only calls engine.progress_callback
+        # (hook) on some platforms. Calling hook from within callback ensures
+        # load_stepper, progress_callback, and stop_flag are honored
+        # consistently everywhere.
+        def hook(t: float, n: int) -> None:
+            if load_stepper is not None:
+                try:
+                    load_stepper.check_and_apply(t)
+                except Exception as exc:
+                    # A failed load step changes the circuit being solved,
+                    # so say so instead of hiding it.
+                    if len(run.warnings) < 100:
+                        run.warnings.append(f"load stepper failed: {exc}")
+            if progress_callback is not None:
+                progress_callback(t, n)
+            if stop_flag is not None and stop_flag():
+                engine.request_stop()
+
         def callback(time_s: float, source_name: str) -> float:
+            # Run the per-tick hook (load_stepper, progress_callback,
+            # stop_flag) so that behavior is consistent across platforms
+            # regardless of whether engine.run_transient calls
+            # progress_callback directly.
+            hook(time_s, source_name)
             state["hits"] += 1
             for pin_name, spec in pin_specs.items():
                 sense_net = spec.get("sense_net") or spec.get("sense")
