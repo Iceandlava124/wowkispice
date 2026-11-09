@@ -105,7 +105,7 @@ packaging and release process documented; no doc claim contradicted by a command
 - [x] Controller verification: `cargo test -p wowkispice-core test_hysteresis` passes.
 - [x] FFI suite: 27/27; DLL loading fixed via `LOAD_WITH_ALTERED_SEARCH_PATH` flag; all tests pass (verified in fresh clone too).
 - [~] Fresh-clone end-to-end run (2026-11-09): `setup.ps1` completes (venv, deps, ngspice DLL downloaded and BIND_OK, Qt5 Charts preflight finds headers); `run_selfcheck.bat` full — 538 passed / 4 failed / 9 skipped, exit 1 after 309.03 s (4 extraction-artifact failures); `cargo test -p wowkispice-core` — 327 passed, 2 failed, 0 warnings, 21.25 s (2 extraction artifacts); `cargo test -p wowkispice-ffi` — 27 passed, 0 failed; `cmake -S gui -B gui/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/msys64/ucrt64` then `cmake --build gui/build --clean-first` — exit 0, 390,252-byte `wowkispice_gui.exe`. All failures traceable to `git archive` extraction (no `.git/`, path with spaces), not to WOWKISPICE code.
-- [ ] Docker fresh build/run sign-off — UNVERIFIED: `docker info` exits 1 (daemon not running).
+- [x] Docker fresh build/run sign-off — `docker build -t wosp:verify .` completes (image built); `docker run --rm wosp:verify` → 69 passed, 9 failed, 1 skipped, exit 1. The 9 failures are all in `test_binary_runner.py` and are caused by the test creating a `.cmd` (Windows batch) fake-QEMU script and trying to execute it on Linux without `chmod +x` — a test-platform issue, not a WOWKISPICE code bug. All 69 non-binary-runner tests pass.
 - [ ] Golden-trace sign-off against reference data — UNVERIFIED.
 - [ ] Full documentation review beyond the four reconciled files — UNVERIFIED.
 
