@@ -101,10 +101,10 @@ packaging and release process documented; no doc claim contradicted by a command
 **Status: `[~]` IN PROGRESS.**
 
 - [x] Core suite green: 334/0/0 (on main repo). Fresh clone: 327/2/0 — 2 path-related failures in `test_netlist.rs` are `git archive` extraction artifacts (`.git/` stripped, temp path has spaces), not code bugs.
-- [x] Full Python gate green: 547 passed / 4 skipped / 0 failed, exit 0 (on main repo). Fresh clone: 538 passed / 4 failed / 9 skipped — 4 failures are `git archive` extraction artifacts (2× path comparison with spaces, 2× missing `.git/`).
+- [x] Full Python gate green: 547 passed / 4 skipped / 0 failed, exit 0 (on main repo). Fresh clone: `run_selfcheck.bat` full — 538 passed / 4 failed / 9 skipped, exit 1, 309.03 s — 4 failures are `git archive` extraction artifacts (2× path comparison with spaces, 2× missing `.git/`).
 - [x] Controller verification: `cargo test -p wowkispice-core test_hysteresis` passes.
 - [x] FFI suite: 27/27; DLL loading fixed via `LOAD_WITH_ALTERED_SEARCH_PATH` flag; all tests pass (verified in fresh clone too).
-- [~] Fresh-clone end-to-end run: setup.ps1 completes (venv, deps, ngspice DLL downloaded and BIND_OK); `run_selfcheck.bat` full fails on 4 extraction-artifact failures only; `cargo test -p wowkispice-core` 327/2/0 (2 extraction artifacts); `cargo test -p wowkispice-ffi` 27/0; `cmake --build gui/build --clean-first` exit 0, 390,252-byte `wowkispice_gui.exe`. All failures traceable to `git archive` extraction (no `.git/`, path with spaces), not to WOWKISPICE code.
+- [~] Fresh-clone end-to-end run (2026-11-09): `setup.ps1` completes (venv, deps, ngspice DLL downloaded and BIND_OK, Qt5 Charts preflight finds headers); `run_selfcheck.bat` full — 538 passed / 4 failed / 9 skipped, exit 1 after 309.03 s (4 extraction-artifact failures); `cargo test -p wowkispice-core` — 327 passed, 2 failed, 0 warnings, 21.25 s (2 extraction artifacts); `cargo test -p wowkispice-ffi` — 27 passed, 0 failed; `cmake -S gui -B gui/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/msys64/ucrt64` then `cmake --build gui/build --clean-first` — exit 0, 390,252-byte `wowkispice_gui.exe`. All failures traceable to `git archive` extraction (no `.git/`, path with spaces), not to WOWKISPICE code.
 - [ ] Docker fresh build/run sign-off — UNVERIFIED: `docker info` exits 1 (daemon not running).
 - [ ] Golden-trace sign-off against reference data — UNVERIFIED.
 - [ ] Full documentation review beyond the four reconciled files — UNVERIFIED.
