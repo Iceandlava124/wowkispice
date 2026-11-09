@@ -105,7 +105,7 @@ impl InnerSock {
         match self {
             InnerSock::Tcp(s) => s.shutdown(Shutdown::Both),
             #[cfg(unix)]
-            InnerSock::Unix(s) => s.shutdown(std::os::unix::net::Shutdown::Both),
+            InnerSock::Unix(s) => s.shutdown(Shutdown::Both),
         }
     }
 }

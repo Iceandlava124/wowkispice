@@ -53,7 +53,7 @@ shipped loop and the legacy table.
 **Status: `[x]` COMPLETE for Windows.**
 
 - [x] `setup.ps1` creates the venv, installs requirements, prepares the ngspice DLL, writes `.env.local`, runs cleanup/fetch/doctor.
-- [x] `tools/setup.sh` and `tools/run_selfcheck.sh` exist for POSIX shells; **partially verified on Linux** — WSL Ubuntu 24.04: `setup.sh` completes (venv, Python deps installed), `run_selfcheck.sh` fails (ngspice DLL is Windows-specific, no libngspice on Linux), Rust core fails to compile on Linux (`std::os::unix::net::Shutdown::Both` → `std::net::Shutdown::Both` portability issue), `apt-get install cargo ngspice` timed out repeatedly; rustup installed manually.
+- [x] `tools/setup.sh` and `tools/run_selfcheck.sh` exist for POSIX shells; **partially verified on Linux** — WSL Ubuntu 24.04: `setup.sh` completes (venv, Python deps installed); `run_selfcheck.sh` fails only because the host lacks a system `libngspice` (the bridge uses `dlopen`, not the Windows DLL, on Unix); installing the system libngspice development package via `apt-get` timed out repeatedly. The Rust core/FFI portability bug (`std::os::unix::net::Shutdown::Both`) is fixed and both crates now pass `cargo check --target x86_64-unknown-linux-gnu` from this host; Linux runtime tests were not run.
 - [x] `run_selfcheck.bat` resolves `.venv\Scripts\python.exe` directly; `tools/selfcheck.py` re-executes under the project venv when started with another `python`.
 - [x] Gate exits non-zero on a failed check (verified by removing a quick-suite file: exit 1; bad flag: exit 2).
 - [x] Regression test starts the gate with the base (non-venv) interpreter and asserts it re-execs into `.venv`: `tests/test_selfcheck.py::test_non_venv_python_reexecutes_into_the_project_venv`.
