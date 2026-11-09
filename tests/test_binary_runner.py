@@ -181,9 +181,17 @@ def _run_with_fake_monitor(pin_specs=None, monitor_cls=_RecordingMonitor,
             fw = os.path.join(td, "flash.bin")
             with open(fw, "wb") as fh:
                 fh.write(b"\x00" * 64)
-            qcmd = os.path.join(td, "fake-qemu.cmd")
-            with open(qcmd, "w") as fh:
-                fh.write("@echo off\r\nexit /b 0\r\n")
+            # Windows: .cmd batch; POSIX: shell script with execute bit so
+            # subprocess.run can spawn it without Permission denied.
+            if sys.platform == "win32":
+                qcmd = os.path.join(td, "fake-qemu.cmd")
+                with open(qcmd, "w") as fh:
+                    fh.write("@echo off\r\nexit /b 0\r\n")
+            else:
+                qcmd = os.path.join(td, "fake-qemu")
+                with open(qcmd, "w") as fh:
+                    fh.write("#!/bin/sh\nexit 0\n")
+                os.chmod(qcmd, 0o755)
             kwargs = dict(duration_ms=0.1, sync_poll_interval=0.001,
                           sync_poll_timeout=0.05)
             kwargs.update(run_kwargs)
