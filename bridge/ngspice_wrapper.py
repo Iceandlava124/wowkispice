@@ -290,6 +290,55 @@ class NgSpiceEngine:
             None
         )
 
+    def _cb_send_char(self, text: bytes, length: int, user_data: Any) -> int:
+        """Callback for ngspice text output."""
+        text_str = text[:length].decode('utf-8', errors='replace') if text else ''
+        self.output_logs.append(text_str)
+        if self.verbose:
+            print(text_str, end='')
+        return 0
+
+    def _cb_send_stat(self, status: bytes, length: int, user_data: Any) -> int:
+        """Callback for ngspice status output."""
+        status_str = status[:length].decode('utf-8', errors='replace') if status else ''
+        self.output_logs.append(status_str)
+        if self.verbose:
+            print(f'[status] {status_str}', end='')
+        return 0
+
+    def _cb_exit(self, code: int, immediate: bool, code2: int, user_data: Any) -> int:
+        """Callback for ngspice exit notification."""
+        return 0
+
+    def _cb_send_data(self, data: Any, vec_count: int, num: int, user_data: Any) -> int:
+        """Callback for ngspice vector data output."""
+        return 0
+
+    def _cb_get_vsrc(self, voltage: Any, time: float, node_name: bytes, id_: int, user_data: Any) -> int:
+        """Callback for ADC voltage source."""
+        if self.user_vsrc_callback:
+            name_str = node_name.decode('utf-8', errors='replace') if node_name else ""
+            voltage[0] = float(self.user_vsrc_callback(time, name_str))
+        return 0
+
+    def _cb_get_isrc(self, current: Any, time: float, node_name: bytes, id_: int, user_data: Any) -> int:
+        """Callback for ADC current source."""
+        if self.user_vsrc_callback:
+            name_str = node_name.decode('utf-8', errors='replace') if node_name else ""
+            current[0] = float(self.user_vsrc_callback(time, name_str))
+        return 0
+
+    def _cb_get_sync(self, time: float, delta_t: Any, old_delta: float,
+                     redo_step: int, ident: int, location: int, user_data: Any) -> int:
+        """Callback for ngspice synchronization."""
+        if self.progress_callback:
+            try:
+                self.progress_callback(float(time), self.timestep_count)
+            except Exception:
+                pass
+        self.timestep_count += 1
+        return 0
+
     def reset(self) -> None:
         """Reset per-run state without re-initializing ngspice.
 
