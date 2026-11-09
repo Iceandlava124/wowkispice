@@ -35,7 +35,7 @@ Key reports: `BASELINE_REPORT.md`, `FFI_CONSOLIDATION_REPORT.md`,
 - `setup.ps1` (venv, requirements, ngspice DLL, `.env.local`, cleanup/fetch/doctor).
 - `run_selfcheck.bat` invokes the venv interpreter directly; `tools/selfcheck.py` re-executes under it from another `python`.
 - Gate failure propagation verified: broken quick suite → exit 1; unknown flag → exit 2.
-- `tools/setup.sh` / `tools/run_selfcheck.sh` exist for POSIX; unverified on Linux/macOS.
+- `tools/setup.sh` / `tools/run_selfcheck.sh` exist for POSIX; **partially verified** on WSL Ubuntu 24.04 — `setup.sh` completes and `selfcheck.py --quick` passes with `libngspice0` installed. Full Linux suite is not green (libngspice segfault after repeated engine init); core Linux tests still have Windows-assuming failures.
 - Docker build/run recorded 2026-11-06; not re-verified (`docker info` exits 1; daemon not running).
 
 ### Phase 2 — Deterministic & regression-testable: COMPLETE
@@ -86,4 +86,4 @@ Key reports: `BASELINE_REPORT.md`, `FFI_CONSOLIDATION_REPORT.md`,
 1. Installer not reproducible or clean-machine verified.
 3. CI not executed on a runner.
 4. Fresh-clone and Docker sign-off not repeated.
-5. POSIX scripts not verified on Linux/macOS.
+5. POSIX is partial: quick self-check passes, full Linux suite is not green.

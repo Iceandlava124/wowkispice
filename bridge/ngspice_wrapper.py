@@ -8,6 +8,7 @@ import ctypes
 import ctypes.util
 import os
 import re
+import sys
 import threading
 from typing import Callable, Optional, Dict, Any, List, Tuple
 
@@ -192,7 +193,7 @@ class NgSpiceEngine:
         self.lib.ngSpice_Init.restype = ctypes.c_int
 
         self.lib.ngSpice_Init_Sync.argtypes = [
-            GetVSRCData_t, GetISRCData_t, GetSyncData_t, ctypes.POINTER(ctypes.c_int), ctypes.c_void_p
+            GetVSRCData_t, GetISRCData_t, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.c_void_p
         ]
         self.lib.ngSpice_Init_Sync.restype = ctypes.c_int
 
@@ -302,10 +303,17 @@ class NgSpiceEngine:
             raise RuntimeError(f"ngSpice_Init failed with code {ret}")
 
         ident = ctypes.c_int(0)
+        # libngspice 42 (Ubuntu 24.04) aborts every transient with
+        # "Timestep too small" when a GetSyncData callback is registered;
+        # VSRC/ISRC registration alone is fine. Stop/progress do not depend on
+        # this callback (request_stop uses a separate thread), so omit it on
+        # non-Windows hosts and keep it on Windows where the bundled DLL
+        # supports it.
+        sync_cb = self._c_get_sync if sys.platform == "win32" else None
         self.lib.ngSpice_Init_Sync(
             self._c_get_vsrc,
             self._c_get_isrc,
-            self._c_get_sync,
+            sync_cb,
             ctypes.byref(ident),
             None
         )

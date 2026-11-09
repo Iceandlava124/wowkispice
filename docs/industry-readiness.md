@@ -39,7 +39,7 @@ gate with the system interpreter, which lacks the project dependencies.
 | No packaging/versioning | Partial — entry points exist but `wosp-gui` is broken; installer unverified | `pyproject.toml`; installer artifact |
 | Coverage asymmetry | Extended — 334 core tests include industry tests; FFI 27/27 | measured this turn |
 | Compliance implied, not established | Bounded in `docs/industry-credibility-baseline.md` | public docs |
-| Windows-centric | POSIX scripts exist, **unverified** | `tools/setup.sh`, `tools/run_selfcheck.sh` |
+| Windows-centric | POSIX **partially verified**: quick self-check passes on WSL Ubuntu 24.04; full Linux suite not green (libngspice segfault after repeated init) | `tools/setup.sh`, `tools/run_selfcheck.sh` |
 | No installer/i18n/crash reporting | Open — Phase 5 | `.nsi` placeholders |
 
 ## Canonical phase plan
