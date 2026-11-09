@@ -377,13 +377,16 @@ if ($rc -ne 0) { throw "libngspice was placed but could not be loaded." }
 # 4b. Qt5 Charts preflight for GUI build
 # ---------------------------------------------------------------------------
 Write-Step "Checking Qt5 Charts availability for GUI build"
-$QtChartsInclude = Join-Path $env:MSYSTEM_PREFIX "include\QtCharts"
+# $env:MSYSTEM_PREFIX is only set inside an MSYS2 shell; in plain PowerShell it
+# is null, so fall back to the standard MSYS2 ucrt64 location.
+$msystemPrefix = if ($env:MSYSTEM_PREFIX) { $env:MSYSTEM_PREFIX } else { "C:\msys64\ucrt64" }
+$QtChartsInclude = Join-Path $msystemPrefix "include\QtCharts"
 if (-not $QtChartsInclude -or -not (Test-Path $QtChartsInclude)) {
     # Try common MSYS2 ucrt64 locations
     $candidates = @(
         "C:\msys64\ucrt64\include\QtCharts",
         "C:\msys64\mingw64\include\QtCharts",
-        (Join-Path (Split-Path $env:MSYSTEM_PREFIX -Parent) "ucrt64\include\QtCharts")
+        (Join-Path (Split-Path -Path $msystemPrefix -Parent) "ucrt64\include\QtCharts")
     )
     $QtChartsInclude = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
@@ -399,7 +402,7 @@ else {
         if ($running) {
             throw "Another package manager ($($running.Name -join ', ')) is running. Close it and re-run setup.ps1."
         }
-        Write-Warn "Stale pacman db.lck found; removing."
+        Write-Warn2 "Stale pacman db.lck found; removing."
         Remove-Item $pacmanLock -Force -ErrorAction SilentlyContinue
     }
     $installOk = $false
@@ -412,7 +415,7 @@ else {
     }
     if (-not $installOk) {
         # Fall back to direct download from MSYS2 repo mirror
-        Write-Warn "pacman mirrors unreachable; falling back to repo.msys2.org direct download"
+        Write-Warn2 "pacman mirrors unreachable; falling back to repo.msys2.org direct download"
         $pkgUrl = "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-qt5-charts-5.15.14-1-any.pkg.tar.zst"
         $pkgFile = Join-Path $env:TEMP "qt5-charts.pkg.tar.zst"
         try {
@@ -422,7 +425,7 @@ else {
             Remove-Item $pkgFile -Force -ErrorAction SilentlyContinue
         }
         catch {
-            Write-Warn "Direct download also failed: $_"
+            Write-Warn2 "Direct download also failed: $_"
         }
     }
     # Re-probe after install attempt
