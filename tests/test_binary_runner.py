@@ -181,8 +181,9 @@ def _run_with_fake_monitor(pin_specs=None, monitor_cls=_RecordingMonitor,
             fw = os.path.join(td, "flash.bin")
             with open(fw, "wb") as fh:
                 fh.write(b"\x00" * 64)
-            # Windows: .cmd batch; POSIX: shell script with execute bit so
-            # subprocess.run can spawn it without Permission denied.
+            # Fake QEMU: on Windows use a .cmd batch; on POSIX use a Python
+            # script that emulates QEMU's HMP monitor on stdio so that
+            # run_binary_cosim can inject ADC counts and read gate state.
             if sys.platform == "win32":
                 qcmd = os.path.join(td, "fake-qemu.cmd")
                 with open(qcmd, "w") as fh:
@@ -190,7 +191,52 @@ def _run_with_fake_monitor(pin_specs=None, monitor_cls=_RecordingMonitor,
             else:
                 qcmd = os.path.join(td, "fake-qemu")
                 with open(qcmd, "w") as fh:
-                    fh.write("#!/bin/sh\nexit 0\n")
+                    fh.write(r'''#!/usr/bin/env python3
+import sys, os, time
+
+# Parse -serial file:<uart_path> for the UART log
+uart_path = None
+for i, arg in enumerate(sys.argv):
+    if arg == "-serial" and i + 1 < len(sys.argv):
+        uart_path = sys.argv[i + 1]
+    elif arg.startswith("-serial="):
+        uart_path = arg.split("=", 1)[1]
+# QEMU passes -serial file:/path/to/log; strip the "file:" prefix
+if uart_path and uart_path.startswith("file:"):
+    uart_path = uart_path[5:]
+
+# Write boot markers to UART log so run_binary_cosim sees firmware booted
+if uart_path:
+    try:
+        with open(uart_path, "w") as f:
+            f.write("BUCK_CTRL: Starting ESP32 Buck Converter\n")
+            f.write("BUCK_CTRL: Entering high-speed hysteretic control loop\n")
+    except Exception:
+        pass
+
+# Emit QEMU monitor prompt on stdout
+sys.stdout.write("(qemu) ")
+sys.stdout.flush()
+
+# Read HMP commands from stdin and respond
+while True:
+    try:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        line = line.strip()
+        if line.startswith("qom-set /machine/peripheral/sens adc1-value "):
+            # qom-set is silent on success; just emit prompt
+            pass
+        elif line == "xp /1wx 0x3FF44004":
+            print("000000003ff44004: 0x00000000")
+        elif line in ("quit", "q"):
+            break
+        sys.stdout.write("(qemu) ")
+        sys.stdout.flush()
+    except (BrokenPipeError, OSError):
+        break
+''')
                 os.chmod(qcmd, 0o755)
             kwargs = dict(duration_ms=0.1, sync_poll_interval=0.001,
                           sync_poll_timeout=0.05)
