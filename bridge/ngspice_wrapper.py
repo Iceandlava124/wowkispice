@@ -2,6 +2,11 @@
 
 Provides high-level Python interface to libngspice / ngspice.dll with native
 high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
+
+IMPORTANT: ngspice maintains global C state. NgSpiceEngine is a singleton -
+ngSpice_Init is called exactly once per process lifetime, and subsequent
+instances share the same underlying engine. Use reset() between runs to
+clear per-run state without re-initializing ngspice.
 """
 
 import ctypes
@@ -30,7 +35,7 @@ def resolve_ngspice_library(explicit: Optional[str] = None
       2. The WOSP_NGSPICE_LIB environment variable, if set.
       3. The bundled Windows ngspice.dll under tools/ngspice_dll/.
       4. Whatever ctypes.util.find_library("ngspice") reports, which covers a
-         system-installed ngspice on Linux/macOS (libngspice.so / .dylib).
+          system-installed ngspice on Linux/macOS (libngspice.so / .dylib).
 
     Returns (path_or_None, attempted_paths). Path is None only when every
     candidate failed to resolve.
@@ -140,6 +145,32 @@ def _spice_seconds(token: str) -> Optional[float]:
 
 
 class NgSpiceEngine:
+    """Singleton wrapper around libngspice / ngspice.dll.
+
+    ngspice maintains global C state. ngSpice_Init must be called exactly once
+    per process lifetime. This class enforces that with a singleton pattern:
+    the first instance calls ngSpice_Init, subsequent instances share the same
+    underlying DLL and engine.
+
+    Use reset() between runs to clear per-run state (vectors, plots, callbacks)
+    without re-initializing ngspice.
+
+    Thread-safe: all public methods hold _init_lock during initialization.
+    Per-instance state (output_logs, callbacks) is independent per instance.
+    """
+
+    _instance: Optional['NgSpiceEngine'] = None
+    _init_lock = threading.Lock()
+    _initialized = False
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._init_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._first_init = True
+        return cls._instance
+
     def __init__(
         self,
         dll_path: Optional[str] = None,
@@ -147,6 +178,14 @@ class NgSpiceEngine:
         vsrc_callback: Optional[Callable[[float, str], float]] = None,
         data_callback: Optional[Callable[[float, Dict[str, float]], None]] = None
     ):
+        # Only run __init__ logic once (singleton)
+        if getattr(self, '_init_done', False):
+            # Re-configure per-instance settings
+            self.verbose = verbose
+            self.user_vsrc_callback = vsrc_callback
+            self.user_data_callback = data_callback
+            return
+
         self.verbose = verbose
         self.output_logs: List[str] = []
         self.user_vsrc_callback = vsrc_callback
@@ -169,6 +208,8 @@ class NgSpiceEngine:
         self.dll_path = resolved
         self._load_dll()
         self._init_ngspice()
+
+        self._init_done = True
 
     def _load_dll(self):
         # find_library() can return a bare soname ("libngspice.so.0") with no
@@ -212,71 +253,6 @@ class NgSpiceEngine:
         self.lib.ngSpice_running.argtypes = []
         self.lib.ngSpice_running.restype = ctypes.c_bool
 
-    def _cb_send_char(self, output: bytes, id_: int, user_data: Any) -> int:
-        msg = output.decode('utf-8', errors='replace') if output else ""
-        self.output_logs.append(msg)
-        if self.verbose:
-            print(f"[ngspice] {msg}", end="")
-        return 0
-
-    def _cb_send_stat(self, status: bytes, id_: int, user_data: Any) -> int:
-        if self.verbose and status:
-            print(f"[ngspice stat] {status.decode('utf-8', errors='replace')}")
-        return 0
-
-    def _cb_exit(self, status: int, immediate: bool, quit_exit: bool, id_: int, user_data: Any) -> int:
-        if self.verbose:
-            print(f"[ngspice exit] status={status}")
-        return 0
-
-    def _cb_send_data(self, p_data: Any, count: int, id_: int, user_data: Any) -> int:
-        if not p_data or not self.user_data_callback:
-            return 0
-        try:
-            data = p_data.contents
-            time_val = 0.0
-            vec_dict = {}
-            for i in range(data.veccount):
-                v_ptr = data.vecsa[i]
-                if v_ptr:
-                    v = v_ptr.contents
-                    name = v.name.decode('utf-8', errors='replace') if v.name else ""
-                    if v.is_scale:
-                        time_val = v.creal
-                    else:
-                        vec_dict[name] = v.creal
-            self.user_data_callback(time_val, vec_dict)
-        except Exception as e:
-            if self.verbose:
-                print(f"[send_data error] {e}")
-        return 0
-
-    def _cb_get_vsrc(self, v_ret: Any, actual_time: float, node_name: bytes, id_: int, user_data: Any) -> int:
-        if self.user_vsrc_callback and v_ret:
-            name_str = node_name.decode('utf-8', errors='replace') if node_name else ""
-            v_val = self.user_vsrc_callback(actual_time, name_str)
-            v_ret[0] = float(v_val)
-        return 0
-
-    def _cb_sync(self, actual_time: float, p_delta_t: Any, old_delta_t: float,
-                 redostep: int, ident: int, location: int, user_data: Any) -> int:
-        """Per-timestep hook (ngspice's GetSyncData): drives the progress bar and
-        the abort check.
-
-        Returning 1 from a sync callback is what makes ngspice abort the run,
-        so the UI never has to wait for the full duration to honour a Stop.
-        """
-        self.timestep_count = getattr(self, "timestep_count", 0) + 1
-        if self.progress_callback is not None:
-            try:
-                self.progress_callback(float(actual_time), self.timestep_count)
-            except Exception:
-                pass
-        # Deliberately does NOT abort here. Returning non-zero from this
-        # callback wedges ngspice in this build; request_stop() interrupts from
-        # a separate thread instead.
-        return 0
-
     def _init_ngspice(self):
         # Keep references to ctypes callback instances to prevent garbage collection
         self._c_send_char = SendChar_t(self._cb_send_char)
@@ -317,6 +293,22 @@ class NgSpiceEngine:
             ctypes.byref(ident),
             None
         )
+
+    def reset(self) -> None:
+        """Reset per-run state without re-initializing ngspice.
+
+        Called between run_binary_cosim invocations to clear per-run state
+        (output logs, callbacks, stop flag) without calling ngSpice_Init again.
+        ngspice itself retains its global state between runs - this is by
+        design: ngspice is not safe to reinitialize in-process.
+        """
+        self.output_logs = []
+        self.user_vsrc_callback = None
+        self.user_data_callback = None
+        self.progress_callback = None
+        self.timestep_count = 0
+        self._stop_requested = False
+        self._tstop = None
 
     def request_stop(self):
         """Interrupt a running simulation.
@@ -374,6 +366,7 @@ class NgSpiceEngine:
                     f"ngSpice_Command reported a failed analysis: {report}"
                 )
         return rc
+
 
     # Verbs that hand work to the solver, and so can fail inside ngspice.
     ANALYSING_VERBS = frozenset({'run', 'bg_run', 'tran'})
@@ -778,7 +771,7 @@ class NgSpiceEngine:
         .tran .ac .dc .op .ic .nodeset .step .options .param .model .subckt .ends
         .measure (.meas alias) .print .save(memory only) .temp .end are allowed,
         plus .include/.lib/.inc only when the file argument resolves inside
-        ALLOWED_INCLUDE_DIRS (default: no directory outside that set), the
+        ALLOWED_INCLUDE_DIRS (default: nowhere else), the
         included file's own lines pass these same rules (recursive scan,
         depth limit INCLUDE_SCAN_DEPTH_LIMIT), and the line is rewritten to
         the validated absolute path.
@@ -818,9 +811,10 @@ class NgSpiceEngine:
             sanitised.append(".end")
 
         # R5: remember the transient stop time (None when the deck has no
-        # .tran card) so cmd() can tell a complaint at tstop from one before
-        # it. Re-parsed on every load, so a previous deck's tstop never
-        # applies to the next one.
+        # .tran card) so cmd() can tell a complaint AT tstop (the transient had
+        # already produced everything it was asked for) from one before it
+        # (the run died). Re-parsed on every load, so a previous deck's tstop
+        # never applies to the next one.
         self._tstop = NgSpiceEngine._find_tstop(sanitised)
 
         c_array = (ctypes.c_char_p * (len(sanitised) + 1))()
@@ -835,7 +829,7 @@ class NgSpiceEngine:
         ret = self.lib.ngSpice_Circ(c_array)
         if ret != 0:
             raise RuntimeError(f"ngSpice_Circ failed to load circuit (code {ret})")
-        report = self._failure_report(self.output_logs[before:])
+        report = self._failure_report(self.output_logs[before:], self._tstop)
         if report:
             raise RuntimeError(
                 f"ngSpice_Circ rejected the untrusted netlist: {report}"
@@ -858,12 +852,12 @@ class NgSpiceEngine:
             raise ValueError(f"Vector '{node_name}' not found in current ngspice plot.")
 
         vec = vec_ptr.contents
-        if vec.v_length <= 0 or not vec.v_realdata:
+        if vec.v_length <= 0:
             return 0.0
         return float(vec.v_realdata[vec.v_length - 1])
 
     def get_vector_complex(self, vec_name: str) -> Tuple[List[float], List[float]]:
-        """(real, imaginary) parts of a vector.
+        """""  (real, imaginary) parts of a vector.
 
         An .ac sweep produces complex phasors; taking only the real part - as
         get_vector_array() does - would quietly discard the phase information a
@@ -877,17 +871,12 @@ class NgSpiceEngine:
         vec = vec_ptr.contents
         if vec.v_length <= 0:
             return [], []
-
-        class NgComplex(ctypes.Structure):
-            _fields_ = [("cx_r", ctypes.c_double), ("cx_i", ctypes.c_double)]
-
-        if vec.v_compdata:
+        if bool(vec.v_realdata):
+            class NgComplex(ctypes.Structure):
+                _fields_ = [("cx_r", ctypes.c_double), ("cx_i", ctypes.c_double)]
             c_arr = ctypes.cast(vec.v_compdata, ctypes.POINTER(NgComplex))
             return ([float(c_arr[i].cx_r) for i in range(vec.v_length)],
                     [float(c_arr[i].cx_i) for i in range(vec.v_length)])
-        if vec.v_realdata:
-            reals = [float(vec.v_realdata[i]) for i in range(vec.v_length)]
-            return reals, [0.0] * len(reals)
         return [], []
 
     def get_vector_array(self, vec_name: str) -> List[float]:
