@@ -4,9 +4,15 @@ Provides high-level Python interface to libngspice / ngspice.dll with native
 high-speed synchronization callbacks (GetVSRCData, GetSyncData, SendData).
 
 IMPORTANT: ngspice maintains global C state. NgSpiceEngine is a singleton -
-ngSpice_Init is called exactly once per process lifetime, and subsequent
-instances share the same underlying engine. Use reset() between runs to
-clear per-run state without re-initializing ngspice.
+ngSpice_Init must be called exactly once per process lifetime. This class
+enforces that with a singleton pattern: the first instance calls ngSpice_Init,
+subsequent instances share the same underlying DLL and engine.
+
+Use reset() between runs to clear per-run state (vectors, plots, callbacks)
+without re-initializing ngspice.
+
+Thread-safe: all public methods hold _init_lock during initialization.
+Per-instance state (output_logs, callbacks) is independent per instance.
 """
 
 import ctypes
@@ -178,14 +184,20 @@ class NgSpiceEngine:
         vsrc_callback: Optional[Callable[[float, str], float]] = None,
         data_callback: Optional[Callable[[float, Dict[str, float]], None]] = None
     ):
-        # Only run __init__ logic once (singleton)
-        if getattr(self, '_init_done', False):
-            # Re-configure per-instance settings
-            self.verbose = verbose
-            self.user_vsrc_callback = vsrc_callback
-            self.user_data_callback = data_callback
-            return
+        # Only run DLL/FFI initialization once (singleton)
+        if not getattr(self, '_init_done', False):
+            resolved, tried = resolve_ngspice_library(dll_path)
+            if resolved is None:
+                raise FileNotFoundError(
+                    "ngspice library not found. Tried:\n  " +
+                    "\n  ".join(tried) + _MISSING_DLL_HELP)
 
+            self.dll_path = resolved
+            self._load_dll()
+            self._init_ngspice()
+            self._init_done = True
+
+        # Always reset per-instance state on every __init__ call
         self.verbose = verbose
         self.output_logs: List[str] = []
         self.user_vsrc_callback = vsrc_callback
@@ -193,23 +205,7 @@ class NgSpiceEngine:
         self.progress_callback: Optional[Callable[[float, int], None]] = None
         self.timestep_count = 0
         self._stop_requested = False
-        # R5: stop time of the loaded deck's .tran card, set by load_circuit.
-        # cmd() needs it to tell a complaint AT tstop (the transient had
-        # already produced everything it was asked for) from one before it
-        # (the run died). None means "no transient known" - fail closed.
         self._tstop: Optional[float] = None
-
-        resolved, tried = resolve_ngspice_library(dll_path)
-        if resolved is None:
-            raise FileNotFoundError(
-                "ngspice library not found. Tried:\n  " +
-                "\n  ".join(tried) + _MISSING_DLL_HELP)
-
-        self.dll_path = resolved
-        self._load_dll()
-        self._init_ngspice()
-
-        self._init_done = True
 
     def _load_dll(self):
         # find_library() can return a bare soname ("libngspice.so.0") with no
@@ -366,7 +362,6 @@ class NgSpiceEngine:
                     f"ngSpice_Command reported a failed analysis: {report}"
                 )
         return rc
-
 
     # Verbs that hand work to the solver, and so can fail inside ngspice.
     ANALYSING_VERBS = frozenset({'run', 'bg_run', 'tran'})
@@ -813,8 +808,7 @@ class NgSpiceEngine:
         # R5: remember the transient stop time (None when the deck has no
         # .tran card) so cmd() can tell a complaint AT tstop (the transient had
         # already produced everything it was asked for) from one before it
-        # (the run died). Re-parsed on every load, so a previous deck's tstop
-        # never applies to the next one.
+        # (the run died). None means "no transient known" - fail closed.
         self._tstop = NgSpiceEngine._find_tstop(sanitised)
 
         c_array = (ctypes.c_char_p * (len(sanitised) + 1))()
