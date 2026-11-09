@@ -93,11 +93,17 @@ reference and legacy Python modules.
 ## Install — Windows (MSYS2)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File setup.ps1   # venv, deps, ngspice DLL
+powershell -ExecutionPolicy Bypass -File setup.ps1   # venv, deps, ngspice DLL, Qt5 Charts
 cargo test -p wowkispice-core                        # verify: 334 passed
 .\run_selfcheck.bat                                  # environment gate: SELF-CHECK: PASS
 .\gui\build\wowkispice_gui.exe                       # launch GUI
 ```
+
+`setup.ps1` now checks for Qt5 Charts headers and installs
+`mingw-w64-ucrt-x86_64-qt5-charts` via pacman (falling back to a direct
+`repo.msys2.org` download if mirrors fail) before the GUI build step. On POSIX
+systems, install the equivalent package (`qt5-charts` or `qt5-qtcharts`) before
+running `setup.sh`.
 
 `run_selfcheck.bat` invokes `.venv\Scripts\python.exe` directly, so it works from a
 clean shell with no virtualenv activated. `tools/selfcheck.py` re-executes itself

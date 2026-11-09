@@ -374,6 +374,66 @@ Remove-Item (Join-Path $Root ".wosp_probe.py") -ErrorAction SilentlyContinue
 if ($rc -ne 0) { throw "libngspice was placed but could not be loaded." }
 
 # ---------------------------------------------------------------------------
+# 4b. Qt5 Charts preflight for GUI build
+# ---------------------------------------------------------------------------
+Write-Step "Checking Qt5 Charts availability for GUI build"
+$QtChartsInclude = Join-Path $env:MSYSTEM_PREFIX "include\QtCharts"
+if (-not $QtChartsInclude -or -not (Test-Path $QtChartsInclude)) {
+    # Try common MSYS2 ucrt64 locations
+    $candidates = @(
+        "C:\msys64\ucrt64\include\QtCharts",
+        "C:\msys64\mingw64\include\QtCharts",
+        (Join-Path (Split-Path $env:MSYSTEM_PREFIX -Parent) "ucrt64\include\QtCharts")
+    )
+    $QtChartsInclude = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if ($QtChartsInclude) {
+    Write-Ok "Qt5 Charts headers found at $QtChartsInclude"
+}
+else {
+    Write-Step "Qt5 Charts headers not found - installing mingw-w64-ucrt-x86_64-qt5-charts"
+    $pacmanLock = "C:\msys64\var\lib\pacman\db.lck"
+    if (Test-Path $pacmanLock) {
+        # Only remove a stale lock if no pacman/pacman-key process is running
+        $running = Get-Process -Name "pacman","pacman-key" -ErrorAction SilentlyContinue
+        if ($running) {
+            throw "Another package manager ($($running.Name -join ', ')) is running. Close it and re-run setup.ps1."
+        }
+        Write-Warn "Stale pacman db.lck found; removing."
+        Remove-Item $pacmanLock -Force -ErrorAction SilentlyContinue
+    }
+    $installOk = $false
+    try {
+        & pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-qt5-charts 2>&1 | Out-Host
+        if ($LASTEXITCODE -eq 0) { $installOk = $true }
+    }
+    catch {
+        $installOk = $false
+    }
+    if (-not $installOk) {
+        # Fall back to direct download from MSYS2 repo mirror
+        Write-Warn "pacman mirrors unreachable; falling back to repo.msys2.org direct download"
+        $pkgUrl = "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-qt5-charts-5.15.14-1-any.pkg.tar.zst"
+        $pkgFile = Join-Path $env:TEMP "qt5-charts.pkg.tar.zst"
+        try {
+            Invoke-WebRequest -Uri $pkgUrl -OutFile $pkgFile -UseBasicParsing -TimeoutSec 60
+            & pacman -U --noconfirm $pkgFile 2>&1 | Out-Host
+            if ($LASTEXITCODE -eq 0) { $installOk = $true }
+            Remove-Item $pkgFile -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Warn "Direct download also failed: $_"
+        }
+    }
+    # Re-probe after install attempt
+    $QtChartsInclude = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $QtChartsInclude -or -not (Test-Path $QtChartsInclude)) {
+        throw "Qt5 Charts could not be installed. Remediation:`n  pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-qt5-charts`n  (or download manually from https://repo.msys2.org/mingw/ucrt64/ and install with `pacman -U`)"
+    }
+    Write-Ok "Qt5 Charts installed at $QtChartsInclude"
+}
+
+# ---------------------------------------------------------------------------
 # 5. Cleanup orphaned processes, fetch prebuilt patched QEMU, and run doctor
 # ---------------------------------------------------------------------------
 Write-Step "Cleaning up orphaned QEMU processes"
