@@ -9,6 +9,8 @@
 #include <QtWidgets/QToolBar>
 #include <QtWidgets/QAction>
 #include <QtWidgets/QDockWidget>
+#include <QtWidgets/QTableWidget>
+#include <QtWidgets/QLabel>
 
 #include "views/schematic_editor.h"
 #include "views/waveform_viewer.h"
@@ -29,6 +31,7 @@ private:
     void setupStatusBar();
     void setupCentralWidget();
     void setupDocks();
+    void setupPropertiesDock();
 
     // Simulation backend
     SpiceBackend m_spiceBackend;
@@ -44,6 +47,11 @@ private:
     void runNoiseAnalysis();
     void runFourierAnalysis();
 
+    // Component properties
+    void showComponentProperties();
+    void editComponentProperties(const QString &compId);
+    void saveComponentProperties();
+
     QTabWidget *m_centralTabs = nullptr;
 
     // View widgets
@@ -55,6 +63,11 @@ private:
     // Dock widgets
     QDockWidget *m_propertiesDock = nullptr;
     QDockWidget *m_consoleDock = nullptr;
+
+    // Properties dock widgets
+    QTableWidget *m_propertiesTable = nullptr;
+    QLabel *m_componentIdLabel = nullptr;
+    QString m_currentComponentId;
 };
 
 #endif // MAINWINDOW_H

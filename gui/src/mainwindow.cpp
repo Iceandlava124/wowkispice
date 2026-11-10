@@ -4,6 +4,9 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QInputDialog>
+#include <QtWidgets/QTableWidget>
+#include <QtWidgets/QHeaderView>
 #include <QtCore/QDebug>
 #include <QtCore/QTextStream>
 #include <QtGui/QColor>
@@ -19,6 +22,7 @@ MainWindow::MainWindow(QWidget *parent)
     setupStatusBar();
     setupCentralWidget();
     setupDocks();
+    setupPropertiesDock();
 
     // Initialize the ngspice backend
     if (m_spiceBackend.isAvailable()) {
@@ -64,6 +68,10 @@ void MainWindow::setupMenuBar()
         m_centralTabs->setCurrentWidget(m_codeWorkspace);
     });
 
+    auto *toolsMenu = menuBar()->addMenu("&Tools");
+    toolsMenu->addAction("&Component Properties", this, &MainWindow::showComponentProperties);
+    toolsMenu->addAction("&Model Library", m_schematicEditor, &SchematicEditor::modelLibraryManagement);
+
     auto *helpMenu = menuBar()->addMenu("&Help");
     helpMenu->addAction("&About", this, [](){
         QMessageBox::about(nullptr, "About WOWKISPICE",
@@ -83,6 +91,9 @@ void MainWindow::setupToolBar()
     connect(runAction, &QAction::triggered, this, &MainWindow::runTransient);
     auto *stopAction = toolBar->addAction("Stop");
     connect(stopAction, &QAction::triggered, this, &MainWindow::stopSimulation);
+    toolBar->addSeparator();
+    auto *propsAction = toolBar->addAction("Properties");
+    connect(propsAction, &QAction::triggered, this, &MainWindow::showComponentProperties);
     toolBar->addSeparator();
     toolBar->addAction("Zoom In");
     toolBar->addAction("Zoom Out");
@@ -123,6 +134,32 @@ void MainWindow::setupDocks()
     m_consoleDock = new QDockWidget("Console", this);
     m_consoleDock->setWidget(new QLabel("Simulation console output will appear here"));
     addDockWidget(Qt::BottomDockWidgetArea, m_consoleDock);
+}
+
+void MainWindow::setupPropertiesDock()
+{
+    m_propertiesTable = new QTableWidget(0, 3, this);
+    m_propertiesTable->setHorizontalHeaderLabels({"Parameter", "Value", "Description"});
+    m_propertiesTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    m_propertiesTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_propertiesTable->verticalHeader()->hide();
+
+    m_componentIdLabel = new QLabel("No component selected", this);
+    m_componentIdLabel->setStyleSheet("QLabel { font-weight: bold; }");
+
+    auto *layout = new QVBoxLayout();
+    layout->addWidget(m_componentIdLabel);
+    layout->addWidget(m_propertiesTable);
+
+    auto *btnLayout = new QHBoxLayout();
+    auto *saveBtn = new QPushButton("Save Changes", this);
+    connect(saveBtn, &QPushButton::clicked, this, &MainWindow::saveComponentProperties);
+    btnLayout->addWidget(saveBtn);
+    layout->addLayout(btnLayout);
+
+    QWidget *container = new QWidget(this);
+    container->setLayout(layout);
+    m_propertiesDock->setWidget(container);
 }
 
 // ---- Simulation actions ----
@@ -193,19 +230,14 @@ void MainWindow::runTransient()
         return;
     }
 
-    // Default transient analysis for a buck converter
-    QStringList deck = m_schematicEditor->netlist();
+    // Generate netlist from the drawn schematic
+    QStringList deck = m_schematicEditor->generateNetlist();
+    m_schematicEditor->setNetlist(deck);
+
     if (deck.isEmpty()) {
-        // Built-in buck converter test circuit
-        deck << "* Buck converter test circuit"
-             << "V1 vin 0 PULSE(0 5 0 1n 1n 10u 20u)"
-             << "L1 vin out 10u"
-             << "D1 out 0 D1N4148"
-             << "Rload out 0 10"
-             << "C1 out 0 100u"
-             << ".model D1N4148 D(Is=1e-9 N=1.8)"
-             << ".tran 1u 5m uic"
-             << ".end";
+        QMessageBox::warning(this, "Empty Schematic",
+            "No components in schematic. Add components first.");
+        return;
     }
 
     m_spiceBackend.reset();
@@ -229,7 +261,7 @@ void MainWindow::runTransient()
         m_centralTabs->setCurrentWidget(m_waveformViewer);
         statusBar()->showMessage(QString("Transient complete: %1 points").arg(time.size()));
     } else {
-        statusBar()->showMessage("Simulation ran but no data vectors found");
+        statusBar()->showMessage("Simulation ran but no time/v(out) vectors found");
     }
 }
 
@@ -264,4 +296,74 @@ void MainWindow::runFourierAnalysis()
 {
     QMessageBox::information(this, "Fourier Analysis",
         "Fourier analysis is not yet implemented.");
+}
+
+// ---- Component properties ----
+
+void MainWindow::showComponentProperties()
+{
+    // For now, show a dialog to edit the first component or prompt for component ID
+    if (m_schematicEditor->netlist().isEmpty() && m_propertiesTable->rowCount() == 0) {
+        // Show available components - for now just edit a default component
+        bool ok;
+        QString compId = QInputDialog::getText(this, "Component Properties",
+            "Enter component ID to edit:", QLineEdit::Normal, "R1", &ok);
+        if (!ok || compId.isEmpty())
+            return;
+        editComponentProperties(compId);
+    } else {
+        editComponentProperties(m_currentComponentId);
+    }
+}
+
+void MainWindow::editComponentProperties(const QString &compId)
+{
+    m_currentComponentId = compId;
+    m_componentIdLabel->setText("Component: " + compId);
+
+    // Get component params from schematic editor
+    m_propertiesTable->setRowCount(0);
+
+    QStringList keys = {"value", "model"};
+    for (const QString &key : keys) {
+        QString currentVal = m_schematicEditor->componentParam(compId, key);
+        if (currentVal.isEmpty()) {
+            currentVal = m_schematicEditor->componentParam(compId, "value"); // fallback
+        }
+
+        int row = m_propertiesTable->rowCount();
+        m_propertiesTable->insertRow(row);
+
+        auto *nameItem = new QTableWidgetItem(key);
+        nameItem->setFlags(nameItem->flags() & ~Qt::ItemIsEditable);
+        m_propertiesTable->setItem(row, 0, nameItem);
+
+        auto *valItem = new QTableWidgetItem(currentVal);
+        m_propertiesTable->setItem(row, 1, valItem);
+
+        QString desc;
+        if (key == "value") desc = "Component value (e.g. 10k, 100n, PULSE(...))";
+        else if (key == "model") desc = "SPICE model name";
+        m_propertiesTable->setItem(row, 2, new QTableWidgetItem(desc));
+    }
+
+    m_propertiesDock->setWindowTitle("Properties — " + compId);
+    m_propertiesDock->show();
+}
+
+void MainWindow::saveComponentProperties()
+{
+    if (m_currentComponentId.isEmpty())
+        return;
+
+    for (int row = 0; row < m_propertiesTable->rowCount(); ++row) {
+        QTableWidgetItem *keyItem = m_propertiesTable->item(row, 0);
+        QTableWidgetItem *valItem = m_propertiesTable->item(row, 1);
+        if (keyItem && valItem) {
+            m_schematicEditor->setComponentParam(m_currentComponentId,
+                keyItem->text(), valItem->text());
+        }
+    }
+
+    statusBar()->showMessage(QString("Properties saved for %1").arg(m_currentComponentId));
 }

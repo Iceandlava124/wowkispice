@@ -5,8 +5,16 @@
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QInputDialog>
 #include <QtWidgets/QMessageBox>
+#include <QtWidgets/QDialog>
+#include <QtWidgets/QDialogButtonBox>
+#include <QtWidgets/QFormLayout>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QLabel>
 #include <QtCore/QDebug>
 #include <QtCore/QStringLiteral>
+#include <QtCore/QTextStream>
 
 SchematicEditor::SchematicEditor(QWidget *parent)
     : QGraphicsView(parent)
@@ -30,13 +38,12 @@ SchematicEditor::SchematicEditor(QWidget *parent)
 
 void SchematicEditor::addComponent(const QString &id, const QString &type, qreal x, qreal y)
 {
-    // Check if model exists; if not, suggest one from library
-    QString model = resolveModelForType(type);
-    if (model.isEmpty()) {
-        QMessageBox::information(nullptr, "Model Library",
-            "No default model for type: " + type + "\n"
-            "Use 'Tools → Model Library' to manage SPICE models.");
-    }
+    ComponentData comp;
+    comp.id = id;
+    comp.type = type;
+    comp.spicePrefix = spicePrefixForType(type);
+    comp.position = QPointF(x, y);
+    comp.params["value"] = defaultValueForType(type);
 
     auto *rect = new QGraphicsRectItem(x - 30, y - 20, 60, 40);
     rect->setPen(QPen(Qt::darkBlue, 2));
@@ -47,15 +54,15 @@ void SchematicEditor::addComponent(const QString &id, const QString &type, qreal
     auto *label = new QGraphicsSimpleTextItem(type, rect);
     label->setPos(-label->boundingRect().width() / 2, -label->boundingRect().height() / 2);
 
-    auto *pinLabel = new QGraphicsSimpleTextItem(id, rect);
-    pinLabel->setPos(35, -10);
-    pinLabel->setScale(0.7);
+    auto *idLabel = new QGraphicsSimpleTextItem(id, rect);
+    idLabel->setPos(-idLabel->boundingRect().width() / 2, 25);
+    idLabel->setScale(0.6);
 
     m_scene->addItem(rect);
-    m_components[id] = rect;
+    m_components[id] = comp;
 
     // Store model reference
-    m_componentModels[id] = model;
+    m_componentModels[id] = resolveModelForType(type);
 
     emit componentAdded(id, type, x, y);
 }
@@ -77,37 +84,29 @@ void SchematicEditor::addWire(const QString &fromPin, const QString &toPin)
     emit wireAdded(fromPin, toPin);
 }
 
-void SchematicEditor::importWAV()
+void SchematicEditor::setComponentParam(const QString &id, const QString &key, const QString &value)
 {
-    // LTspice: import WAV file as arbitrary voltage stimulus
-    QString filePath = QFileDialog::getOpenFileName(
-        this, "Import WAV Stimulus", "",
-        "Waveform Audio Files (*.wav);;All Files (*)");
-
-    if (!filePath.isEmpty()) {
-        importWAVStimulus(filePath);
+    auto it = m_components.find(id);
+    if (it != m_components.end()) {
+        it.value().params[key] = value;
     }
 }
 
-void SchematicEditor::runBodeAnalysis()
+QString SchematicEditor::componentParam(const QString &id, const QString &key) const
 {
-    // Frequency response analysis from circuit
-    // Extract component values, compute transfer function, display Bode plot
-    QMessageBox::information(this, "Bode Analysis",
-        "Bode plot analysis selected.\n"
-        "The GUI will compute the transfer function from the circuit elements\n"
-        "and display frequency response with phase and magnitude plots.\n"
-        "This addresses LTspice's lack of interactive filter design.");
-
-    // TODO: Implement actual Bode analysis - extract RLC values,
-    // compute H(s), plot using QtCharts or emit to parent widget
-    qDebug() << "Bode analysis requested from schematic";
+    auto it = m_components.find(id);
+    if (it != m_components.end()) {
+        auto pit = it.value().params.find(key);
+        if (pit != it.value().params.end()) {
+            return pit.value();
+        }
+    }
+    return QString();
 }
 
 void SchematicEditor::modelLibraryManagement()
 {
     // Dialog to manage SPICE model libraries
-    // Addresses LTspice pain point: "需要指出运放使用的 model，并 include进 SPICE netlist"
     QStringList models;
     for (auto it = m_componentModels.constBegin(); it != m_componentModels.constEnd(); ++it) {
         models << it.key() + ": " + it.value();
@@ -133,27 +132,134 @@ void SchematicEditor::modelLibraryManagement()
     }
 }
 
+QStringList SchematicEditor::generateNetlist() const
+{
+    QStringList lines;
+
+    // Build nets (const method can't modify m_nets, so we work on a copy)
+    QMap<QString, QVector<QString>> nets;
+    int unnamedNet = 0;
+
+    for (auto it = m_components.begin(); it != m_components.end(); ++it) {
+        const ComponentData &comp = it.value();
+        for (auto pit = comp.pinNets.begin(); pit != comp.pinNets.end(); ++pit) {
+            const QString &netName = pit.value();
+            nets[netName].append(comp.id + "." + pit.key());
+        }
+    }
+
+    // Title line
+    lines << "* WOWKISPICE Generated Netlist";
+    lines << "* Generated from schematic editor";
+    lines << "";
+
+    // Component lines
+    for (auto it = m_components.begin(); it != m_components.end(); ++it) {
+        const ComponentData &comp = it.value();
+
+        // Build SPICE line: <prefix><id> <node1> <node2> ... <value>
+        QString spiceLine = comp.spicePrefix + comp.id;
+
+        // Collect nodes from pin nets
+        QStringList nodes;
+        for (auto pit = comp.pinNets.begin(); pit != comp.pinNets.end(); ++pit) {
+            nodes << pit.value();
+        }
+
+        // If no nets assigned, create default nodes
+        if (nodes.isEmpty()) {
+            // Default: two unnamed nodes
+            nodes << QString("net_%1").arg(unnamedNet);
+            ++unnamedNet;
+            nodes << QString("net_%1").arg(unnamedNet);
+            ++unnamedNet;
+        }
+
+        for (const QString &node : nodes) {
+            spiceLine += " " + node;
+        }
+
+        // Add value parameter
+        if (comp.params.contains("value") && !comp.params["value"].isEmpty()) {
+            spiceLine += " " + comp.params["value"];
+        }
+
+        // Add model parameter if present
+        if (comp.params.contains("model") && !comp.params["model"].isEmpty()) {
+            spiceLine += " model=" + comp.params["model"];
+        }
+
+        lines << spiceLine;
+    }
+
+    lines << "";
+
+    // Analysis cards - default to transient if none specified
+    bool hasAnalysis = false;
+    for (const QString &line : lines) {
+        if (line.startsWith(".")) {
+            hasAnalysis = true;
+            break;
+        }
+    }
+
+    if (!hasAnalysis) {
+        lines << ".tran 1u 5m uic";
+    }
+
+    lines << ".end";
+
+    return lines;
+}
+
+QString SchematicEditor::spicePrefixForType(const QString &type) const
+{
+    QString t = type.toLower();
+    if (t.contains("resistor")) return "R";
+    if (t.contains("capacitor") || t.contains("cap")) return "C";
+    if (t.contains("inductor")) return "L";
+    if (t.contains("voltage") || t.contains("vsource")) return "V";
+    if (t.contains("current") || t.contains("isource")) return "I";
+    if (t.contains("mosfet") || t.contains("nmos") || t.contains("pmos")) return "M";
+    if (t.contains("diode")) return "D";
+    if (t.contains("bjt") || t.contains("npn") || t.contains("pnp")) return "Q";
+    if (t.contains("opamp") || t.contains("amplifier")) return "X";
+    return "R";
+}
+
+QString SchematicEditor::defaultValueForType(const QString &type) const
+{
+    QString t = type.toLower();
+    if (t.contains("resistor")) return "1k";
+    if (t.contains("capacitor") || t.contains("cap")) return "100n";
+    if (t.contains("inductor")) return "10u";
+    if (t.contains("voltage") || t.contains("vsource")) return "PULSE(0 5 0 1n 1n 10u 20u)";
+    if (t.contains("current") || t.contains("isource")) return "1m";
+    if (t.contains("diode")) return "";
+    if (t.contains("mosfet")) return "";
+    if (t.contains("bjt")) return "";
+    return "1k";
+}
+
 QString SchematicEditor::resolveModelForType(const QString &type)
 {
     // Map component types to default SPICE models
-    // This is a simplified lookup; in production this would consult
-    // a model library or user-defined database
     if (type.contains("opamp", Qt::CaseInsensitive) ||
         type.contains("amplifier", Qt::CaseInsensitive)) {
-        return " macromodel_name";  // placeholder - user defines in .lib
+        return " macromodel_name";
     }
     if (type.contains("resistor", Qt::CaseInsensitive)) {
-        return "";  // resistors use standard R model
+        return "";
     }
     if (type.contains("capacitor", Qt::CaseInsensitive) ||
         type.contains("cap", Qt::CaseInsensitive)) {
-        return "";  // capacitors use standard C model
+        return "";
     }
     if (type.contains("inductor", Qt::CaseInsensitive) ||
         type.contains("inductor", Qt::CaseInsensitive)) {
-        return "";  // inductors use standard L model
+        return "";
     }
-    return "";  // no default model
+    return "";
 }
 
 void SchematicEditor::onAddComponent(const QString &type, qreal x, qreal y)
@@ -164,7 +270,6 @@ void SchematicEditor::onAddComponent(const QString &type, qreal x, qreal y)
 
 void SchematicEditor::importWAVStimulus(const QString &filePath)
 {
-    // LTspice feature: use WAV file as arbitrary voltage source
     QMessageBox::information(this, "WAV Stimulus Import",
         "WAV file import functionality:\n"
         "- LTspice supports WAV files as voltage sources\n"
