@@ -685,7 +685,11 @@ class SchematicEditor(QMainWindow):
         while worker.isRunning():
             app.processEvents()
             worker.wait(10)
-        app.processEvents()
+        try:
+            app.processEvents()
+        except RuntimeError:
+            # Qt object already deleted - safe to ignore here
+            pass
         self._worker = None
         return worker.result, worker.error
 
