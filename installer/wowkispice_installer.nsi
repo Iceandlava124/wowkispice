@@ -13,10 +13,8 @@ ShowInstDetails nevershow
 ; -----------------------------------------
 ; Page setup
 ; -----------------------------------------
-Page welcome
 Page directory
 Page instfiles
-Page finished
 
 ; -----------------------------------------
 ; Installer branding
@@ -62,11 +60,11 @@ Var SELFCHECK_BAT
 Section "Core Installation"
     ; Copy the GUI executable
     SetOutPath $INSTDIR
-    File "gui\build\wowkispice_gui.exe"
+    File "..\gui\build\wowkispice_gui.exe"
     ; Copy the firmware control DLL
-    File "firmware\esp32_buck_controller\src\firmware_control.dll"
+    File "..\firmware\esp32_buck_controller\src\firmware_control.dll"
     ; Copy the self-check batch file
-    File "tools\run_selfcheck.bat"
+    File "..\tools\run_selfcheck.bat"
     ; Create Start Menu shortcut
     CreateDirectory "$SMPROGRAMS\WOWKISPICE"
     CreateShortcut "$SMPROGRAMS\WOWKISPICE\WOWKISPICE.lnk" "$INSTDIR\wowkispice_gui.exe"
