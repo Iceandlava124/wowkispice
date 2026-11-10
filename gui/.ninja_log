@@ -1,7 +1,0 @@
-# ninja log v7
-7	3802	8156633232922146	wowkispice_gui_autogen/timestamp	f8a793d9815de631
-7	3802	8156633232922146	wowkispice_gui_autogen/mocs_compilation.cpp	f8a793d9815de631
-7	3802	8156633232922146	C:/Users/gudae/Music/PROJECT_WOWKISPICE/gui/wowkispice_gui_autogen/timestamp	f8a793d9815de631
-7	3802	8156633232922146	C:/Users/gudae/Music/PROJECT_WOWKISPICE/gui/wowkispice_gui_autogen/mocs_compilation.cpp	f8a793d9815de631
-3878	5998	8156633234294474	CMakeFiles/wowkispice_gui.dir/src/views/code_workspace.cpp.obj	890e782896976112
-3854	6545	8156633234057613	CMakeFiles/wowkispice_gui.dir/src/views/waveform_viewer.cpp.obj	fa1355ca6ac13029

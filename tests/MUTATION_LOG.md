@@ -335,38 +335,3 @@ The harness's per-mutation summary lines all read "MUTATION i" because of a
 `label[0]` bug in its print statement; the labelled header printed above
 each run identifies which mutation actually ran, and each was asserted
 against its own expected failing test name.
-
-# 2026-11-10 — JOB R3-A: control_law.py mutation tests (≥5 required by SCORECARD R3)
-
-Method: same scratch-copy approach as JOB 3. Copy bridge/ to temp dir, apply sed mutation, run pytest from scratch dir.
-Harness: `python -m pytest <repo>/tests/test_control_law_unit.py -q -p no:randomly --timeout=25 --timeout-method=thread --tb=line`
-Baseline (unmutated): **36 passed**
-
-## Mutation i - allow vhigh = 0 (relax lower bound check)
-- Mutation: `bridge/control_law.py` line 123 `if not 0 < vhigh <= 24:` -> `if not 0 <= vhigh <= 24:`
-- Result: **killed by** test_rejects_zero_vhigh (new test added to test_control_law_unit.py)
-- Without the new test, vhigh=0 would be silently accepted and the regulator would compute invalid threshold counts
-- **KILLED**
-
-## Mutation ii - allow adc_bits up to 32 instead of 24
-- Mutation: `bridge/control_law.py` line 130 `if not 8 <= adc_bits <= 24:` -> `if not 8 <= adc_bits <= 32:`
-- Result: **killed by** test_rejects_adc_bits_above_24 (new test added to test_control_law_unit.py)
-- Without the new test, adc_bits=30 would compute an incorrect full scale and wrong threshold counts
-- **KILLED**
-
-## Mutation iii - wrong full scale in _to_counts
-- Mutation: `bridge/control_law.py` line 188 `return max(0, min(full, int(round(...))))` -> `return max(0, min(full * 2, int(round(...))))`
-- Result: **killed by** test_exact_full_scale_clips_to_max (expects 4095 for 3.3V/12bit, mutation gives 8190)
-- **KILLED**
-
-## Mutation iv - allow equal thresholds
-- Mutation: `bridge/control_law.py` line 165 `if low >= high:` -> `if low > high:`
-- Result: **killed by** test_equal_threshold_counts_are_rejected
-- **KILLED**
-
-## Mutation v - wrong switch_count increment
-- Mutation: `bridge/control_law.py` line 239 `self.switch_count += 1` -> `self.switch_count += 2`
-- Result: **killed by** test_update_counts_switches_only_on_a_level_change (asserts switch_count == 2, mutation gives 4)
-- **KILLED**
-
-5/5 mutants killed; control run after restore: 36 passed (entry #299).

@@ -685,14 +685,7 @@ class SchematicEditor(QMainWindow):
         while worker.isRunning():
             app.processEvents()
             worker.wait(10)
-        # Pump any pending events from the worker, but guard against
-        # native access violations if the worker emitted signals after
-        # being torn down (R2 crash fix).
-        try:
-            app.processEvents()
-        except RuntimeError:
-            # Qt object already deleted - safe to ignore here
-            pass
+        app.processEvents()
         self._worker = None
         return worker.result, worker.error
 

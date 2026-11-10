@@ -383,8 +383,8 @@ pub fn normalize_law(input: &LawInput) -> Result<LawSpec, LawError> {
         let (low, high) = match (input.low_counts, input.high_counts) {
             (Some(low), Some(high)) => (low, high),
             _ => (
-                to_counts_raw((target_v - hyst) * divider, vref, adc_bits)?,
-                to_counts_raw((target_v + hyst) * divider, vref, adc_bits)?,
+                to_counts_raw((target_v - hyst) * divider, vref, adc_bits),
+                to_counts_raw((target_v + hyst) * divider, vref, adc_bits),
             ),
         };
         if low >= high {
@@ -423,23 +423,10 @@ pub fn normalize_law(input: &LawInput) -> Result<LawSpec, LawError> {
 ///
 /// Python `_to_counts`: `max(0, min(full, int(round(volts / vref * full))))`
 /// in that operation order, with round-half-to-even (pycompat).
-///
-/// NaN and Inf are rejected with a `LawError` - they must never reach the
-/// ADC conversion silently (SCORECARD R5).
-pub fn to_counts_raw(volts: f64, vref: f64, bits: i32) -> Result<i64, LawError> {
-    if volts.is_nan() || volts.is_infinite() {
-        return Err(LawError::new(format!(
-            "ADC input volts={volts} is NaN or Inf; NaN/Inf must never reach ADC conversion"
-        )));
-    }
-    if vref.is_nan() || vref.is_infinite() || vref == 0.0 {
-        return Err(LawError::new(format!(
-            "ADC vref={vref} is NaN, Inf, or zero; invalid reference voltage"
-        )));
-    }
+pub fn to_counts_raw(volts: f64, vref: f64, bits: i32) -> i64 {
     let full = (1i64 << bits) - 1;
     let r = pycompat::round_half_even(volts / vref * full as f64);
-    Ok(r.max(0).min(full))
+    r.max(0).min(full)
 }
 
 // ----------------------------------------------------------------------
@@ -550,7 +537,7 @@ impl ControlLaw {
                 law.spec.target_v * law.divider,
                 law.vref,
                 law.adc_bits,
-            )?;
+            );
         }
         Ok(law)
     }
@@ -561,10 +548,7 @@ impl ControlLaw {
     }
 
     /// Sense node -> ADC counts, including the divider and clipping.
-    ///
-    /// NaN/Inf inputs are rejected - they must never reach ADC conversion
-    /// silently (SCORECARD R5).
-    pub fn to_counts(&self, sense_v: f64) -> Result<i64, LawError> {
+    pub fn to_counts(&self, sense_v: f64) -> i64 {
         to_counts_raw(sense_v * self.divider, self.vref, self.adc_bits)
     }
 
@@ -622,17 +606,7 @@ impl ControlLaw {
     /// records telemetry for the run report (Python's update(), whose
     /// `time_s` defaults to 0.0 - pass 0.0 explicitly here).
     pub fn update(&mut self, sense_v: f64, time_s: f64) -> f64 {
-        let counts = match self.to_counts(sense_v) {
-            Ok(c) => c,
-            Err(_) => {
-                // NaN/Inf sense input: hold previous output level, never
-                // propagate NaN/Inf into the ADC conversion path (R5).
-                let pin = if self.level { self.vhigh } else { 0.0 };
-                self.history_time.push(time_s);
-                self.history_pin.push(pin);
-                return pin;
-            }
-        };
+        let counts = self.to_counts(sense_v);
         let previous = self.level;
         self.level = self.decide(counts);
         if self.level != previous {

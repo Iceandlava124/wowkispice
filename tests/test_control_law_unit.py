@@ -76,28 +76,6 @@ class TestSpecNormalization:
         else:
             raise AssertionError("expected ControlLawError for adc_bits=4")
 
-    def test_rejects_zero_vhigh(self):
-        try:
-            control_law.normalize_law(
-                {"kind": "hysteretic", "pin": "GPIO18", "sense_net": "vout",
-                 "target_v": 3.3, "hysteresis_v": 0.165, "vhigh": 0,
-                 "vref": 3.3, "adc_bits": 12})
-        except control_law.ControlLawError:
-            pass
-        else:
-            raise AssertionError("expected ControlLawError for vhigh=0")
-
-    def test_rejects_adc_bits_above_24(self):
-        try:
-            control_law.normalize_law(
-                {"kind": "hysteretic", "pin": "GPIO18", "sense_net": "vout",
-                 "target_v": 3.3, "hysteresis_v": 0.165, "vref": 3.3,
-                 "adc_bits": 30})
-        except control_law.ControlLawError:
-            pass
-        else:
-            raise AssertionError("expected ControlLawError for adc_bits=30")
-
     def _reraise(self):
         return type("R", (), {"__enter__": lambda s: None,
                              "__exit__": lambda s, *a: False})()

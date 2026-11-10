@@ -1,5 +1,0 @@
-C:/Users/gudae/Music/PROJECT_WOWKISPICE/gui/CMakeFiles/wowkispice_gui.dir
-C:/Users/gudae/Music/PROJECT_WOWKISPICE/gui/CMakeFiles/edit_cache.dir
-C:/Users/gudae/Music/PROJECT_WOWKISPICE/gui/CMakeFiles/rebuild_cache.dir
-C:/Users/gudae/Music/PROJECT_WOWKISPICE/gui/CMakeFiles/wowkispice_gui_autogen_timestamp_deps.dir
-C:/Users/gudae/Music/PROJECT_WOWKISPICE/gui/CMakeFiles/wowkispice_gui_autogen.dir
