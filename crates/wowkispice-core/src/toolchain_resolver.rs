@@ -163,8 +163,13 @@ impl ToolchainResolver {
             self.repo_root.join("ngspice*").join("*ngspice*"),
             self.repo_root.join("bin").join("*ngspice*"),
             self.repo_root.join("lib").join("*ngspice*"),
-            PathBuf::from("C:/msys64/*/lib/*ngspice*"),
-            PathBuf::from("C:/Spice64/*"),
+            // Linux fallback paths (the Python wrapper searches $PATH + ctypes.util.find_library)
+            PathBuf::from("/usr/lib/*ngspice*"),
+            PathBuf::from("/usr/local/lib/*ngspice*"),
+            PathBuf::from("/usr/lib/*/libngspice*"),
+            // MinGW-w64 cross-install that might be present on Linux dev boxes
+            PathBuf::from("/mingw64/lib/*ngspice*"),
+            PathBuf::from("/msys64/usr/lib/*ngspice*"),
         ];
 
         for pattern in &patterns {

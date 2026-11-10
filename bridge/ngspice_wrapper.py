@@ -260,7 +260,7 @@ class NgSpiceEngine:
 
         self._c_get_vsrc = GetVSRCData_t(self._cb_get_vsrc)
         self._c_get_isrc = GetISRCData_t(lambda v, t, n, i, u: 0)
-        self._c_get_sync = GetSyncData_t(self._cb_sync)
+        self._c_get_sync = GetSyncData_t(self._cb_get_sync)
 
         ret = self.lib.ngSpice_Init(
             self._c_send_char,
@@ -281,7 +281,7 @@ class NgSpiceEngine:
         # this callback (request_stop uses a separate thread), so omit it on
         # non-Windows hosts and keep it on Windows where the bundled DLL
         # supports it.
-        sync_cb = self._c_get_sync if sys.platform == "win32" else None
+        sync_cb = GetSyncData_t(self._cb_get_sync) if sys.platform == "win32" else None
         self.lib.ngSpice_Init_Sync(
             self._c_get_vsrc,
             self._c_get_isrc,
