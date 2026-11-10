@@ -825,6 +825,11 @@ impl NgSpiceFfi {
         Ok(unsafe { *info.v_realdata.add(info.v_length as usize - 1) })
     }
 
+    /// Return the raw `ngSpice_CurPlot` function pointer for use in callbacks.
+    pub fn cur_plot_method(&self) -> Option<NgSpiceCurPlotFn> {
+        self.cur_plot
+    }
+
     /// Return the raw `ngGet_Vec_Info` function pointer for use in callbacks.
     ///
     /// Callbacks fire during `cmd("run")`, when `&self` is mutably borrowed.
@@ -855,6 +860,184 @@ impl Drop for NgSpiceFfi {
         // Don't unload the DLL - ngspice may have allocated memory that
         // the OS will clean up on process exit. Freeing the DLL while
         // ngspice state is still live causes heap corruption.
+    }
+}
+
+// ---------------------------------------------------------------------------
+// C-compatible API for GUI interop
+// ---------------------------------------------------------------------------
+
+/// Opaque handle to an NgSpiceFfi instance.
+/// Created with `wowkispice_ffi_new`, destroyed with `wowkispice_ffi_destroy`.
+#[repr(C)]
+pub struct FfiHandle {
+    _opaque: [u8; 0],
+}
+
+/// Create a new NgSpiceFfi instance.
+/// Returns a null pointer on failure.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_new() -> *mut FfiHandle {
+    match NgSpiceFfi::new() {
+        Ok(engine) => Box::into_raw(Box::new(engine)) as *mut FfiHandle,
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+/// Destroy an NgSpiceFfi instance created with `wowkispice_ffi_new`.
+/// Safe to call with a null pointer.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_destroy(ptr: *mut FfiHandle) {
+    if !ptr.is_null() {
+        unsafe {
+            let _ = Box::from_raw(ptr as *mut NgSpiceFfi);
+        }
+    }
+}
+
+/// Initialize ngspice with default (no-op) callbacks.
+/// Returns 0 on success, non-zero on failure.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_init(ptr: *mut FfiHandle) -> c_int {
+    if ptr.is_null() {
+        return -1;
+    }
+    let engine = unsafe { &mut *(ptr as *mut NgSpiceFfi) };
+    match engine.init(None, None, None, None) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Execute an ngspice command string.
+/// Returns 0 on success, non-zero on failure.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_cmd(ptr: *mut FfiHandle, command: *const c_char) -> c_int {
+    if ptr.is_null() || command.is_null() {
+        return -1;
+    }
+    let engine = unsafe { &mut *(ptr as *mut NgSpiceFfi) };
+    let c_str = unsafe { CStr::from_ptr(command) };
+    match engine.cmd(c_str.to_string_lossy().as_ref()) {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Load a circuit deck into ngspice.
+/// `lines` is an array of `count` null-terminated C strings.
+/// Returns 0 on success, non-zero on failure.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_load_circuit(
+    ptr: *mut FfiHandle,
+    lines: *const *const c_char,
+    count: c_int,
+) -> c_int {
+    if ptr.is_null() || lines.is_null() || count <= 0 {
+        return -1;
+    }
+    let engine = unsafe { &mut *(ptr as *mut NgSpiceFfi) };
+
+    let mut rust_lines: Vec<&str> = Vec::with_capacity(count as usize);
+    for i in 0..count as usize {
+        let line_ptr = unsafe { *lines.add(i) };
+        if line_ptr.is_null() {
+            return -1;
+        }
+        match unsafe { CStr::from_ptr(line_ptr).to_str() } {
+            Ok(s) => rust_lines.push(s),
+            Err(_) => return -1,
+        }
+    }
+
+    match engine.load_circuit(&rust_lines) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Get the current plot name.
+/// Returns a pointer to a null-terminated string owned by ngspice (do not free),
+/// or null on failure.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_cur_plot(ptr: *mut FfiHandle) -> *const c_char {
+    if ptr.is_null() {
+        return ptr::null();
+    }
+    let engine = unsafe { &*(ptr as *mut NgSpiceFfi) };
+    match engine.cur_plot() {
+        Ok(_name) => {
+            // Return the raw pointer from ngspice's own memory (like ngSpice_CurPlot does)
+            // We need to call the underlying function directly since engine.cur_plot()
+            // converts to a Rust String. Use the function pointer instead.
+            let Some(cur_plot_fn) = engine.cur_plot_method() else {
+                return ptr::null();
+            };
+            let ptr = unsafe { cur_plot_fn() };
+            ptr as *const c_char
+        }
+        Err(_) => ptr::null(),
+    }
+}
+
+/// Reset ngspice.
+/// Returns 0 on success, non-zero on failure.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_reset(ptr: *mut FfiHandle) -> c_int {
+    if ptr.is_null() {
+        return -1;
+    }
+    let engine = unsafe { &mut *(ptr as *mut NgSpiceFfi) };
+    match engine.reset() {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Get a real vector as an array of f64 values.
+/// `out` must point to a buffer that can hold at least `*out_len` values.
+/// On return, `*out_len` is set to the actual number of values written.
+/// Returns 0 on success, non-zero on failure.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_get_vector_array(
+    ptr: *mut FfiHandle,
+    vec_name: *const c_char,
+    out: *mut c_double,
+    out_len: *mut c_int,
+) -> c_int {
+    if ptr.is_null() || vec_name.is_null() || out.is_null() || out_len.is_null() {
+        return -1;
+    }
+    let engine = unsafe { &*(ptr as *mut NgSpiceFfi) };
+    let c_str = unsafe { CStr::from_ptr(vec_name) };
+    match engine.get_vector_array(c_str.to_string_lossy().as_ref()) {
+        Ok(values) => {
+            let len = values.len() as c_int;
+            unsafe { *out_len = len };
+            for i in 0..values.len() {
+                unsafe { *out.add(i) = values[i] };
+            }
+            0
+        }
+        Err(_) => -1,
+    }
+}
+
+/// Get the last sample of a real vector.
+/// Returns 0.0 on failure or if vector is empty.
+#[no_mangle]
+pub extern "C" fn wowkispice_ffi_get_last_sample(
+    ptr: *mut FfiHandle,
+    vec_name: *const c_char,
+) -> c_double {
+    if ptr.is_null() || vec_name.is_null() {
+        return 0.0;
+    }
+    let engine = unsafe { &*(ptr as *mut NgSpiceFfi) };
+    let c_str = unsafe { CStr::from_ptr(vec_name) };
+    match engine.get_last_sample(c_str.to_string_lossy().as_ref()) {
+        Ok(v) => v,
+        Err(_) => 0.0,
     }
 }
 
