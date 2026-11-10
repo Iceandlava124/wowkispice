@@ -129,7 +129,11 @@ void buck_controller_tick_ext(int32_t adc_counts,
     static bool initialized = false;
 
     if (!initialized) {
-        buck_controller_ext_init(&state, oversample_n);
+        state.gate_on = false;
+        state.last_mv = 0;
+        state.oversample_n = oversample_n;
+        state.samples_accum = 0;
+        state.oversample_ok = false;
         initialized = true;
     }
 
