@@ -11,6 +11,7 @@
 #include <QtCore/QString>
 #include <QtCore/QVector>
 #include <QtCore/QPair>
+#include <QtCore/QPointF>
 
 class QGraphicsRectItem;
 class QGraphicsSimpleTextItem;
@@ -29,6 +30,14 @@ struct ComponentData {
 struct NetData {
     QString name;            // e.g. "vin", "out", "gnd"
     QVector<QString> pins;   // list of "componentId.pinName" connected to this net
+};
+
+/// Represents a drawn wire between two pins.
+struct WireData {
+    QString fromPin;   // "componentId.pinName"
+    QString toPin;     // "componentId.pinName"
+    QPointF fromPos;
+    QPointF toPos;
 };
 
 class SchematicEditor : public QGraphicsView
@@ -57,14 +66,26 @@ public:
     QStringList netlist() const;
     void setNetlist(const QStringList &lines);
 
+    // Component types available for placement
+    QStringList availableComponentTypes() const;
+
+    // Public placement methods (used by MainWindow)
+    void startPlacingComponent(const QString &type);
+    void cancelWire();
+    QString componentIdAtScenePos(const QPointF &pos) const;
+
 signals:
     void componentAdded(const QString &id, const QString &type, qreal x, qreal y);
     void wireAdded(const QString &fromPin, const QString &toPin);
     void netlistGenerated(const QStringList &lines);
+    void componentDoubleClicked(const QString &id);
     void analysisComplete(const QString &results);
 
-private slots:
-    void onAddComponent(const QString &type, qreal x, qreal y);
+protected:
+    // Mouse interaction for placing components and wires
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 
 private:
     QGraphicsScene *m_scene;
@@ -72,8 +93,19 @@ private:
     QMap<QString, QPair<QPointF, QPointF>> m_wireEndpoints;
     QMap<QString, QString> m_componentModels;    // stored model names per component
     QStringList m_netlistLines;                  // stored SPICE netlist lines
+    QVector<WireData> m_wires;                   // drawn wires
+
+    // Mouse interaction state
+    enum InteractionMode { SelectMode, PlaceComponentMode, PlaceWireMode };
+    InteractionMode m_mode = SelectMode;
+    QString m_placeType;                         // type to place when in PlaceComponentMode
+    QString m_wireFromComponent;                 // component id for wire start
+    QString m_wireFromPin;                       // pin name for wire start
+    QPointF m_wireStartPos;                      // scene position of wire start
+    QGraphicsLineItem *m_tempWire = nullptr;     // temporary wire being drawn
 
     QMap<QString, NetData> m_nets;               // net name -> net data
+    QString m_currentComponentId;                // currently selected component id
 
     void importWAVStimulus(const QString &filePath);
     void showModelManagementDialog();
@@ -82,6 +114,10 @@ private:
     QString defaultValueForType(const QString &type) const;
     void buildNets();
     QString componentSpiceLine(const ComponentData &comp) const;
+    QGraphicsItem *itemAtScenePos(const QPointF &pos) const;
+    QPointF pinPosition(const QString &compId, const QString &pinName) const;
+    void startPlacingWire(const QString &compId, const QString &pinName);
+    void finishWire(const QPointF &endPos);
 };
 
 #endif // SCHEMATIC_EDITOR_H

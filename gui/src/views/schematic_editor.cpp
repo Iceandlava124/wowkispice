@@ -2,6 +2,8 @@
 #include <QtWidgets/QGraphicsSceneMouseEvent>
 #include <QtWidgets/QGraphicsRectItem>
 #include <QtWidgets/QGraphicsSimpleTextItem>
+#include <QtWidgets/QGraphicsEllipseItem>
+#include <QtGui/QMouseEvent>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QInputDialog>
 #include <QtWidgets/QMessageBox>
@@ -24,6 +26,7 @@ SchematicEditor::SchematicEditor(QWidget *parent)
     setScene(m_scene);
     setRenderHint(QPainter::Antialiasing);
     setDragMode(QGraphicsView::RubberBandDrag);
+    setMouseTracking(true);
 
     // Draw a grid background (easier schematic entry)
     for (qreal x = -2000; x <= 2000; x += 50) {
@@ -50,6 +53,7 @@ void SchematicEditor::addComponent(const QString &id, const QString &type, qreal
     rect->setBrush(QBrush(QColor("#f0f8ff")));
     rect->setFlag(QGraphicsItem::ItemIsMovable, true);
     rect->setFlag(QGraphicsItem::ItemIsSelectable, true);
+    rect->setData(0, id);  // store component id in item data
 
     auto *label = new QGraphicsSimpleTextItem(type, rect);
     label->setPos(-label->boundingRect().width() / 2, -label->boundingRect().height() / 2);
@@ -57,6 +61,16 @@ void SchematicEditor::addComponent(const QString &id, const QString &type, qreal
     auto *idLabel = new QGraphicsSimpleTextItem(id, rect);
     idLabel->setPos(-idLabel->boundingRect().width() / 2, 25);
     idLabel->setScale(0.6);
+
+    // Draw pins (small circles on left and right)
+    qreal pinSize = 6;
+    auto *pin1 = new QGraphicsEllipseItem(-35 - pinSize/2, -pinSize/2, pinSize, pinSize, rect);
+    pin1->setBrush(QBrush(Qt::black));
+    pin1->setData(0, id + ".p1");
+
+    auto *pin2 = new QGraphicsEllipseItem(30 + pinSize/2, -pinSize/2, pinSize, pinSize, rect);
+    pin2->setBrush(QBrush(Qt::black));
+    pin2->setData(0, id + ".p2");
 
     m_scene->addItem(rect);
     m_components[id] = comp;
@@ -69,17 +83,39 @@ void SchematicEditor::addComponent(const QString &id, const QString &type, qreal
 
 void SchematicEditor::addWire(const QString &fromPin, const QString &toPin)
 {
-    auto fromIt = m_wireEndpoints.find(fromPin);
-    auto toIt = m_wireEndpoints.find(toPin);
-    if (fromIt == m_wireEndpoints.end() || toIt == m_wireEndpoints.end()) {
-        return;
-    }
+    // Parse "componentId.pinName" format
+    auto parsePin = [](const QString &pinStr) -> QPair<QString, QString> {
+        int dot = pinStr.indexOf('.');
+        if (dot < 0) return {pinStr, ""};
+        return {pinStr.left(dot), pinStr.mid(dot + 1)};
+    };
+
+    auto fromParts = parsePin(fromPin);
+    auto toParts = parsePin(toPin);
+
+    QPointF fromPos = pinPosition(fromParts.first, fromParts.second);
+    QPointF toPos = pinPosition(toParts.first, toParts.second);
 
     auto *line = m_scene->addLine(
-        fromIt.value().first.x(), fromIt.value().first.y(),
-        toIt.value().first.x(), toIt.value().first.y(),
+        fromPos.x(), fromPos.y(),
+        toPos.x(), toPos.y(),
         QPen(Qt::red, 2));
     line->setZValue(0);
+    line->setData(0, fromPin + "->" + toPin);
+
+    WireData wire;
+    wire.fromPin = fromPin;
+    wire.toPin = toPin;
+    wire.fromPos = fromPos;
+    wire.toPos = toPos;
+    m_wires.append(wire);
+
+    // Update pinNets: both pins share the same net
+    QString netName = "net_" + QString::number(m_wires.size());
+    auto &compFrom = m_components[fromParts.first];
+    auto &compTo = m_components[toParts.first];
+    compFrom.pinNets[fromParts.second] = netName;
+    compTo.pinNets[toParts.second] = netName;
 
     emit wireAdded(fromPin, toPin);
 }
@@ -104,49 +140,230 @@ QString SchematicEditor::componentParam(const QString &id, const QString &key) c
     return QString();
 }
 
-void SchematicEditor::modelLibraryManagement()
+QStringList SchematicEditor::availableComponentTypes() const
 {
-    // Dialog to manage SPICE model libraries
-    QStringList models;
-    for (auto it = m_componentModels.constBegin(); it != m_componentModels.constEnd(); ++it) {
-        models << it.key() + ": " + it.value();
-    }
+    return {"resistor", "capacitor", "inductor", "voltage_source", "current_source",
+            "diode", "mosfet_n", "mosfet_p", "bjt_npn", "bjt_pnp", "opamp"};
+}
 
-    if (models.isEmpty()) {
-        QMessageBox::information(this, "Model Library",
-            "No models currently stored.\n"
-            "Add components to populate the library.");
+void SchematicEditor::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton) {
+        QGraphicsView::mousePressEvent(event);
         return;
     }
 
-    QString modelName = QInputDialog::getItem(
-        this, "Model Library",
-        "Select or enter a SPICE model name:",
-        models, 0, false);
+    QPointF scenePos = mapToScene(event->pos());
 
-    if (!modelName.isEmpty()) {
-        QMessageBox::information(this, "Model Library",
-            "Model '" + modelName + "' selected.\n"
-            "This model will be included in the netlist export.\n"
-            "Ensure the model is defined in your SPICE directive block.");
+    if (m_mode == PlaceComponentMode && !m_placeType.isEmpty()) {
+        // Place a new component at clicked position
+        static int compCounter = 0;
+        QString id = m_placeType.left(1).toUpper() + QString::number(++compCounter);
+        addComponent(id, m_placeType, scenePos.x(), scenePos.y());
+        m_mode = SelectMode;
+        m_placeType.clear();
+        event->accept();
+        return;
     }
+
+    if (m_mode == PlaceWireMode && !m_wireFromComponent.isEmpty()) {
+        // We're placing a wire - look for a pin to connect to
+        QGraphicsItem *item = itemAtScenePos(scenePos);
+        if (item) {
+            QString pinData = item->data(0).toString();
+            if (pinData.contains('.')) {
+                // This is a pin - finish the wire
+                finishWire(scenePos);
+                event->accept();
+                return;
+            }
+        }
+        // Clicked empty space - cancel wire placement
+        cancelWire();
+        QGraphicsView::mousePressEvent(event);
+        return;
+    }
+
+    // Select mode - check if clicked on a component or pin
+    QGraphicsItem *item = itemAtScenePos(scenePos);
+    if (item) {
+        QString itemData = item->data(0).toString();
+        if (!itemData.isEmpty() && !itemData.contains("->")) {
+            // Could be a component id or a pin
+            if (itemData.contains('.')) {
+                // It's a pin - start wire placement
+                QString pinStr = itemData;
+                int dot = pinStr.indexOf('.');
+                QString compId = pinStr.left(dot);
+                QString pinName = pinStr.mid(dot + 1);
+                startPlacingWire(compId, pinName);
+            } else {
+                // It's a component - select it
+                m_currentComponentId = itemData;
+                emit componentDoubleClicked(itemData);
+            }
+        }
+    }
+
+    QGraphicsView::mousePressEvent(event);
+}
+
+void SchematicEditor::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton) {
+        QGraphicsView::mouseDoubleClickEvent(event);
+        return;
+    }
+
+    QPointF scenePos = mapToScene(event->pos());
+    QGraphicsItem *item = itemAtScenePos(scenePos);
+    if (item) {
+        QString itemData = item->data(0).toString();
+        if (!itemData.isEmpty() && !itemData.contains('.')) {
+            // Double-clicked a component - emit signal for properties editing
+            emit componentDoubleClicked(itemData);
+            event->accept();
+            return;
+        }
+    }
+
+    QGraphicsView::mouseDoubleClickEvent(event);
+}
+
+void SchematicEditor::mouseMoveEvent(QMouseEvent *event)
+{
+    QPointF scenePos = mapToScene(event->pos());
+
+    if (m_mode == PlaceWireMode && m_tempWire) {
+        // Update temporary wire position
+        m_tempWire->setLine(m_wireStartPos.x(), m_wireStartPos.y(),
+                           scenePos.x(), scenePos.y());
+    }
+
+    QGraphicsView::mouseMoveEvent(event);
+}
+
+QGraphicsItem *SchematicEditor::itemAtScenePos(const QPointF &pos) const
+{
+    return m_scene->itemAt(pos, QTransform());
+}
+
+QString SchematicEditor::componentIdAtScenePos(const QPointF &pos) const
+{
+    QGraphicsItem *item = itemAtScenePos(pos);
+    if (item) {
+        QString data = item->data(0).toString();
+        if (!data.isEmpty() && !data.contains('.') && !data.contains("->")) {
+            return data;
+        }
+    }
+    return QString();
+}
+
+QPointF SchematicEditor::pinPosition(const QString &compId, const QString &pinName) const
+{
+    auto it = m_components.find(compId);
+    if (it == m_components.end())
+        return QPointF();
+
+    // Find the pin item in the scene
+    QString pinData = compId + "." + pinName;
+    QList<QGraphicsItem *> items = m_scene->items();
+    for (QGraphicsItem *item : items) {
+        if (item->data(0).toString() == pinData) {
+            return item->scenePos();
+        }
+    }
+
+    // Fallback: estimate pin position based on component position
+    QPointF compPos = it.value().position;
+    if (pinName == "p1")
+        return QPointF(compPos.x() - 35, compPos.y());
+    else if (pinName == "p2")
+        return QPointF(compPos.x() + 30, compPos.y());
+    return compPos;
+}
+
+void SchematicEditor::startPlacingComponent(const QString &type)
+{
+    m_mode = PlaceComponentMode;
+    m_placeType = type;
+    setCursor(Qt::CrossCursor);
+}
+
+void SchematicEditor::startPlacingWire(const QString &compId, const QString &pinName)
+{
+    m_mode = PlaceWireMode;
+    m_wireFromComponent = compId;
+    m_wireFromPin = pinName;
+    m_wireStartPos = pinPosition(compId, pinName);
+
+    // Create temporary wire
+    m_tempWire = m_scene->addLine(m_wireStartPos.x(), m_wireStartPos.y(),
+                                 m_wireStartPos.x(), m_wireStartPos.y(),
+                                 QPen(Qt::red, 2, Qt::DashLine));
+    m_tempWire->setZValue(1000);
+    setCursor(Qt::CrossCursor);
+}
+
+void SchematicEditor::finishWire(const QPointF &endPos)
+{
+    // Find the component and pin at end position
+    QGraphicsItem *item = itemAtScenePos(endPos);
+    if (!item) {
+        cancelWire();
+        return;
+    }
+
+    QString pinData = item->data(0).toString();
+    if (!pinData.contains('.')) {
+        cancelWire();
+        return;
+    }
+
+    int dot = pinData.indexOf('.');
+    QString toCompId = pinData.left(dot);
+    QString toPinName = pinData.mid(dot + 1);
+
+    // Don't connect to same pin
+    if (m_wireFromComponent == toCompId && m_wireFromPin == toPinName) {
+        cancelWire();
+        return;
+    }
+
+    QString fromPin = m_wireFromComponent + "." + m_wireFromPin;
+    QString toPin = toCompId + "." + toPinName;
+
+    // Add the wire
+    addWire(fromPin, toPin);
+
+    // Clean up
+    cancelWire();
+}
+
+void SchematicEditor::cancelWire()
+{
+    if (m_tempWire) {
+        m_scene->removeItem(m_tempWire);
+        delete m_tempWire;
+        m_tempWire = nullptr;
+    }
+    m_mode = SelectMode;
+    m_wireFromComponent.clear();
+    m_wireFromPin.clear();
+    m_wireStartPos = QPointF();
+    setCursor(Qt::ArrowCursor);
+}
+
+void SchematicEditor::buildNets()
+{
+    m_nets.clear();
+    // Nets are built during addWire() now via pinNets
 }
 
 QStringList SchematicEditor::generateNetlist() const
 {
     QStringList lines;
-
-    // Build nets (const method can't modify m_nets, so we work on a copy)
-    QMap<QString, QVector<QString>> nets;
-    int unnamedNet = 0;
-
-    for (auto it = m_components.begin(); it != m_components.end(); ++it) {
-        const ComponentData &comp = it.value();
-        for (auto pit = comp.pinNets.begin(); pit != comp.pinNets.end(); ++pit) {
-            const QString &netName = pit.value();
-            nets[netName].append(comp.id + "." + pit.key());
-        }
-    }
 
     // Title line
     lines << "* WOWKISPICE Generated Netlist";
@@ -168,11 +385,9 @@ QStringList SchematicEditor::generateNetlist() const
 
         // If no nets assigned, create default nodes
         if (nodes.isEmpty()) {
-            // Default: two unnamed nodes
-            nodes << QString("net_%1").arg(unnamedNet);
-            ++unnamedNet;
-            nodes << QString("net_%1").arg(unnamedNet);
-            ++unnamedNet;
+            static int unnamedNet = 0;
+            nodes << QString("net_%1").arg(unnamedNet++);
+            nodes << QString("net_%1").arg(unnamedNet++);
         }
 
         for (const QString &node : nodes) {
@@ -220,9 +435,12 @@ QString SchematicEditor::spicePrefixForType(const QString &type) const
     if (t.contains("inductor")) return "L";
     if (t.contains("voltage") || t.contains("vsource")) return "V";
     if (t.contains("current") || t.contains("isource")) return "I";
-    if (t.contains("mosfet") || t.contains("nmos") || t.contains("pmos")) return "M";
+    if (t.contains("mosfet_n")) return "M";
+    if (t.contains("mosfet_p")) return "M";
+    if (t.contains("bjt_npn")) return "Q";
+    if (t.contains("bjt_pnp")) return "Q";
     if (t.contains("diode")) return "D";
-    if (t.contains("bjt") || t.contains("npn") || t.contains("pnp")) return "Q";
+    if (t.contains("bjt")) return "Q";
     if (t.contains("opamp") || t.contains("amplifier")) return "X";
     return "R";
 }
@@ -262,10 +480,32 @@ QString SchematicEditor::resolveModelForType(const QString &type)
     return "";
 }
 
-void SchematicEditor::onAddComponent(const QString &type, qreal x, qreal y)
+void SchematicEditor::modelLibraryManagement()
 {
-    // Default positioning: grid-based with mouse offset
-    addComponent("comp_" + type, type, x, y);
+    // Dialog to manage SPICE model libraries
+    QStringList models;
+    for (auto it = m_componentModels.constBegin(); it != m_componentModels.constEnd(); ++it) {
+        models << it.key() + ": " + it.value();
+    }
+
+    if (models.isEmpty()) {
+        QMessageBox::information(this, "Model Library",
+            "No models currently stored.\n"
+            "Add components to populate the library.");
+        return;
+    }
+
+    QString modelName = QInputDialog::getItem(
+        this, "Model Library",
+        "Select or enter a SPICE model name:",
+        models, 0, false);
+
+    if (!modelName.isEmpty()) {
+        QMessageBox::information(this, "Model Library",
+            "Model '" + modelName + "' selected.\n"
+            "This model will be included in the netlist export.\n"
+            "Ensure the model is defined in your SPICE directive block.");
+    }
 }
 
 void SchematicEditor::importWAVStimulus(const QString &filePath)

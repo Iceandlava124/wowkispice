@@ -7,6 +7,9 @@
 #include <QtWidgets/QInputDialog>
 #include <QtWidgets/QTableWidget>
 #include <QtWidgets/QHeaderView>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QToolButton>
+#include <QtWidgets/QButtonGroup>
 #include <QtCore/QDebug>
 #include <QtCore/QTextStream>
 #include <QtGui/QColor>
@@ -35,6 +38,14 @@ MainWindow::MainWindow(QWidget *parent)
     } else {
         statusBar()->showMessage(QString("Backend unavailable: %1").arg(m_spiceBackend.errorString()));
     }
+
+    // Connect schematic editor signals
+    connect(m_schematicEditor, &SchematicEditor::componentDoubleClicked,
+            this, &MainWindow::editComponentProperties);
+    connect(m_schematicEditor, &SchematicEditor::netlistGenerated,
+            this, [this](const QStringList &lines) {
+                m_schematicEditor->setNetlist(lines);
+            });
 }
 
 void MainWindow::setupMenuBar()
@@ -87,6 +98,62 @@ void MainWindow::setupToolBar()
 {
     auto *toolBar = addToolBar("Main");
     toolBar->setObjectName("MainToolbar");
+
+    // --- Component placement group ---
+    toolBar->addSeparator();
+    auto *compLabel = new QLabel("Components: ", this);
+    toolBar->addWidget(compLabel);
+
+    auto *btnResistor = new QToolButton(this);
+    btnResistor->setText("R");
+    btnResistor->setToolTip("Place Resistor");
+    btnResistor->setCheckable(true);
+    connect(btnResistor, &QToolButton::clicked, this, [this](){ placeComponent("resistor"); });
+
+    auto *btnCapacitor = new QToolButton(this);
+    btnCapacitor->setText("C");
+    btnCapacitor->setToolTip("Place Capacitor");
+    btnCapacitor->setCheckable(true);
+    connect(btnCapacitor, &QToolButton::clicked, this, [this](){ placeComponent("capacitor"); });
+
+    auto *btnInductor = new QToolButton(this);
+    btnInductor->setText("L");
+    btnInductor->setToolTip("Place Inductor");
+    btnInductor->setCheckable(true);
+    connect(btnInductor, &QToolButton::clicked, this, [this](){ placeComponent("inductor"); });
+
+    auto *btnVoltage = new QToolButton(this);
+    btnVoltage->setText("V");
+    btnVoltage->setToolTip("Place Voltage Source");
+    btnVoltage->setCheckable(true);
+    connect(btnVoltage, &QToolButton::clicked, this, [this](){ placeComponent("voltage_source"); });
+
+    auto *btnDiode = new QToolButton(this);
+    btnDiode->setText("D");
+    btnDiode->setToolTip("Place Diode");
+    btnDiode->setCheckable(true);
+    connect(btnDiode, &QToolButton::clicked, this, [this](){ placeComponent("diode"); });
+
+    toolBar->addWidget(btnResistor);
+    toolBar->addWidget(btnCapacitor);
+    toolBar->addWidget(btnInductor);
+    toolBar->addWidget(btnVoltage);
+    toolBar->addWidget(btnDiode);
+
+    // --- Wire mode ---
+    toolBar->addSeparator();
+    auto *btnWire = new QToolButton(this);
+    btnWire->setText("Wire");
+    btnWire->setToolTip("Place Wire (click pin to pin)");
+    btnWire->setCheckable(true);
+    connect(btnWire, &QToolButton::clicked, this, [this](bool checked){ 
+        if (checked) setWireMode(); 
+        else m_schematicEditor->cancelWire(); 
+    });
+    toolBar->addWidget(btnWire);
+
+    // --- Simulation ---
+    toolBar->addSeparator();
     auto *runAction = toolBar->addAction("Run");
     connect(runAction, &QAction::triggered, this, &MainWindow::runTransient);
     auto *stopAction = toolBar->addAction("Stop");
@@ -272,18 +339,114 @@ void MainWindow::stopSimulation()
 
 void MainWindow::runAcAnalysis()
 {
-    QMessageBox::information(this, "AC Analysis",
-        "AC Analysis uses the Co-Sim Dashboard's Bode plot feature.\n"
-        "Switch to the Co-Sim Dashboard tab and configure the frequency sweep.");
-    m_centralTabs->setCurrentWidget(m_cosimDashboard);
+    if (!m_simulationReady) {
+        QMessageBox::warning(this, "Backend Not Ready",
+            "ngspice backend is not available.");
+        return;
+    }
+
+    QStringList deck = m_schematicEditor->generateNetlist();
+    if (deck.isEmpty()) {
+        QMessageBox::warning(this, "Empty Schematic",
+            "No components in schematic. Add components first.");
+        return;
+    }
+
+    // Replace analysis card with AC sweep
+    QStringList acDeck;
+    bool replaced = false;
+    for (const QString &line : deck) {
+        if (line.startsWith(".tran") || line.startsWith(".ac") || line.startsWith(".dc")) {
+            acDeck << ".ac dec 100 10 1Meg";
+            replaced = true;
+        } else {
+            acDeck << line;
+        }
+    }
+    if (!replaced) {
+        acDeck << ".ac dec 100 10 1Meg";
+    }
+    acDeck << ".end";
+
+    m_spiceBackend.reset();
+    if (!m_spiceBackend.loadCircuit(acDeck)) {
+        QMessageBox::warning(this, "AC Analysis Error",
+            QString("Failed to load circuit: %1").arg(m_spiceBackend.errorString()));
+        return;
+    }
+
+    if (!m_spiceBackend.cmd("run")) {
+        QMessageBox::warning(this, "AC Analysis Error",
+            QString("Simulation failed: %1").arg(m_spiceBackend.errorString()));
+        return;
+    }
+
+    // Read back frequency and magnitude/phase
+    QVector<double> freq, mag, phase;
+    if (m_spiceBackend.getVectorArray("frequency", freq) &&
+        m_spiceBackend.getVectorArray("v(out)", mag)) {
+        // For AC, vectors are complex - magnitude is stored in v(out)
+        m_waveformViewer->addTrace("frequency", freq, mag, Qt::blue);
+        m_centralTabs->setCurrentWidget(m_waveformViewer);
+        statusBar()->showMessage(QString("AC Analysis complete: %1 points").arg(freq.size()));
+    } else {
+        statusBar()->showMessage("AC Analysis ran but no frequency/v(out) vectors found");
+    }
 }
 
 void MainWindow::runDcSweep()
 {
-    QMessageBox::information(this, "DC Sweep",
-        "DC Sweep uses the Co-Sim Dashboard's Parameter Sweep feature.\n"
-        "Switch to the Co-Sim Dashboard tab and configure the sweep.");
-    m_centralTabs->setCurrentWidget(m_cosimDashboard);
+    if (!m_simulationReady) {
+        QMessageBox::warning(this, "Backend Not Ready",
+            "ngspice backend is not available.");
+        return;
+    }
+
+    QStringList deck = m_schematicEditor->generateNetlist();
+    if (deck.isEmpty()) {
+        QMessageBox::warning(this, "Empty Schematic",
+            "No components in schematic. Add components first.");
+        return;
+    }
+
+    // Replace analysis card with DC sweep
+    QStringList dcDeck;
+    bool replaced = false;
+    for (const QString &line : deck) {
+        if (line.startsWith(".tran") || line.startsWith(".ac") || line.startsWith(".dc")) {
+            dcDeck << ".dc V1 0 5 0.1";
+            replaced = true;
+        } else {
+            dcDeck << line;
+        }
+    }
+    if (!replaced) {
+        dcDeck << ".dc V1 0 5 0.1";
+    }
+    dcDeck << ".end";
+
+    m_spiceBackend.reset();
+    if (!m_spiceBackend.loadCircuit(dcDeck)) {
+        QMessageBox::warning(this, "DC Sweep Error",
+            QString("Failed to load circuit: %1").arg(m_spiceBackend.errorString()));
+        return;
+    }
+
+    if (!m_spiceBackend.cmd("run")) {
+        QMessageBox::warning(this, "DC Sweep Error",
+            QString("Simulation failed: %1").arg(m_spiceBackend.errorString()));
+        return;
+    }
+
+    QVector<double> sweep, vout;
+    if (m_spiceBackend.getVectorArray("v1", sweep) &&
+        m_spiceBackend.getVectorArray("v(out)", vout)) {
+        m_waveformViewer->addTrace("v1", sweep, vout, Qt::blue);
+        m_centralTabs->setCurrentWidget(m_waveformViewer);
+        statusBar()->showMessage(QString("DC Sweep complete: %1 points").arg(sweep.size()));
+    } else {
+        statusBar()->showMessage("DC Sweep ran but no vectors found");
+    }
 }
 
 void MainWindow::runNoiseAnalysis()
@@ -298,13 +461,26 @@ void MainWindow::runFourierAnalysis()
         "Fourier analysis is not yet implemented.");
 }
 
+// ---- Component placement ----
+
+void MainWindow::placeComponent(const QString &type)
+{
+    m_schematicEditor->startPlacingComponent(type);
+    statusBar()->showMessage(QString("Click to place %1...").arg(type));
+}
+
+void MainWindow::setWireMode()
+{
+    m_schematicEditor->cancelWire(); // cancel any existing wire
+    statusBar()->showMessage("Wire mode: click pin to pin to connect");
+}
+
 // ---- Component properties ----
 
 void MainWindow::showComponentProperties()
 {
-    // For now, show a dialog to edit the first component or prompt for component ID
-    if (m_schematicEditor->netlist().isEmpty() && m_propertiesTable->rowCount() == 0) {
-        // Show available components - for now just edit a default component
+    if (m_schematicEditor->componentIdAtScenePos(QPointF()).isEmpty() && m_currentComponentId.isEmpty()) {
+        // Prompt for component ID
         bool ok;
         QString compId = QInputDialog::getText(this, "Component Properties",
             "Enter component ID to edit:", QLineEdit::Normal, "R1", &ok);

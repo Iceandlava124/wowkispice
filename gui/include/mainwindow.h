@@ -47,6 +47,10 @@ private:
     void runNoiseAnalysis();
     void runFourierAnalysis();
 
+    // Component placement
+    void placeComponent(const QString &type);
+    void setWireMode();
+
     // Component properties
     void showComponentProperties();
     void editComponentProperties(const QString &compId);
