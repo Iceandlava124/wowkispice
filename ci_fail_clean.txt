@@ -1,0 +1,34 @@
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	∩╗┐2026-11-09T19:04:06.3774588Z ##[group]Run python tests/test_ngspice_bridge.py
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3774831Z ^[[36;1mpython tests/test_ngspice_bridge.py^[[0m
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3815708Z shell: /usr/bin/bash -e {0}
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3815863Z env:
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3816008Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3816239Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3816465Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3816677Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3816877Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3817085Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.3817264Z ##[endgroup]
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6648271Z test_rc_circuit_mathematical_precision (__main__.TestNgSpiceBridge.test_rc_circuit_mathematical_precision)
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6707760Z Verify RC low-pass filter transient step response point-by-point against ... ERROR
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6737553Z 
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6767698Z ======================================================================
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6797819Z ERROR: test_rc_circuit_mathematical_precision (__main__.TestNgSpiceBridge.test_rc_circuit_mathematical_precision)
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6827701Z Verify RC low-pass filter transient step response point-by-point against
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6857666Z ----------------------------------------------------------------------
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6887896Z Traceback (most recent call last):
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6907063Z   File "/home/runner/work/wowkispice/wowkispice/tests/test_ngspice_bridge.py", line 29, in test_rc_circuit_mathematical_precision
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6933418Z     engine = NgSpiceEngine(verbose=False)
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6935100Z              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6935699Z   File "/home/runner/work/wowkispice/wowkispice/bridge/ngspice_wrapper.py", line 197, in __init__
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6936148Z     self._init_ngspice()
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6936572Z   File "/home/runner/work/wowkispice/wowkispice/bridge/ngspice_wrapper.py", line 263, in _init_ngspice
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6937047Z     self._c_get_sync = GetSyncData_t(self._cb_sync)
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6937307Z                                      ^^^^^^^^^^^^^
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6938007Z AttributeError: 'NgSpiceEngine' object has no attribute '_cb_sync'
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6938157Z 
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6938244Z ----------------------------------------------------------------------
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6938429Z Ran 1 test in 0.005s
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6938509Z 
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6938556Z FAILED (errors=1)
+Co-Sim Voltage & Load Matrix Verification	Run ngspice Ctypes Bridge Sanity Test	2026-11-09T19:04:06.6945110Z ##[error]Process completed with exit code 1.

@@ -91,7 +91,7 @@ fn test_the_line_after_a_suppressed_marker_goes_with_it() {
 #[test]
 fn test_a_finite_value_still_converts() {
     // 1.65 V into a 3.3 V 12-bit converter is exactly half scale.
-    assert_eq!(to_counts_raw(1.65, 3.3, 12), 2048);
+    assert_eq!(to_counts_raw(1.65, 3.3, 12).unwrap(), 2048);
 }
 
 // Note: Python's `_to_counts` relies on `int(NaN)` raising ValueError;
