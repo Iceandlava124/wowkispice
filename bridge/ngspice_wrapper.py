@@ -876,6 +876,12 @@ class NgSpiceEngine:
             c_array[idx] = encoded
         c_array[len(sanitised)] = None
 
+        # Keep c_array alive for ngspice to reference during subsequent
+        # ngSpice_Command calls (e.g. "run"). Otherwise the local variable
+        # goes out of scope when load_circuit returns, and ngspice may
+        # access freed memory during subsequent commands.
+        self._c_array = c_array
+
         # R5: ngSpice_Circ returns 0 even when it could not parse the deck
         # (measured: malformed deck -> rc 0 + 'Error: circuit not parsed.'),
         # so the captured output, not the return code, decides success here.
