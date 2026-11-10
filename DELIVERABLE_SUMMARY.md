@@ -60,7 +60,7 @@ Key reports: `BASELINE_REPORT.md`, `FFI_CONSOLIDATION_REPORT.md`,
 
 ### Phase 5 — Product hardening & distribution: NOT STARTED
 
-- Installer artifact exists but is not reproducible from the checked-in `.nsi` (literal `<USERPROFILE>` paths, no `OutFile`/pages, `makensis` absent) and is unverified on a clean machine.
+- Installer artifact exists (124,773 bytes, NSIS PE32). `.nsi` fixed: `Page welcome` removed (unsupported by installed NSIS version), file paths made relative (`..\gui\build\wowkispice_gui.exe` etc.). Compilation verified with `makensis` v3.x. Clean-machine install **unverified** (no test machine available).
 - Open: SBOM, save-format migration, parameter-sweep tool, POSIX verification, i18n/a11y, crash reporting.
 
 ### Phase 6 — Optional regulated workflows: NOT STARTED

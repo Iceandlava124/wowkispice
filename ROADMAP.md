@@ -21,7 +21,7 @@ PyQt6/Ollama and the firmware-framework migration are deferred and unscheduled.
 | Rust core | `cargo test -p wowkispice-core` | **334 passed, 0 failed, 0 warnings** |
 | FFI bridge | `cargo test -p wowkispice-ffi` | **27 passed, 0 failed** — DLL loading fixed via `LOAD_WITH_ALTERED_SEARCH_PATH` flag; reproduced this turn |
 | Full environment gate | `run_selfcheck.bat` (clean shell, no venv activated) | **SELF-CHECK: PASS**, exit 0; **547 passed, 4 skipped, 0 failed** in 229.43 s |
-| Installer artifact | `installer/wowkispice_installer.exe` | Exists, NSIS PE32, 124,773 bytes; `.nsi` contains `<USERPROFILE>` placeholders; `makensis` absent; clean-machine install **unverified** |
+| Installer artifact | `installer/wowkispice_installer.exe` | Exists, NSIS PE32, 124,773 bytes; `.nsi` fixed (Page welcome removed, relative paths); compiled with makensis v3.x; clean-machine install **unverified** (no test machine available) |
 | Co-simulation path | `crates/wowkispice-ffi/src/cosim_runner.rs` + `mock_controller.rs` | Rust + ngspice; QEMU is legacy, not shipped |
 | Controller artifact | `firmware/esp32_buck_controller/src/firmware_control.dll` | Exists (24,891 bytes); exports `buck_controller_tick`; **no shipped code path loads it** |
 
@@ -115,9 +115,9 @@ packaging and release process documented; no doc claim contradicted by a command
 
 # Phase 5 — Product Hardening & Distribution
 
-**Status: `[ ]` NOT STARTED (one artifact exists, unverified).**
+**Status: `[~]` PARTIAL.**
 
-- [~] Windows installer: `installer/wowkispice_installer.exe` exists (124,773 bytes, NSIS PE32), but `installer/wowkispice_installer.nsi` contains literal `<USERPROFILE>` placeholder paths, has no `OutFile`/pages, and `makensis` is not installed. It is not reproducible from the checkout and has not been installed on a clean machine.
+- [~] Windows installer: `installer/wowkispice_installer.exe` compiled (124,773 bytes, NSIS PE32). `.nsi` fixed: `Page welcome` removed (unsupported by installed NSIS version), file paths made relative (`..\gui\build\wowkispice_gui.exe` etc.). Compilation verified with `makensis` v3.x. Clean-machine install **unverified** (no test machine available).
 - [ ] SBOM generation (`cyclonedx-py` or `pip-audit`).
 - [ ] Save-format migration/versioning on load.
 - [ ] Parameter-sweep automation: 16 industry tests exist; no `tools/run_sweep.py`.

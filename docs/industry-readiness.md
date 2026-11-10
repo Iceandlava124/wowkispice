@@ -22,7 +22,7 @@ Measured evidence:
 | `cargo test -p wowkispice-ffi` | 27 passed, 0 failed (DLL loading fixed via `LOAD_WITH_ALTERED_SEARCH_PATH`) |
 | `run_selfcheck.bat` (clean shell) | `SELF-CHECK: PASS`, exit 0; 547 passed, 4 skipped in 229.43 s |
 | Controller hysteresis | `cargo test -p wowkispice-core test_hysteresis` passes |
-| Installer | Artifact exists (124,773 bytes); template `.nsi`; clean install unverified |
+| Installer | Artifact exists (124,773 bytes); NSIS script fixed (`RequestConfirmation` removed, file paths made relative); compiled with `makensis` v3.x; clean-machine install **unverified** |
 
 The gate resolves the project interpreter itself: `run_selfcheck.bat` calls
 `.venv\Scripts\python.exe`, and `tools/selfcheck.py` re-executes under the repo
