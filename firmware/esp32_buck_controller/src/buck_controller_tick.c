@@ -125,12 +125,12 @@ void buck_controller_tick_ext(int32_t adc_counts,
                               uint32_t oversample_n,
                               bool *gpio_out)
 {
-    static hysteretic_state_t state;
+    static hysteretic_state_t state = {0};
+    static bool initialized = false;
 
-    /* Initialise on first call (state is preserved across calls automatically
-       because it's static; we initialise only once). */
-    if (state.oversample_n != state.oversample_n) { /* force init on first call */
+    if (!initialized) {
         buck_controller_ext_init(&state, oversample_n);
+        initialized = true;
     }
 
     /* ---- Oversample handling -------------------------------------------------
@@ -163,7 +163,8 @@ void buck_controller_tick_ext(int32_t adc_counts,
      * We accumulate and, once we have enough samples, apply hysteresis once.
      * ------------------------------------------------------------------ */
     state.samples_accum += adc_counts;
-    if (!state.oversample_ok && state.samples_accum >= (int32_t)(oversample_n * ADC_MAX_COUNT / 4)) {
+    if (!state.oversample_ok && oversample_n > 0 &&
+        state.samples_accum >= (int32_t)(oversample_n * ADC_MAX_COUNT / 4)) {
         /* Rough heuristic: after accumulating enough "full-scale" equivalents,
            treat the accumulated average as valid.  (In a production build the
        caller would pass the exact average; this keeps the API simple.) */
