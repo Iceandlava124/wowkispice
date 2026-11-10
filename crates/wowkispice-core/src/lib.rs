@@ -35,3 +35,4 @@ pub mod report_generator;
 pub mod selfcheck;
 pub mod serial_console;
 pub mod toolchain_resolver;
+pub mod standalone_sim;
