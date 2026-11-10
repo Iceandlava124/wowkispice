@@ -869,8 +869,11 @@ class NgSpiceEngine:
         self._tstop = NgSpiceEngine._find_tstop(sanitised)
 
         c_array = (ctypes.c_char_p * (len(sanitised) + 1))()
+        byte_objs = []  # Keep references alive so c_array pointers stay valid
         for idx, line in enumerate(sanitised):
-            c_array[idx] = line.encode('utf-8')
+            encoded = line.encode('utf-8')
+            byte_objs.append(encoded)
+            c_array[idx] = encoded
         c_array[len(sanitised)] = None
 
         # R5: ngSpice_Circ returns 0 even when it could not parse the deck
