@@ -194,13 +194,21 @@ class NgSpiceEngine:
 
             self.dll_path = resolved
             self._load_dll()
+
+            # Initialize per-instance state BEFORE _init_ngspice() so that
+            # ngSpice_Init callbacks (which run during initialization) can
+            # access self.output_logs and other per-instance state.
+            self.verbose = verbose
+            self.output_logs: List[str] = []
+            self.user_vsrc_callback = vsrc_callback
+            self.user_data_callback = data_callback
+            self.progress_callback: Optional[Callable[[float, int], None]] = None
+            self.timestep_count = 0
+            self._stop_requested = False
+            self._tstop: Optional[float] = None
+
             self._init_ngspice()
             self._init_done = True
-
-        # Always reset per-instance state on every __init__ call
-        self.verbose = verbose
-        self.output_logs: List[str] = []
-        self.user_vsrc_callback = vsrc_callback
         self.user_data_callback = data_callback
         self.progress_callback: Optional[Callable[[float, int], None]] = None
         self.timestep_count = 0
