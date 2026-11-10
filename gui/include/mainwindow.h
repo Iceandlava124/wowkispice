@@ -14,6 +14,7 @@
 #include "views/waveform_viewer.h"
 #include "views/cosim_dashboard.h"
 #include "views/code_workspace.h"
+#include "spice_backend.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -28,6 +29,20 @@ private:
     void setupStatusBar();
     void setupCentralWidget();
     void setupDocks();
+
+    // Simulation backend
+    SpiceBackend m_spiceBackend;
+    bool m_simulationReady = false;
+
+    // Simulation actions
+    void openSchematic();
+    void saveSchematic();
+    void runTransient();
+    void stopSimulation();
+    void runAcAnalysis();
+    void runDcSweep();
+    void runNoiseAnalysis();
+    void runFourierAnalysis();
 
     QTabWidget *m_centralTabs = nullptr;
 

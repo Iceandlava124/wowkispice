@@ -29,6 +29,10 @@ public:
     void runBodeAnalysis();        // Frequency response / Bode plot
     void modelLibraryManagement(); // SPICE model/lib management
 
+    // Netlist import/export for simulation
+    QStringList netlist() const;
+    void setNetlist(const QStringList &lines);
+
 signals:
     void componentAdded(const QString &id, const QString &type, qreal x, qreal y);
     void wireAdded(const QString &fromPin, const QString &toPin);
@@ -42,6 +46,7 @@ private:
     QMap<QString, QGraphicsRectItem *> m_components;
     QMap<QString, QPair<QPointF, QPointF>> m_wireEndpoints;
     QMap<QString, QString> m_componentModels;  // stored model names per component
+    QStringList m_netlistLines;                // stored SPICE netlist lines
 
     void importWAVStimulus(const QString &filePath);
     void showModelManagementDialog();

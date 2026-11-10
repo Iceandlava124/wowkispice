@@ -17,7 +17,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(GUI_SRCS
     src/main.cpp
     src/mainwindow.cpp
+    src/spice_backend.cpp
     include/mainwindow.h
+    include/spice_backend.h
     src/views/schematic_editor.cpp
     include/views/schematic_editor.h
     src/views/waveform_viewer.cpp

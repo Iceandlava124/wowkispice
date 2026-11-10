@@ -178,3 +178,13 @@ void SchematicEditor::importWAVStimulus(const QString &filePath)
         "arbitrary waveform sources.\n"
         "The converted voltage source will be placed at cursor position.");
 }
+
+QStringList SchematicEditor::netlist() const
+{
+    return m_netlistLines;
+}
+
+void SchematicEditor::setNetlist(const QStringList &lines)
+{
+    m_netlistLines = lines;
+}
