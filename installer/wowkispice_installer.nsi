@@ -5,34 +5,28 @@
 ; Installer settings
 ; -----------------------------------------
 Name "WOWKISPICE"
-; Version set by /VERSION command below
-; The /VERSION command is on the OutputUI arc
-; Output is written to $INSTDIR
-
-; -----------------------------------------
-; Install options
-; ---------------------------------6
-; Create the "Start Menu" folder
-; Name already set above (line 7)
-; Installer display and branding
+OutFile "wowkispice_installer.exe"
 InstallDir "$PROGRAMFILES\WOWKISPICE"
-; Request application privileges
 RequestExecutionLevel user
-; Create a desktop shortcut
-; RequestFlags sitemsparkle ; removed - invalid NSIS flag
-; Create a Start Menu entry
-; RequestFlags menuforall ; removed - causing invalid command error
-; Don't show the 'About' box about box
 ShowInstDetails nevershow
 
 ; -----------------------------------------
 ; Page setup
 ; -----------------------------------------
-; Page welcome ; commented out - not supported in this NSIS version
-; Page license
-; Page directory
-; Page instfiles
-; Page finished ; commented out
+Page welcome
+Page directory
+Page instfiles
+Page finished
+
+; -----------------------------------------
+; Installer branding
+; -----------------------------------------
+; Set out application icon
+; This requires an .ico file
+; VISTAURBilder 16x16 32x32 48x48 256x256
+; When using the nsis bmp logo, make sure you
+; have modern gui
+; Instructions at: http://nsis.sourceforge.net/Vista%20Style
 
 ; -----------------------------------------
 ; Installer branding
@@ -68,11 +62,11 @@ Var SELFCHECK_BAT
 Section "Core Installation"
     ; Copy the GUI executable
     SetOutPath $INSTDIR
-    File "<USERPROFILE>\Music\PROJECT_WOWKISPICE\gui\build\wowkispice_gui.exe"
+    File "gui\build\wowkispice_gui.exe"
     ; Copy the firmware control DLL
-    File "<USERPROFILE>\Music\PROJECT_WOWKISPICE\firmware\esp32_buck_controller\src\firmware_control.dll"
+    File "firmware\esp32_buck_controller\src\firmware_control.dll"
     ; Copy the self-check batch file
-    File "<USERPROFILE>\Music\PROJECT_WOWKISPICE\tools\run_selfcheck.bat"
+    File "tools\run_selfcheck.bat"
     ; Create Start Menu shortcut
     CreateDirectory "$SMPROGRAMS\WOWKISPICE"
     CreateShortcut "$SMPROGRAMS\WOWKISPICE\WOWKISPICE.lnk" "$INSTDIR\wowkispice_gui.exe"

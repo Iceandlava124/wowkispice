@@ -29,27 +29,54 @@ void MainWindow::setupMenuBar()
     fileMenu->addAction("E&xit", this, &QWidget::close, QKeySequence::Quit);
 
     auto *simMenu = menuBar()->addMenu("&Simulation");
-    simMenu->addAction("&Run Transient", this, [](){}, QKeySequence("F5"));
+    simMenu->addAction("&Run Transient", this, [](){
+        QMessageBox::information(nullptr, "Run Transient",
+            "Transient simulation not yet connected to backend.\n"
+            "Use the Co-Sim Dashboard to run simulations once ngspice bridge is connected.");
+    }, QKeySequence("F5"));
     simMenu->addAction("&Stop", this, [](){}, QKeySequence("Shift+F5"));
     simMenu->addSeparator();
-    simMenu->addAction("&AC Analysis", this, [](){});
-    simMenu->addAction("&DC Sweep", this, [](){});
-    simMenu->addAction("&Noise", this, [](){});
-    simMenu->addAction("&Fourier", this, [](){});
+    simMenu->addAction("&AC Analysis", this, [](){
+        QMessageBox::information(nullptr, "AC Analysis",
+            "AC Analysis not yet implemented.\n"
+            "Use the Co-Sim Dashboard's Bode plot feature for frequency analysis.");
+    });
+    simMenu->addAction("&DC Sweep", this, [](){
+        QMessageBox::information(nullptr, "DC Sweep",
+            "DC Sweep not yet implemented.\n"
+            "Use the Co-Sim Dashboard's Parameter Sweep feature.");
+    });
+    simMenu->addAction("&Noise", this, [](){
+        QMessageBox::information(nullptr, "Noise Analysis",
+            "Noise analysis not yet implemented.");
+    });
+    simMenu->addAction("&Fourier", this, [](){
+        QMessageBox::information(nullptr, "Fourier Analysis",
+            "Fourier analysis not yet implemented.");
+    });
 
     auto *viewMenu = menuBar()->addMenu("&View");
-    viewMenu->addAction("&Schematic Editor", this, [](){});
-    viewMenu->addAction("&Waveform Viewer", this, [](){});
-    viewMenu->addAction("&Co-Sim Dashboard", this, [](){});
-    viewMenu->addAction("&Code Workspace", this, [](){});
+    viewMenu->addAction("&Schematic Editor", m_centralTabs, [this](){
+        m_centralTabs->setCurrentWidget(m_schematicEditor);
+    });
+    viewMenu->addAction("&Waveform Viewer", m_centralTabs, [this](){
+        m_centralTabs->setCurrentWidget(m_waveformViewer);
+    });
+    viewMenu->addAction("&Co-Sim Dashboard", m_centralTabs, [this](){
+        m_centralTabs->setCurrentWidget(m_cosimDashboard);
+    });
+    viewMenu->addAction("&Code Workspace", m_centralTabs, [this](){
+        m_centralTabs->setCurrentWidget(m_codeWorkspace);
+    });
 
     auto *helpMenu = menuBar()->addMenu("&Help");
     helpMenu->addAction("&About", this, [](){
         QMessageBox::about(nullptr, "About WOWKISPICE",
-            "WOWKISPICE Studio\n"
+            "WOWKISPICE Studio v0.1.0\n"
             "Closed-loop mixed-signal co-simulation GUI\n"
             "LTspice + Wokwi inspired\n"
-            "4 views: Schematic Editor, Waveform Viewer, Co-Sim Dashboard, Code/Text Workspace");
+            "4 views: Schematic Editor, Waveform Viewer, Co-Sim Dashboard, Code/Text Workspace\n"
+            "Industrial Hardening: calibration, oversample, FSM verification, 16 industry tests");
     });
 }
 
