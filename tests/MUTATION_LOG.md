@@ -335,3 +335,36 @@ The harness's per-mutation summary lines all read "MUTATION i" because of a
 `label[0]` bug in its print statement; the labelled header printed above
 each run identifies which mutation actually ran, and each was asserted
 against its own expected failing test name.
+
+# 2026-11-10 — JOB R3-B: binary_runner.py mutation tests (≥5 required by SCORECARD R3)
+
+Method: same scratch-copy approach as JOB R3-A. Copy bridge/ to temp dir, apply sed mutation, run pytest from scratch dir.
+Harness: `python -m pytest <repo>/tests/test_binary_runner.py -q -p no:randomly --timeout=25 --timeout-method=thread --tb=line`
+Baseline (unmutated): **42 passed**
+
+## Mutation i - ADC quantization uses wrong threshold
+- Mutation: `bridge/binary_runner.py` - change ADC threshold comparison from `<` to `<=` in `to_counts`
+- Result: **killed by** test_firmware_threshold_counts_round_trip_through_the_divider
+- **KILLED**
+
+## Mutation ii - Load stepper never invokes
+- Mutation: `bridge/binary_runner.py` - comment out load stepper invocation in `run_binary_cosim`
+- Result: **killed by** test_load_stepper_is_invoked_during_the_solve
+- **KILLED**
+
+## Mutation iii - Sync mode always adaptive
+- Mutation: `bridge/binary_runner.py` - force sync mode to always be "adaptive" regardless of config
+- Result: **killed by** test_fixed_mode_reads_the_gate_once_per_callback
+- **KILLED**
+
+## Mutation iv - Monitor errors swallowed
+- Mutation: `bridge/binary_runner.py` - wrap monitor read in try/except that returns None instead of raising
+- Result: **killed by** test_monitor_failures_are_reported_not_swallowed
+- **KILLED**
+
+## Mutation v - ADC quantization off by one
+- Mutation: `bridge/binary_runner.py` - change ADC quantization from round to floor
+- Result: **killed by** test_vout_3v3_reaches_the_adc_as_2048_counts
+- **KILLED**
+
+5/5 mutants killed; control run after restore: 42 passed.
