@@ -225,7 +225,7 @@ impl BuckCoSim {
         let mut solver = CircuitSolver::new(circuit, dt, tstop)?;
         let controller_input = LawInput { kind: Some("hysteretic".to_string()), pin: Some("GPIO18".to_string()), sense_net: Some(sense_node.clone()), target_v: Some(target_v), hysteresis_v: Some(hysteresis_v), divider: Some(divider), vref: Some(vref), vhigh: Some(3.3), adc_bits: Some(12), source: None, low_counts: None, high_counts: None, carrier_hz: None, duty_gain: None, source_counts: None };
         let controller = make_law(&controller_input).map_err(|e| format!("Controller creation failed: {}", e.message()))?;
-        Ok(BuckCoSim { solver, controller, sense_node, switch_node_p, switch_node_n, vref, target_v, hysteresis_v, divider, tstep: tstop, results: Vec::new() })
+        Ok(BuckCoSim { solver, controller, sense_node, switch_node_p, switch_node_n, vref, target_v, hysteresis_v, divider, tstep: dt, results: Vec::new() })
     }
 
     pub fn run(&mut self) -> Result<Vec<CoSimResult>, String> {
