@@ -1,0 +1,36 @@
+name: Julia CI
+
+on:
+  push:
+    branches: [ main, master, dev, baseline-fix ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-julia:
+    name: wowkispice-core Julia Tests
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13'
+
+      - name: Install Julia dependencies
+        run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
+
+      - name: Run Rust Tests with Julia Feature
+        name: cargo test --features julia
+        run: cargo test -p wowkispice-core --features julia 2>&1
+        timeout-minutes: 120
+
+      - name: Julia Solver Validation
+        run: |
+          cd bridge/julia
+          julia solve_julia.jl \"{\\\"circuit\\\":{\\\"resistors\\\":[{\\\"value\\\":1000}],\\\"capacitors\\\":[{\\\"value\\\":1e-6}],\\\"voltage_sources\\\":[{\\\"dc_value\\\":5.0}]},\\\"simulation\\\":{\\\"dt\\\":1e-6,\\\"tstop\\\":0.01}}\"
+        working-directory: .
