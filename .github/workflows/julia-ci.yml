@@ -174,8 +174,9 @@ jobs:
 
       - name: Install cyclonedx dependencies
         run: |
-          python3 -m pip install cython lxml 2>&1 | tail -5 > pip_install.log
-          if [ $? -ne 0 ]; then
+          python3 -m pip install cython lxml > pip_install.log 2>&1 || true
+          pip_exit=$?
+          if [ "$pip_exit" -ne 0 ]; then
             echo "PIP INSTALL FAILED - see pip_install.log" > install_error.txt
           fi
 
