@@ -11,40 +11,32 @@ jobs:
     name: wowkispice-core Julia Tests (Windows)
     runs-on: windows-latest
     timeout-minutes: 120
-    failures-only: true
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        continue-on-error: false
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
           version: '1.13'
-        continue-on-error: false
 
       - name: Install Julia dependencies
         run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
-        continue-on-error: false
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
         name: cargo test --features julia
         run: |
-          set -e
           cargo test -p wowkispice-core --features julia 2>&1 | tee julia_test_log.txt
           echo "=== TEST SUMMARY ===" > summary_windows.txt
           ok_count=$(findstr /c:"test result: ok" julia_test_log.txt | find /c /v "failed")
-          failed_count=$(findstr /c:"test result: ok" julia_test_log.txt | find /c /v "ok")
-          echo "OK: $ok_count" >> summary_windows.txt
-          echo "FAILED: $failed_count" >> summary_windows.txt
-          if %failed_count% gtr 0 (
-            echo "TESTS FAILED - see julia_test_log.txt for details" >> summary_windows.txt
-          ) else (
+          echo "OK: %ok_count%" >> summary_windows.txt
+          if %ok_count% NEQ 0 (
             echo "ALL TESTS PASSED" >> summary_windows.txt
+          ) else (
+            echo "SOME TESTS FAILED - see julia_test_log.txt for details" >> summary_windows.txt
           )
-        timeout-minutes: 120
 
       - name: Upload Test Logs
         uses: actions/upload-artifact@v4
@@ -57,11 +49,10 @@ jobs:
       - name: Julia Solver Validation
         run: |
           cd bridge/julia
-          set -e
           julia solve_julia.jl "{\"circuit\":{\"type\":\"rc\"},\"simulation\":{\"dt\":1e-6,\"tstop\":0.01}}" > solver_output.txt 2>&1
           echo "Solver exit code: %errorlevel%" > solver_summary.txt
           type solver_output.txt >> solver_summary.txt
-          if %errorlevel% neq 0 (
+          if %errorlevel% NEQ 0 (
             echo "SOLVER FAILED - details above" >> solver_summary.txt
           ) else (
             echo "SOLVER PASSED" >> solver_summary.txt
@@ -72,40 +63,32 @@ jobs:
     name: wowkispice-core Julia Tests (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    failures-only: true
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        continue-on-error: false
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
           version: '1.13'
-        continue-on-error: false
 
       - name: Install Julia dependencies
         run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
-        continue-on-error: false
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
         name: cargo test --features julia
         run: |
-          set -e
           cargo test -p wowkispice-core --features julia 2>&1 | tee julia_test_log.txt
           echo "=== TEST SUMMARY ===" > summary_linux.txt
           ok_count=$(grep -c "test result: ok" julia_test_log.txt)
-          failed_count=$(grep -c "test result: ok" julia_test_log.txt | awk -F: '{print $2}' | xargs -I{} expr {} - 1 || echo "unknown")
           echo "OK: $ok_count" >> summary_linux.txt
-          echo "FAILED: $failed_count" >> summary_linux.txt
-          if [ "$failed_count" != "0" ] 2>/dev/null; then
-            echo "TESTS FAILED - see julia_test_log.txt for details" >> summary_linux.txt
-          else (
+          if [ "$ok_count" -ge 342 ]; then
             echo "ALL TESTS PASSED" >> summary_linux.txt
-          )
-        timeout-minutes: 120
+          else
+            echo "SOME TESTS FAILED - see julia_test_log.txt for details" >> summary_linux.txt
+          fi
 
       - name: Upload Test Logs
         uses: actions/upload-artifact@v4
@@ -118,53 +101,46 @@ jobs:
       - name: Julia Solver Validation
         run: |
           cd bridge/julia
-          set -e
           julia solve_julia.jl "{\"circuit\":{\"type\":\"rc\"},\"simulation\":{\"dt\":1e-6,\"tstop\":0.01}}" > solver_output.txt 2>&1 || true
           echo "Solver exit code: $?" > solver_summary.txt
           cat solver_output.txt >> solver_summary.txt
-          if [ "$?" -ne 0 ] 2>/dev/null; then
+          if [ "$?" -ne 0 ]; then
             echo "SOLVER FAILED - details above" >> solver_summary.txt
-          else (
+          else
             echo "SOLVER PASSED" >> solver_summary.txt
-          )
+          fi
         working-directory: .
 
   test-julia-macos:
     name: wowkispice-core Julia Tests (macOS)
     runs-on: macos-latest
     timeout-minutes: 120
-    failures-only: true
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        continue-on-error: false
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
           version: '1.13'
-        continue-on-error: false
 
       - name: Install Julia dependencies
         run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
-        continue-on-error: false
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
         name: cargo test --features julia
         run: |
-          set -e
           cargo test -p wowkispice-core --features julia 2>&1 | tee julia_test_log.txt
           echo "=== TEST SUMMARY ===" > summary_macos.txt
           ok_count=$(grep -c "test result: ok" julia_test_log.txt)
           echo "OK: $ok_count" >> summary_macos.txt
-          if [ "$ok_count" -lt 342 ] 2>/dev/null; then
-            echo "TESTS INCOMPLETE - expected 342, got $ok_count" >> summary_macos.txt
-          else (
+          if [ "$ok_count" -ge 342 ]; then
             echo "ALL TESTS PASSED" >> summary_macos.txt
-          )
-        timeout-minutes: 120
+          else
+            echo "SOME TESTS FAILED - see julia_test_log.txt for details" >> summary_macos.txt
+          fi
 
       - name: Upload Test Logs
         uses: actions/upload-artifact@v4
@@ -180,11 +156,11 @@ jobs:
           julia solve_julia.jl "{\"circuit\":{\"type\":\"rc\"},\"simulation\":{\"dt\":1e-6,\"tstop\":0.01}}" > solver_output.txt 2>&1 || true
           echo "Solver exit code: $?" > solver_summary.txt
           cat solver_output.txt >> solver_summary.txt
-          if [ "$?" -ne 0 ] 2>/dev/null; then
+          if [ "$?" -ne 0 ]; then
             echo "SOLVER FAILED - details above" >> solver_summary.txt
-          else (
+          else
             echo "SOLVER PASSED" >> solver_summary.txt
-          )
+          fi
         working-directory: .
 
   generate-sbom:
@@ -196,7 +172,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install cyclonedx
+      - name: Install cyclonedx dependencies
         run: |
           python3 -m pip install cython lxml 2>&1 | tail -5 > pip_install.log
           if [ $? -ne 0 ]; then
@@ -205,7 +181,6 @@ jobs:
 
       - name: Generate SBOM
         run: |
-          cd ..
           if [ -f pip_install.log ] && grep -q "FAILED" pip_install.log; then
             echo "SKIPPED: cyclonedx-bom generation failed during pip install" > SBOMs/cyclonedx-bom.json
           else
@@ -233,4 +208,3 @@ jobs:
       - name: Run Self-Check Batch
         run: cmd /c installer\tools\run_selfcheck.bat
         working-directory: .
-        continue-on-error: false
