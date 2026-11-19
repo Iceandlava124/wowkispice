@@ -499,6 +499,11 @@ fn test_missing_file_inside_allowed_dir_is_rejected() {
 // generated script under sys.executable; the port runs the identical script
 // under the venv's interpreter.
 
+// This parity check exercises Windows ntpath semantics (the Python script
+// asserts realpath/PROJECT_ROOT shapes with backslashes), and the Python
+// ngspice_wrapper import calls ctypes.util.find_library at import time, which
+// can hang on POSIX CI runners. Gate it to Windows where it is meaningful.
+#[cfg(windows)]
 #[test]
 fn test_decisions_are_identical_from_a_foreign_cwd() {
     let root = project_root();

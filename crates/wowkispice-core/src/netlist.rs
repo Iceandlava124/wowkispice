@@ -766,7 +766,13 @@ fn match_spice_number_re(t: &str) -> Option<(f64, f64)> {
 // ntpath helpers (os.path semantics on Windows)
 // ------------------------------------------------------------------
 
+// On Windows the netlist sanitiser mirrors Python's ntpath (backslash) semantics.
+// On POSIX (Linux/macOS CI) the real separator is '/', so path helpers must use
+// the platform separator or canonicalized paths get corrupted.
+#[cfg(windows)]
 const OS_SEP: char = '\\';
+#[cfg(not(windows))]
+const OS_SEP: char = '/';
 
 /// ntpath.splitdrive()
 fn split_drive(s: &str) -> (&str, &str) {
@@ -830,9 +836,13 @@ fn py_isfile(path: &str) -> bool {
     fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
 }
 
-/// os.path.expanduser("~") on Windows: USERPROFILE.
+/// os.path.expanduser("~"): USERPROFILE on Windows, HOME on POSIX.
 fn py_expanduser_tilde() -> String {
-    std::env::var("USERPROFILE").unwrap_or_else(|_| String::new())
+    #[cfg(windows)]
+    let key = "USERPROFILE";
+    #[cfg(not(windows))]
+    let key = "HOME";
+    std::env::var(key).unwrap_or_else(|_| String::new())
 }
 
 /// os.path.realpath(): canonicalize (resolving symlinks and the on-disk
@@ -852,15 +862,20 @@ pub fn py_realpath(path: &str) -> String {
     }
 }
 
-/// \\?\C:\... -> C:\... ; \\?\UNC\server\share -> \\server\share
+/// Strip Rust's `\\?\` verbatim prefix. On Windows ntpath semantics this yields
+/// backslash paths; on POSIX we leave the forward slashes from canonicalize().
 fn strip_unc_prefix(p: &str) -> String {
     if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
-        return format!("\\\\{}", rest.replace('\\', OS_SEP.to_string().as_str()));
+        return format!("\\\\{}", rest.replace('\\', &OS_SEP.to_string()));
     }
     if let Some(rest) = p.strip_prefix(r"\\?\") {
-        return rest.replace('/', "\\");
+        return rest.replace('\\', &OS_SEP.to_string()).replace('/', &OS_SEP.to_string());
     }
-    p.replace('/', "\\")
+    if cfg!(windows) {
+        p.replace('/', "\\")
+    } else {
+        p.to_string()
+    }
 }
 
 /// Lexical normalization for paths that do not exist on disk (the case
@@ -904,8 +919,10 @@ fn lexical_normalize(p: &str) -> String {
             }
         }
     } else if prefix_len == 1 {
-        // rooted, drive-less: "\foo\bar"
-        format!("\\\\{}", comps.join(&OS_SEP.to_string()))
+        // rooted path: "\foo\bar" on Windows, "/foo/bar" on POSIX.
+        // Use a single platform separator; the old hardcoded "\\" prefix
+        // produced "\\Users\..." which broke every POSIX path comparison.
+        format!("{}{}", OS_SEP, comps.join(&OS_SEP.to_string()))
     } else {
         comps.join(&OS_SEP.to_string())
     }
