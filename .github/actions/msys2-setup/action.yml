@@ -8,21 +8,24 @@ inputs:
 outputs:
   msys2-dir:
     description: 'Path to MSYS2 bin directory'
-    value: '{{_msys2-dir}}'
+    value: ${{ steps.setup.outputs.msys2-dir }}
 runs:
-  using: 'bash'
-  args: []
-steps:
-  - name: Install MSYS2 UCRT64 tools
-    run: |
-      echo "Setting up MSYS2 UCRT64 environment"
-      # Windows-latest runner already has gcc, cmake, ninja
-      # Just ensure PATH includes the right tools
-      echo "MSYS2 channel: ${{ inputs.msys2-channel }}"
-      echo "::set-output name=msys2-dir::/usr/${{ inputs.msys2-channel }}"
-  - name: Verify Build Tools
-    run: |
-      echo "Checking build tools..."
-      gcc --version || echo "gcc not found"
-      cmake --version || echo "cmake not found"
-      ninja --version || echo "ninja not found"
+  using: 'composite'
+  steps:
+    - name: Install MSYS2 UCRT64 tools
+      id: setup
+      shell: bash
+      run: |
+        echo "Setting up MSYS2 ${INPUTS_MSYS2_CHANNEL} environment"
+        # Windows-latest runner already has gcc, cmake, ninja on PATH.
+        # Just surface the channel and export the bin dir for later steps.
+        BIN_DIR="/usr/${INPUTS_MSYS2_CHANNEL}/bin"
+        echo "msys2-dir=$BIN_DIR" >> "$GITHUB_OUTPUT"
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
+    - name: Verify Build Tools
+      shell: bash
+      run: |
+        echo "Checking build tools..."
+        gcc --version || echo "gcc not found"
+        cmake --version || echo "cmake not found"
+        ninja --version || echo "ninja not found"
