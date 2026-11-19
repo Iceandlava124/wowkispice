@@ -8,7 +8,7 @@ This project does NOT bundle Julia in the Windows installer. Julia is a **user-i
 
 - Rust core (`wowkispice-core` crate) — zero external dependencies
 - Julia backend bridge code (`julia_bridge.rs`, `solve_julia.jl`)
-- All 342 Rust tests (baseline + Julia feature)
+- All 379 Rust tests (369 baseline + 10 Julia-bridge tests)
 - Documentation (`JULIA_SETUP.md`)
 - CI configuration (`julia-ci.yml`)
 

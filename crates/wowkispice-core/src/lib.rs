@@ -36,3 +36,11 @@ pub mod selfcheck;
 pub mod serial_console;
 pub mod toolchain_resolver;
 pub mod standalone_sim;
+
+/// Julia circuit solver bridge.
+///
+/// Only compiled when the `julia` feature is enabled, so the baseline
+/// build remains zero-dependency. All types and functions in this module
+/// are only visible to callers with the `julia` feature.
+#[cfg(feature = "julia")]
+pub mod julia_bridge;

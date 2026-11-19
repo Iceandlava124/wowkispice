@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, master ]
 
+# Every job uses bash (Git Bash ships with all GitHub-hosted runners),
+# so the same script works on Windows, Linux and macOS.
+# Steps print the failing test names instead of just "SOME TESTS FAILED".
+
 jobs:
   test-julia-windows:
     name: wowkispice-core Julia Tests (Windows)
@@ -22,42 +26,87 @@ jobs:
           version: '1.13'
 
       - name: Install Julia dependencies
+        shell: bash
         run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
-        name: cargo test --features julia
+        shell: bash
+        id: tests
+        continue-on-error: true
         run: |
+          set -o pipefail
           cargo test -p wowkispice-core --features julia 2>&1 | tee julia_test_log.txt
-          echo "=== TEST SUMMARY ===" > summary_windows.txt
-          ok_count=$(findstr /c:"test result: ok" julia_test_log.txt | find /c /v "failed")
-          echo "OK: %ok_count%" >> summary_windows.txt
-          if %ok_count% NEQ 0 (
-            echo "ALL TESTS PASSED" >> summary_windows.txt
-          ) else (
-            echo "SOME TESTS FAILED - see julia_test_log.txt for details" >> summary_windows.txt
-          )
+          echo "cargo_exit=$?" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Test Logs
+      - name: Report Failed Tests (Windows)
+        shell: bash
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "=========================================="
+          echo "FAILED TESTS on Windows (from julia_test_log.txt):"
+          echo "=========================================="
+          grep -E "FAILED|failures:|test result: FAILED" julia_test_log.txt || true
+          echo ""
+          echo "--- Last 40 lines of log ---"
+          tail -40 julia_test_log.txt || true
+          exit 1
+
+      - name: Summarize Result (Windows)
+        shell: bash
+        if: always()
+        run: |
+          {
+            echo "=== WOWKISPICE Julia CI - Windows ==="
+            echo "Run date: $(date -u)"
+            grep -E "test result:" julia_test_log.txt || true
+            echo ""
+            if grep -qE "test result: FAILED|failures:|\[failed\]|error\[" julia_test_log.txt; then
+              echo "RESULT: FAILED - see julia-ci-logs-windows artifact and 'Report Failed Tests' step"
+            else
+              echo "RESULT: PASSED"
+            fi
+          } | tee summary_windows.txt
+
+      - name: Upload Test Logs (always, even on failure)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: julia-test-logs-windows
           path: |
             julia_test_log.txt
             summary_windows.txt
+          retention-days: 14
 
       - name: Julia Solver Validation
+        shell: bash
         run: |
-          cd bridge/julia
-          julia solve_julia.jl "{\"circuit\":{\"type\":\"rc\"},\"simulation\":{\"dt\":1e-6,\"tstop\":0.01}}" > solver_output.txt 2>&1
-          echo "Solver exit code: %errorlevel%" > solver_summary.txt
-          type solver_output.txt >> solver_summary.txt
-          if %errorlevel% NEQ 0 (
-            echo "SOLVER FAILED - details above" >> solver_summary.txt
-          ) else (
-            echo "SOLVER PASSED" >> solver_summary.txt
-          )
-        working-directory: .
+          set -o pipefail
+          julia bridge/julia/solve_julia.jl \
+            '{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.01}}' \
+            > solver_output.txt 2>&1 || {
+              echo "SOLVER FAILED to run" | tee solver_summary.txt
+              cat solver_output.txt >> solver_summary.txt
+              exit 1
+            }
+          if ! grep -q '"status"' solver_output.txt || ! grep -q '"times"' solver_output.txt; then
+            {
+              echo "SOLVER OUTPUT INVALID - missing required fields (status/times)"
+              echo "--- solver_output.txt ---"
+              cat solver_output.txt
+            } | tee solver_summary.txt
+            exit 1
+          fi
+          echo "SOLVER PASSED" | tee solver_summary.txt
+          cat solver_output.txt >> solver_summary.txt
+
+      - name: Upload Solver Logs (always)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: julia-solver-logs-windows
+          path: solver_summary.txt
+          retention-days: 14
 
   test-julia-linux:
     name: wowkispice-core Julia Tests (Linux)
@@ -74,42 +123,87 @@ jobs:
           version: '1.13'
 
       - name: Install Julia dependencies
+        shell: bash
         run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
-        name: cargo test --features julia
+        shell: bash
+        id: tests
+        continue-on-error: true
         run: |
+          set -o pipefail
           cargo test -p wowkispice-core --features julia 2>&1 | tee julia_test_log.txt
-          echo "=== TEST SUMMARY ===" > summary_linux.txt
-          ok_count=$(grep -c "test result: ok" julia_test_log.txt)
-          echo "OK: $ok_count" >> summary_linux.txt
-          if [ "$ok_count" -ge 342 ]; then
-            echo "ALL TESTS PASSED" >> summary_linux.txt
-          else
-            echo "SOME TESTS FAILED - see julia_test_log.txt for details" >> summary_linux.txt
-          fi
+          echo "cargo_exit=$?" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Test Logs
+      - name: Report Failed Tests (Linux)
+        shell: bash
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "=========================================="
+          echo "FAILED TESTS on Linux (from julia_test_log.txt):"
+          echo "=========================================="
+          grep -E "FAILED|failures:|test result: FAILED" julia_test_log.txt || true
+          echo ""
+          echo "--- Last 40 lines of log ---"
+          tail -40 julia_test_log.txt || true
+          exit 1
+
+      - name: Summarize Result (Linux)
+        shell: bash
+        if: always()
+        run: |
+          {
+            echo "=== WOWKISPICE Julia CI - Linux ==="
+            echo "Run date: $(date -u)"
+            grep -E "test result:" julia_test_log.txt || true
+            echo ""
+            if grep -qE "test result: FAILED|failures:|\[failed\]|error\[" julia_test_log.txt; then
+              echo "RESULT: FAILED - see julia-ci-logs-linux artifact and 'Report Failed Tests' step"
+            else
+              echo "RESULT: PASSED"
+            fi
+          } | tee summary_linux.txt
+
+      - name: Upload Test Logs (always, even on failure)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: julia-test-logs-linux
           path: |
             julia_test_log.txt
             summary_linux.txt
+          retention-days: 14
 
       - name: Julia Solver Validation
+        shell: bash
         run: |
-          cd bridge/julia
-          julia solve_julia.jl "{\"circuit\":{\"type\":\"rc\"},\"simulation\":{\"dt\":1e-6,\"tstop\":0.01}}" > solver_output.txt 2>&1 || true
-          echo "Solver exit code: $?" > solver_summary.txt
-          cat solver_output.txt >> solver_summary.txt
-          if [ "$?" -ne 0 ]; then
-            echo "SOLVER FAILED - details above" >> solver_summary.txt
-          else
-            echo "SOLVER PASSED" >> solver_summary.txt
+          set -o pipefail
+          julia bridge/julia/solve_julia.jl \
+            '{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.01}}' \
+            > solver_output.txt 2>&1 || {
+              echo "SOLVER FAILED to run" | tee solver_summary.txt
+              cat solver_output.txt >> solver_summary.txt
+              exit 1
+            }
+          if ! grep -q '"status"' solver_output.txt || ! grep -q '"times"' solver_output.txt; then
+            {
+              echo "SOLVER OUTPUT INVALID - missing required fields (status/times)"
+              echo "--- solver_output.txt ---"
+              cat solver_output.txt
+            } | tee solver_summary.txt
+            exit 1
           fi
-        working-directory: .
+          echo "SOLVER PASSED" | tee solver_summary.txt
+          cat solver_output.txt >> solver_summary.txt
+
+      - name: Upload Solver Logs (always)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: julia-solver-logs-linux
+          path: solver_summary.txt
+          retention-days: 14
 
   test-julia-macos:
     name: wowkispice-core Julia Tests (macOS)
@@ -126,76 +220,131 @@ jobs:
           version: '1.13'
 
       - name: Install Julia dependencies
+        shell: bash
         run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
-        name: cargo test --features julia
+        shell: bash
+        id: tests
+        continue-on-error: true
         run: |
+          set -o pipefail
           cargo test -p wowkispice-core --features julia 2>&1 | tee julia_test_log.txt
-          echo "=== TEST SUMMARY ===" > summary_macos.txt
-          ok_count=$(grep -c "test result: ok" julia_test_log.txt)
-          echo "OK: $ok_count" >> summary_macos.txt
-          if [ "$ok_count" -ge 342 ]; then
-            echo "ALL TESTS PASSED" >> summary_macos.txt
-          else
-            echo "SOME TESTS FAILED - see julia_test_log.txt for details" >> summary_macos.txt
-          fi
+          echo "cargo_exit=$?" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Test Logs
+      - name: Report Failed Tests (macOS)
+        shell: bash
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "=========================================="
+          echo "FAILED TESTS on macOS (from julia_test_log.txt):"
+          echo "=========================================="
+          grep -E "FAILED|failures:|test result: FAILED" julia_test_log.txt || true
+          echo ""
+          echo "--- Last 40 lines of log ---"
+          tail -40 julia_test_log.txt || true
+          exit 1
+
+      - name: Summarize Result (macOS)
+        shell: bash
+        if: always()
+        run: |
+          {
+            echo "=== WOWKISPICE Julia CI - macOS ==="
+            echo "Run date: $(date -u)"
+            grep -E "test result:" julia_test_log.txt || true
+            echo ""
+            if grep -qE "test result: FAILED|failures:|\[failed\]|error\[" julia_test_log.txt; then
+              echo "RESULT: FAILED - see julia-ci-logs-macos artifact and 'Report Failed Tests' step"
+            else
+              echo "RESULT: PASSED"
+            fi
+          } | tee summary_macos.txt
+
+      - name: Upload Test Logs (always, even on failure)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: julia-test-logs-macos
           path: |
             julia_test_log.txt
             summary_macos.txt
+          retention-days: 14
 
       - name: Julia Solver Validation
+        shell: bash
         run: |
-          cd bridge/julia
-          julia solve_julia.jl "{\"circuit\":{\"type\":\"rc\"},\"simulation\":{\"dt\":1e-6,\"tstop\":0.01}}" > solver_output.txt 2>&1 || true
-          echo "Solver exit code: $?" > solver_summary.txt
-          cat solver_output.txt >> solver_summary.txt
-          if [ "$?" -ne 0 ]; then
-            echo "SOLVER FAILED - details above" >> solver_summary.txt
-          else
-            echo "SOLVER PASSED" >> solver_summary.txt
+          set -o pipefail
+          julia bridge/julia/solve_julia.jl \
+            '{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.01}}' \
+            > solver_output.txt 2>&1 || {
+              echo "SOLVER FAILED to run" | tee solver_summary.txt
+              cat solver_output.txt >> solver_summary.txt
+              exit 1
+            }
+          if ! grep -q '"status"' solver_output.txt || ! grep -q '"times"' solver_output.txt; then
+            {
+              echo "SOLVER OUTPUT INVALID - missing required fields (status/times)"
+              echo "--- solver_output.txt ---"
+              cat solver_output.txt
+            } | tee solver_summary.txt
+            exit 1
           fi
-        working-directory: .
+          echo "SOLVER PASSED" | tee solver_summary.txt
+          cat solver_output.txt >> solver_summary.txt
+
+      - name: Upload Solver Logs (always)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: julia-solver-logs-macos
+          path: solver_summary.txt
+          retention-days: 14
 
   generate-sbom:
-    name: Generate SBOM
+    name: Generate SBOM (best-effort)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    continue-on-error: true   # SBOM is informational; never block the pipeline on it
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install cyclonedx dependencies
+      - name: Install system libraries for lxml
         run: |
-          python3 -m pip install cython lxml > pip_install.log 2>&1 || true
-          pip_exit=$?
-          if [ "$pip_exit" -ne 0 ]; then
-            echo "PIP INSTALL FAILED - see pip_install.log" > install_error.txt
-          fi
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Install cyclonedx tooling
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 -m pip install --upgrade pip 2>&1 | tee pip_install.log
+          python3 -m pip install cyclonedx-bom lxml 2>&1 | tee -a pip_install.log
 
       - name: Generate SBOM
+        shell: bash
         run: |
-          if [ -f pip_install.log ] && grep -q "FAILED" pip_install.log; then
-            echo "SKIPPED: cyclonedx-bom generation failed during pip install" > SBOMs/cyclonedx-bom.json
-          else
-            cyclonedx-bom -j -o SBOMs/cyclonedx-bom.json \
-              -p crates/wowkispice-core \
-              -p bridge/julia \
-              --parsers rust,cpp,python
-          fi
+          set -o pipefail
+          mkdir -p SBOMs
+          cyclonedx-bom -o SBOMs/cyclonedx-bom.json \
+            -p crates/wowkispice-core \
+            -p bridge/julia \
+            --parsers rust,cpp,python 2>&1 | tee sbom_gen.log
+          echo "SBOM generation exit: $?" | tee sbom_status.txt
+          cat sbom_gen.log >> sbom_status.txt
 
-      - name: Upload SBOM Artifact
+      - name: Upload SBOM Artifact (always)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: cyclonedx-sbom
-          path: SBOMs/cyclonedx-bom.json
+          path: |
+            SBOMs/cyclonedx-bom.json
+            sbom_status.txt
+          retention-days: 14
 
   verify-installer-selfcheck:
     name: Verify Installer Self-Check
@@ -207,5 +356,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Self-Check Batch
+        shell: cmd
         run: cmd /c installer\tools\run_selfcheck.bat
         working-directory: .

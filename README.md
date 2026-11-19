@@ -9,11 +9,11 @@ The Rust core, the ngspice FFI layer, and the C++/Qt5 GUI are the shipped path.
 
 | Component | Status |
 |---|---|
-| **Rust core** (`crates/wowkispice-core`) | `cargo test -p wowkispice-core`: **334 passed, 0 failed, 0 warnings** |
+| **Rust core** (`crates/wowkispice-core`) | `cargo test -p wowkispice-core`: **369 passed, 0 failed**; `cargo test -p wowkispice-core --features julia`: **379 passed, 0 failed** (adds 10 Julia-bridge tests; baseline stays zero-dependency, `default = []`) |
 | **FFI bridge** (`crates/wowkispice-ffi`) | **27 passed, 0 failed** (26 lib + 1 integration); DLL load uses `LOAD_WITH_ALTERED_SEARCH_PATH`, and `ngGetVSRCData` is optional because this build does not export it |
 | **Qt5 GUI** (`gui/`) | Clean rebuild verified 2026-11-07: `cmake --build gui/build --clean-first` exit 0, **0 warnings** (`-Wall -Wextra -Werror -pedantic`), 390,252-byte `wowkispice_gui.exe`. Requires Qt5 Charts |
 | **Hysteretic controller** | Rust tests reproduce the firmware thresholds 1995/2030; parity with the Python mock is tested at the logic level |
-| **Environment gate** | `run_selfcheck.bat`: **SELF-CHECK: PASS**, exit 0, 547 passed / 4 skipped, in 229.43 s |
+| **Environment gate** | `run_selfcheck.bat`: **SELF-CHECK: PASS**, all 5 checks (Rust core tests, Julia-feature tests, Julia solver script, deployment guide, Rust↔Julia bridge) |
 | **Installer** | `installer/wowkispice_installer.exe` exists (NSIS PE32, 124,773 bytes); the checked-in `.nsi` is a template with placeholder paths and is **not** reproducible as-is. Installation on a clean machine is **unverified** |
 | **Co-simulation path** | Rust `cosim_runner` + ngspice + Rust controller model (`crates/wowkispice-ffi/src/mock_controller.rs`). QEMU is **legacy, not the shipped path** |
 
@@ -38,8 +38,12 @@ migration, AI design assistant.
 ## Try It Instantly
 
 ```bash
-# 1. Core tests (334 passed, 0 failed, 0 warnings)
+# 1. Core tests (369 passed, 0 failed)
 cargo test -p wowkispice-core
+
+# 1b. Core tests including the Julia bridge (379 passed, 0 failed)
+# Requires the `julia` feature only; baseline stays zero-dependency
+cargo test -p wowkispice-core --features julia
 
 # 2. Launch the GUI (4-tab window)
 # Qt5 Charts is required: C:/msys64/usr/bin/pacman.exe -S mingw-w64-ucrt-x86_64-qt5-charts
@@ -68,9 +72,30 @@ The `firmware_control.dll` artifact exists and exports `buck_controller_tick`, b
 logic and compare it against the Python mock. QEMU is retained only for historical
 reference and legacy Python modules.
 
+## Julia backend (optional)
+
+The Rust core has an opt-in `julia` feature that links a pure-Rust JSON bridge to a
+Julia-based circuit solver (`bridge/julia/solve_julia.jl`). The baseline build uses
+**zero external dependencies**; the bridge is only compiled with `--features julia`.
+
+```bash
+# 1. Baseline — 369 passed, 0 failed (unchanged), no Julia dependency
+cargo test -p wowkispice-core
+
+# 2. With the Julia bridge — 379 passed, 0 failed (adds 10 bridge tests:
+#    JSON serialization round-trip, whitespace/reordered/missing-field handling,
+#    convergence-failure parsing, error-status detection)
+cargo test -p wowkispice-core --features julia
+```
+
+The solver itself requires Julia ≥ 1.9 with `DifferentialEquations.jl` and `JSON.jl`
+(see `JULIA_DEPLOYMENT_GUIDE.md` for the package install and `julia-ci.yml` for the
+exact CI invocation, including the `"times"`/`"status"` output validation step).
+The Julia solver is **not** bundled: it is a user-installed runtime dependency.
+
 ## Honest Boundaries
 
-- **Core functionality** is verified and test-backed (334 Rust tests, FFI bridge,
+- **Core functionality** is verified and test-backed (369 Rust core tests, FFI bridge,
   Qt5 GUI, controller parity).
 - **Distribution**: source+build. An NSIS installer artifact exists, but it is not
   reproducible from the checked-in `.nsi` template and has not been verified on a
@@ -94,7 +119,7 @@ reference and legacy Python modules.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File setup.ps1   # venv, deps, ngspice DLL, Qt5 Charts
-cargo test -p wowkispice-core                        # verify: 334 passed
+cargo test -p wowkispice-core                        # verify: 369 passed
 .\run_selfcheck.bat                                  # environment gate: SELF-CHECK: PASS
 .\gui\build\wowkispice_gui.exe                       # launch GUI
 ```

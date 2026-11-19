@@ -16,7 +16,7 @@ if errorlevel 1 (
     echo FAIL: Rust core tests have failures
     exit /b 1
 )
-echo PASS: Rust core tests passed (342/342)
+echo PASS: Rust core tests passed (all passing)
 
 echo.
 echo [2/5] Checking Julia feature tests...
@@ -25,7 +25,7 @@ if errorlevel 1 (
     echo FAIL: Julia feature tests have failures
     exit /b 1
 )
-echo PASS: Julia feature tests passed (342/342)
+echo PASS: Julia feature tests passed (all passing)
 
 echo.
 echo [3/5] Checking Julia solver script exists...
