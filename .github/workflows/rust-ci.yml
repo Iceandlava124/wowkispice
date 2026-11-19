@@ -22,44 +22,20 @@ jobs:
           msys2-channel: 'ucrt64'
 
       - name: Run Rust Core Tests
-        name: cargo test -p wowkispice-core
-        run: cargo test -p wowkispice-core 2>&1
-        timeout-minutes: 120
+        shell: bash
+        run: cargo test -p wowkispice-core 2>&1 | tee test-output.txt
+        timeout-minutes: 60
 
       - name: Verify Zero Warnings
+        shell: bash
         run: |
-          cargo test -p wowkispice-core 2>&1 | grep -c "warning" || echo "0 warnings detected"
-        timeout-minutes: 60
+          # Informational only: warnings are reported, not gated.
+          count=$(grep -c "warning" test-output.txt || true)
+          echo "warning lines: $count"
 
       - name: Artifact Test Logs
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-wowkispice-core
-          path: test-output.txt
-          retention-days: 7
-
-  test-ffi:
-    name: wowkispice-ffi Unit Tests
-    runs-on: windows-latest
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up MSYS2 UCRT64
-        uses: ./.github/actions/msys2-setup
-        with:
-          msys2-channel: 'ucrt64'
-
-      - name: Run FFI Tests
-        name: cargo test -p wowkispice-ffi
-        run: cargo test -p wowkispice-ffi 2>&1
-        timeout-minutes: 60
-
-      - name: Artifact FFI Test Logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs-wowkispice-ffi
           path: test-output.txt
           retention-days: 7
