@@ -88,7 +88,7 @@ cargo test -p wowkispice-core
 cargo test -p wowkispice-core --features julia
 ```
 
-The solver itself requires Julia ≥ 1.9 with `DifferentialEquations.jl` and `JSON.jl`
+The solver itself requires Julia ≥ 1.9 with `OrdinaryDiffEq.jl` and `JSON.jl` — locked in `bridge/julia/Project.toml` + `Manifest.toml`. Run `julia --project=bridge/julia -e "using Pkg; Pkg.instantiate()"` to install the exact pinned versions (see `JULIA_DEPLOYMENT_GUIDE.md`). CI uses the same lockfile with `actions/cache` for the Julia depot so repeat runs are instantaneous.
 (see `JULIA_DEPLOYMENT_GUIDE.md` for the package install and `julia-ci.yml` for the
 exact CI invocation, including the `"times"`/`"status"` output validation step).
 The Julia solver is **not** bundled: it is a user-installed runtime dependency.

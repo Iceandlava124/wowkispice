@@ -1,4 +1,7 @@
-using DifferentialEquations
+# The solver only uses Tsit5 and ODEProblem, both from OrdinaryDiffEq.
+# Importing the full DifferentialEquations meta-package would pull in ~300
+# packages (SDEs, DDEs, DAEs, ...) that this script never calls.
+using OrdinaryDiffEq
 using JSON
 using Statistics
 

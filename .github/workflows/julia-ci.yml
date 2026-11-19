@@ -25,9 +25,18 @@ jobs:
         with:
           version: '1.13'
 
-      - name: Install Julia dependencies
+      - name: Cache Julia depot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/packages
+            ~/.julia/compiled
+          key: ${{ runner.os }}-julia-depot-${{ hashFiles('bridge/julia/Manifest.toml') }}
+
+      - name: Instantiate Julia environment (from lockfile)
         shell: bash
-        run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
+        run: julia --project=bridge/julia -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
@@ -82,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          julia bridge/julia/solve_julia.jl \
+          julia --project=bridge/julia bridge/julia/solve_julia.jl \
             '{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.01}}' \
             > solver_output.txt 2>&1 || {
               echo "SOLVER FAILED to run" | tee solver_summary.txt
@@ -122,9 +131,18 @@ jobs:
         with:
           version: '1.13'
 
-      - name: Install Julia dependencies
+      - name: Cache Julia depot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/packages
+            ~/.julia/compiled
+          key: ${{ runner.os }}-julia-depot-${{ hashFiles('bridge/julia/Manifest.toml') }}
+
+      - name: Instantiate Julia environment (from lockfile)
         shell: bash
-        run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
+        run: julia --project=bridge/julia -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
@@ -179,7 +197,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          julia bridge/julia/solve_julia.jl \
+          julia --project=bridge/julia bridge/julia/solve_julia.jl \
             '{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.01}}' \
             > solver_output.txt 2>&1 || {
               echo "SOLVER FAILED to run" | tee solver_summary.txt
@@ -219,9 +237,18 @@ jobs:
         with:
           version: '1.13'
 
-      - name: Install Julia dependencies
+      - name: Cache Julia depot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/packages
+            ~/.julia/compiled
+          key: ${{ runner.os }}-julia-depot-${{ hashFiles('bridge/julia/Manifest.toml') }}
+
+      - name: Instantiate Julia environment (from lockfile)
         shell: bash
-        run: julia -e 'using Pkg; Pkg.add(["DifferentialEquations", "JSON"])'
+        run: julia --project=bridge/julia -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
         timeout-minutes: 30
 
       - name: Run Rust Tests with Julia Feature
@@ -276,7 +303,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          julia bridge/julia/solve_julia.jl \
+          julia --project=bridge/julia bridge/julia/solve_julia.jl \
             '{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.01}}' \
             > solver_output.txt 2>&1 || {
               echo "SOLVER FAILED to run" | tee solver_summary.txt

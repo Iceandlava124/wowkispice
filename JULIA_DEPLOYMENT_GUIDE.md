@@ -18,13 +18,28 @@ This project does NOT bundle Julia in the Windows installer. Julia is a **user-i
 - Download from: https://julialang.org/downloads/
 - Verify: `julia --version` → `1.13.3`
 
-**2. Install Required Packages**
-Open Julia REPL and run:
+**2. Install the Locked Environment (from the repo's Julia project)**
+
+The solver ships with `bridge/julia/Project.toml` and a committed `Manifest.toml`
+so every machine instantiates the exact same package versions. In PowerShell or bash:
+
+```bash
+julia --project=bridge/julia -e "using Pkg; Pkg.instantiate()"
+```
+
+This installs only the solver's real dependencies — `OrdinaryDiffEq` (contains Tsit5,
+which is all the solver uses; **not** the ~300-package DifferentialEquations meta-package),
+`JSON.jl`, and `Statistics` (stdlib). The full set is ~160 packages; first install
+precompiles once, then subsequent uses are cached.
+
+If you prefer a global install instead of the project, add just these packages:
+
 ```julia
 using Pkg
-Pkg.add(["DifferentialEquations", "JSON"])
+Pkg.add(["OrdinaryDiffEq", "JSON"])
 ```
-- `DifferentialEquations.jl` — ODE solver (Tsit5, Rodas5, etc.)
+
+- `OrdinaryDiffEq.jl` — ODE solver (Tsit5)
 - `JSON.jl` — JSON parsing for Rust⇄Julia communication
 
 **3. First-Run Precompilation**
@@ -40,6 +55,13 @@ cargo test
 cargo test --features julia
 ```
 
+The solver invocations must use the project flag so the locked environment is selected:
+
+```bash
+julia --project=bridge/julia bridge/julia/solve_julia.jl \
+  '{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.01}}'
+```
+
 ### 📦 SBOM (Software Bill of Materials)
 
 **SBOM Status**: Component list documented; formal CycloneDX generation requires `cyclonedx-bom` toolchain with internet access and Python build environment (lxml compilation).
@@ -49,8 +71,8 @@ cargo test --features julia
 | `wowkispice-core` crate | `crates/wowkispice-core/` | MIT/Apache-2.0 (workspace) | Rust library, zero runtime deps |
 | `julia_bridge.rs` | `crates/wowkispice-core/src/` | MIT/Apache-2.0 | FFI bridge, feature-flagged |
 | `solve_julia.jl` | `bridge/julia/` | MIT | Julia solver, 4 circuit models |
-| `DifferentialEquations.jl` | User-installed runtime | MIT | ODE solver package |
-| `JSON.jl` | User-installed runtime | MIT | JSON parsing package |
+| `OrdinaryDiffEq.jl` | User-installed runtime (locked via `Project.toml`/`Manifest.toml`) | MIT | ODE solver (Tsit5) |
+| `JSON.jl` | User-installed runtime (locked via `Project.toml`/`Manifest.toml`) | MIT | JSON parsing package |
 | `ngspice.dll` | Optional bundled dependency | LGPL-3.0 | For ngspice integration |
 
 **SBOM Format**: CycloneDX JSON.
@@ -112,7 +134,7 @@ Pkg.upgrade()
 | Issue | Solution |
 |-------|----------|
 | `julia not found in PATH` | Add `C:\Julia\bin` to system PATH |
-| `Package DifferentialEquations not found` | Run: `julia -e 'using Pkg; Pkg.add("DifferentialEquations")'` |
+| `Package OrdinaryDiffEq not found` | Run: `julia --project=bridge/julia -e 'using Pkg; Pkg.instantiate()'` |
 | `Solver failed to converge` | Check circuit topology; try `Rodas5` instead of `Tsit5` |
 | `JSON parse error` | Verify input JSON matches expected schema |
 
