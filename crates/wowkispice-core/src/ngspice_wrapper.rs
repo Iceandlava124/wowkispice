@@ -533,11 +533,15 @@ impl NgSpiceEngine {
         data_callback: Option<Box<dyn Fn(f64, BTreeMap<String, f64>) + Send + Sync>>,
     ) -> NgSpiceResult<Self> {
         let (resolved, _tried) = resolve_ngspice_library(dll_path);
-        let resolved = match resolved {
-            Some(p) => p,
-            None => {
-                return Err(NgSpiceError::MissingDLL);
-            }
+        // Documented behaviour (see the doc comment on this function): when no
+        // DLL can be found, the engine is still constructed with
+        // `dll_loaded = false`; methods that would call into the DLL return
+        // Err(NgSpiceError::DllNotLoaded) instead.  This keeps call sites in
+        // this crate (and in CI, where no ngspice DLL is available) able to
+        // exercise the "unloaded DLL" path without unwrap-panicking.
+        let (dll_path_out, dll_loaded_out) = match resolved {
+            Some(p) => (Some(p.to_string()), false), // present but not loaded until a real FFI is added
+            None => (None, false),
         };
 
         Ok(Self {
@@ -548,8 +552,8 @@ impl NgSpiceEngine {
             progress_callback: None,
             timestep_count: 0,
             stop_requested: false,
-            dll_path: Some(resolved),
-            dll_loaded: false,
+            dll_path: dll_path_out,
+            dll_loaded: dll_loaded_out,
             tstop: None,
         })
     }

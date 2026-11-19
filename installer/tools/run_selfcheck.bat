@@ -6,11 +6,18 @@ echo ============================================
 echo WOWKISPICE Self-Check
 echo ============================================
 
-set "WORKSPACE=C:\Users\gudae\Music\PROJECT_WOWKISPICE"
+:: Resolve the workspace from this script's location so the check works on any
+:: machine/checkout path (installer\tools\run_selfcheck.bat -> repo root is two levels up).
+set "SCRIPT_DIR=%~dp0"
+set "WORKSPACE=%SCRIPT_DIR%..\.."
 
 echo.
 echo [1/5] Checking Rust core tests...
 cd /d "%WORKSPACE%"
+if errorlevel 1 (
+    echo FAIL: could not cd to workspace %WORKSPACE%
+    exit /b 1
+)
 cargo test -p wowkispice-core 2>nul | find "0 failed" >nul
 if errorlevel 1 (
     echo FAIL: Rust core tests have failures

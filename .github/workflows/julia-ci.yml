@@ -348,8 +348,10 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python3 -m pip install --upgrade pip 2>&1 | tee pip_install.log
-          python3 -m pip install cyclonedx-bom lxml 2>&1 | tee -a pip_install.log
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --user cyclonedx-bom lxml
+          # pip --user puts scripts in ~/.local/bin, which is not on PATH by default on runners
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Generate SBOM
         shell: bash
