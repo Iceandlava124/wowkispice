@@ -532,13 +532,41 @@ print("ALL_CHECKS_PASSED")
     ));
     fs::create_dir_all(&foreign).unwrap();
 
-    let python = format!("{}\\.venv\\Scripts\\python.exe", root);
-    let output = Command::new(python)
+    // Resolve the Python interpreter cross-platform. The parity check needs a
+    // Python that can import bridge.ngspice_wrapper (pure stdlib Python from the
+    // repo). Prefer the project's venv when present; otherwise fall back to a
+    // Python on PATH. Skip with a clear message if none is available.
+    let venv_rel = if cfg!(windows) {
+        ".venv/Scripts/python.exe"
+    } else {
+        ".venv/bin/python"
+    };
+    let venv_python = Path::new(&root).join(venv_rel);
+    let python: String = if venv_python.is_file() {
+        venv_python.to_string_lossy().into_owned()
+    } else {
+        let found = ["python3", "python"].iter().find_map(|p| {
+            Command::new(p)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|_| p.to_string())
+        });
+        match found {
+            Some(p) => p,
+            None => {
+                eprintln!("SKIP foreign-cwd parity check: no Python interpreter found (looked for {venv_rel}, python3, python)");
+                return;
+            }
+        }
+    };
+    let output = Command::new(&python)
         .arg("-c")
         .arg(&script)
         .current_dir(&foreign)
         .output()
-        .expect("spawn python for foreign-cwd check");
+        .unwrap_or_else(|e| panic!("spawn python for foreign-cwd check ({python}): {e}"));
     let out = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),

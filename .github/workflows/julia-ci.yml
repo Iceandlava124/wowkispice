@@ -20,6 +20,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set native Rust target
+        shell: bash
+        run: |
+          # The repo's .cargo/config.toml pins x86_64-pc-windows-gnu for local
+          # Windows dev (no MSVC linker). CI runners must use their own host
+          # target, otherwise Linux/macOS fail with E0463 (no gnu std).
+          HOST=$(rustc -vV | sed -n 's/^host: //p')
+          echo "CARGO_BUILD_TARGET=$HOST" >> "$GITHUB_ENV"
+          echo "Using native Rust target: $HOST"
+
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
@@ -126,6 +136,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set native Rust target
+        shell: bash
+        run: |
+          # The repo's .cargo/config.toml pins x86_64-pc-windows-gnu for local
+          # Windows dev (no MSVC linker). CI runners must use their own host
+          # target, otherwise Linux/macOS fail with E0463 (no gnu std).
+          HOST=$(rustc -vV | sed -n 's/^host: //p')
+          echo "CARGO_BUILD_TARGET=$HOST" >> "$GITHUB_ENV"
+          echo "Using native Rust target: $HOST"
+
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
@@ -231,6 +251,16 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Set native Rust target
+        shell: bash
+        run: |
+          # The repo's .cargo/config.toml pins x86_64-pc-windows-gnu for local
+          # Windows dev (no MSVC linker). CI runners must use their own host
+          # target, otherwise Linux/macOS fail with E0463 (no gnu std).
+          HOST=$(rustc -vV | sed -n 's/^host: //p')
+          echo "CARGO_BUILD_TARGET=$HOST" >> "$GITHUB_ENV"
+          echo "Using native Rust target: $HOST"
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
@@ -350,20 +380,35 @@ jobs:
           set -o pipefail
           python3 -m pip install --upgrade pip
           python3 -m pip install --user cyclonedx-bom lxml
-          # pip --user puts scripts in ~/.local/bin, which is not on PATH by default on runners
+          # cyclonedx-bom v5+ renamed its CLI from `cyclonedx-bom` to `cyclonedx-py`,
+          # and pip --user scripts land in ~/.local/bin (not on PATH by default).
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Generate SBOM
         shell: bash
+        continue-on-error: true
         run: |
           set -o pipefail
           mkdir -p SBOMs
-          cyclonedx-bom -o SBOMs/cyclonedx-bom.json \
-            -p crates/wowkispice-core \
-            -p bridge/julia \
-            --parsers rust,cpp,python 2>&1 | tee sbom_gen.log
-          echo "SBOM generation exit: $?" | tee sbom_status.txt
-          cat sbom_gen.log >> sbom_status.txt
+          # Correct modern CLI: `cyclonedx-py environment`. The old
+          # `cyclonedx-bom -p ... --parsers ...` flags no longer exist.
+          if command -v cyclonedx-py >/dev/null 2>&1; then
+            cyclonedx-py environment --of JSON -o SBOMs/cyclonedx-bom.json 2>&1 | tee sbom_gen.log
+          else
+            echo "cyclonedx-py not on PATH after install - SBOM skipped" | tee sbom_gen.log
+          fi
+          {
+            echo "=== SBOM generation status ==="
+            echo "cyclonedx-py: $(command -v cyclonedx-py 2>/dev/null || echo NOT_FOUND)"
+            cat sbom_gen.log
+            echo "=== Output file ==="
+            if [ -f SBOMs/cyclonedx-bom.json ]; then
+              echo "SBOM generated: $(wc -c < SBOMs/cyclonedx-bom.json) bytes"
+            else
+              echo "SBOM NOT generated (best-effort job; pipeline not blocked)"
+            fi
+          } > sbom_status.txt
+          cat sbom_status.txt
 
       - name: Upload SBOM Artifact (always)
         uses: actions/upload-artifact@v4
