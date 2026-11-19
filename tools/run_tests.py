@@ -149,7 +149,16 @@ def main(argv=None):
         elif low.startswith("skipped"):
             summary["skipped"] = line.strip()
 
-    print("\n".join(lines[-25:]))
+    # Print the TAIL plus a HEAD excerpt. A fatal Python crash (e.g. PyQt5
+    # segfault) puts its "Fatal Python error" header and crashing test name at
+    # the TOP of the output, while pytest's plugin teardown traceback fills the
+    # tail -- printing only the tail hid the root cause on CI for three runs.
+    if len(lines) > 60:
+        print("\n".join(lines[:20]))
+        print("... [%d lines omitted] ..." % (len(lines) - 45))
+        print("\n".join(lines[-25:]))
+    else:
+        print("\n".join(lines))
     print("full pytest output: logs/%s (%d lines)" % (
         os.path.basename(full_path), len(lines)))
     print()
