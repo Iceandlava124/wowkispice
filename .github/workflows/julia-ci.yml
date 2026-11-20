@@ -119,6 +119,10 @@ jobs:
           echo "SOLVER PASSED" | tee solver_summary.txt
           cat solver_output.txt >> solver_summary.txt
 
+      - name: Julia Parameter Tests (custom component values)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_parameters.jl
+
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4
         if: always()
@@ -235,6 +239,10 @@ jobs:
           echo "SOLVER PASSED" | tee solver_summary.txt
           cat solver_output.txt >> solver_summary.txt
 
+      - name: Julia Parameter Tests (custom component values)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_parameters.jl
+
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4
         if: always()
@@ -350,6 +358,10 @@ jobs:
           fi
           echo "SOLVER PASSED" | tee solver_summary.txt
           cat solver_output.txt >> solver_summary.txt
+
+      - name: Julia Parameter Tests (custom component values)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_parameters.jl
 
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4

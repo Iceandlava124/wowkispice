@@ -287,9 +287,23 @@ fn to_json_string(input: &JuliaInput) -> String {
     let circuit = &input.circuit;
     let sim = &input.simulation;
 
+    // Explicit scalar parameters derived from the component arrays. The Julia
+    // solver prefers these over the arrays, so the values Rust sends actually
+    // drive the ODEs instead of silently falling back to hard-coded defaults.
+    let resistance = circuit.resistors.first().map(|r| r.value).unwrap_or(1000.0);
+    let capacitance = circuit.capacitors.first().map(|c| c.value).unwrap_or(1e-6);
+    let inductance = circuit.inductors.first().map(|l| l.value).unwrap_or(1e-3);
+    let input_voltage = circuit.voltage_sources.first().map(|v| v.dc_value).unwrap_or(5.0);
+    let input_current = circuit.current_sources.first().map(|i| i.value).unwrap_or(1e-3);
+
     format!(
-        r#"{{"circuit":{{"name":"{}","resistors":[{}],"capacitors":[{}],"inductors":[{}],"diodes":[{}],"mosfets_n":[{}],"mosfets_p":[{}],"switches":[{}],"voltage_sources":[{}],"current_sources":[{}],"ground_node":"{}"}},"simulation":{{"dt":{},"tstop":{},"method":"{}","tolerance":{}}}}}"#,
+        r#"{{"circuit":{{"name":"{}","resistance":{},"capacitance":{},"inductance":{},"input_voltage":{},"input_current":{},"resistors":[{}],"capacitors":[{}],"inductors":[{}],"diodes":[{}],"mosfets_n":[{}],"mosfets_p":[{}],"switches":[{}],"voltage_sources":[{}],"current_sources":[{}],"ground_node":"{}"}},"simulation":{{"dt":{},"tstop":{},"method":"{}","tolerance":{}}}}}"#,
         escape_json_string(&circuit.name),
+        resistance,
+        capacitance,
+        inductance,
+        input_voltage,
+        input_current,
         resistors_to_json(&circuit.resistors),
         capacitors_to_json(&circuit.capacitors),
         inductors_to_json(&circuit.inductors),
@@ -719,6 +733,31 @@ mod tests {
     }
 
     // ---------- Round-trip / edge-case tests (added during code hardening) ----------
+
+    /// Custom component values must be serialized as explicit scalar keys so
+    /// the Julia solver actually uses them (it prefers scalars over arrays).
+    #[test]
+    fn test_custom_component_values_serialized() {
+        use crate::standalone_sim::PassiveComponent;
+        use crate::standalone_sim::ComponentType;
+
+        let mut circuit = Circuit::default();
+        circuit.resistors.push(PassiveComponent {
+            name: "R1".to_string(), node1: "in".to_string(), node2: "out".to_string(),
+            value: 2000.0, kind: ComponentType::Resistor,
+        });
+        circuit.capacitors.push(PassiveComponent {
+            name: "C1".to_string(), node1: "out".to_string(), node2: "0".to_string(),
+            value: 2e-6, kind: ComponentType::Capacitor,
+        });
+        let input = circuit_to_julia_input(&circuit, 1e-6, 0.01, "Tsit5", 1e-6);
+        let json = to_json_string(&input);
+        assert!(json.contains("\"resistance\":2000"), "missing custom resistance: {}", json);
+        assert!(json.contains("\"capacitance\":2e-6") || json.contains("\"capacitance\":0.000002"), "missing custom capacitance: {}", json);
+        // Defaults still present for components the circuit doesn't have
+        assert!(json.contains("\"inductance\":0.001"), "missing default inductance: {}", json);
+        assert!(json.contains("\"input_voltage\":5"), "missing default input voltage: {}", json);
+    }
 
     /// Round-trip: build JuliaInput from a Circuit, serialize to JSON, then feed
     /// the serialized JSON back through the *output* parser to verify the

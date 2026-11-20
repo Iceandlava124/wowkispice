@@ -5,73 +5,85 @@ using OrdinaryDiffEq
 using JSON
 using Statistics
 
+# Resolve a circuit parameter from the JSON protocol.
+#
+# Rust (julia_bridge.rs) sends BOTH explicit scalar keys and component arrays
+# ([{"name":...,"node1":...,"node2":...,"value":...}, ...]). Older callers may
+# send only one shape, so prefer the scalar key and fall back to the first
+# component in the array. This is what makes component values actually
+# configurable instead of silently using hard-coded defaults.
+function circuit_param(circuit, scalar_key, array_key, value_key, default::Float64)
+    if haskey(circuit, scalar_key)
+        v = circuit[scalar_key]
+        v isa Number && return Float64(v)
+    end
+    if haskey(circuit, array_key)
+        arr = circuit[array_key]
+        if arr isa AbstractVector && !isempty(arr)
+            first_item = arr[1]
+            # JSON.jl parses objects as JSON.Object <: AbstractDict, not Dict
+            if first_item isa AbstractDict && haskey(first_item, value_key)
+                v = first_item[value_key]
+                v isa Number && return Float64(v)
+            end
+        end
+    end
+    return default
+end
+
 # Main solver function that takes JSON input and returns JSON output
 function solve_julia_circuit(circuit_json)
-    # Parse the circuit description
     circuit = circuit_json["circuit"]
     simulation = circuit_json["simulation"]
 
-    # Extract parameters
     dt = simulation["dt"]
     tstop = simulation["tstop"]
     method = get(simulation, "method", "Tsit5")
     tolerance = get(simulation, "tolerance", 1e-6)
 
-    # Circuit type selection (from circuit["type"])
     circuit_type_lower = lowercase(get(circuit, "type", "rc"))
 
-    # Thermal voltage for diode model
-    V_t = 0.026  # ~26mV at room temperature
+    # --- Parameters resolved from JSON (with documented defaults) ---
+    # Scalars are preferred; component arrays from julia_bridge.rs are the
+    # fallback so both protocol shapes work.
+    R = circuit_param(circuit, "resistance", "resistors", "value", 1000.0)
+    C = circuit_param(circuit, "capacitance", "capacitors", "value", 1e-6)
+    L = circuit_param(circuit, "inductance", "inductors", "value", 1e-3)
+    Vin = circuit_param(circuit, "input_voltage", "voltage_sources", "dc_value", 5.0)
+    I_in = circuit_param(circuit, "input_current", "current_sources", "value", 1e-3)
+    # Diode physics constants: only explicit scalar keys are meaningful here
+    # (a diode's generic "value" field may encode a part number or Vf, not I_s).
+    I_s = haskey(circuit, "saturation_current") ? Float64(circuit["saturation_current"]) : 1e-12
+    V_t = haskey(circuit, "thermal_voltage") ? Float64(circuit["thermal_voltage"]) : 0.026
 
     # --- Diode model (Shockley equation) ---
-    # Input current captured from circuit JSON
     function diode_ode!(du, u, p, t)
-        I_in = get(circuit, "input_current", 1e-3)  # from circuit JSON, default 1mA
-        I = u[1]  # diode current
-        V = u[1]  # diode voltage
-        I_s = 1e-12  # saturation current
-        du[1] = (I_in - I_s*(exp(V/V_t)-1))  # input_current - diode current
+        V = u[1]
+        du[1] = I_in - I_s * (exp(V / V_t) - 1)
     end
 
-    # --- RL circuit model ---
-    # Input voltage, R, L captured from circuit JSON
+    # --- RL circuit model: dI/dt = (Vin - I*R)/L ---
     function rl_ode!(du, u, p, t)
-        V_in = get(circuit, "input_voltage", 5.0)  # from circuit JSON, default 5V
-        R = get(circuit, "resistance", 100.0)  # from circuit JSON, default 100 ohms
-        L = get(circuit, "inductance", 1e-3)  # from circuit JSON, default 1mH
-        I = u[1]  # inductor current
-        du[1] = (V_in - I*R)/L
+        I = u[1]
+        du[1] = (Vin - I * R) / L
     end
 
-    # --- RLC resonance model (underdamped) ---
-    # Input voltage, R, L, C captured from circuit JSON
+    # --- RLC resonance model (state: [capacitor voltage, inductor current]) ---
     function rlc_ode!(du, u, p, t)
-        V_in = get(circuit, "input_voltage", 5.0)  # from circuit JSON, default 5V
-        R = get(circuit, "resistance", 10.0)  # from circuit JSON, default 10 ohms
-        L = get(circuit, "inductance", 1e-3)  # from circuit JSON, default 1mH
-        C = get(circuit, "capacitance", 1e-6)  # from circuit JSON, default 1uF
-        V_c = u[1]  # capacitor voltage
-        I_l = u[2]  # inductor current
-        du[1] = I_l  # dVc/dt = I_l/C
-        du[2] = (V_in - R*I_l - V_c)/L  # dI_l/dt = (V - R*I - V_c)/L
+        V_c = u[1]
+        I_l = u[2]
+        du[1] = I_l / C
+        du[2] = (Vin - R * I_l - V_c) / L
     end
 
-    # --- Simple RC circuit model (default) ---
-    # R, C, Vin used with default values
-    R = 1000.0  # ohms
-    C = 1e-6  # farads
-    Vin = 5.0   # volts
-
-    # ODE for RC circuit: dVc/dt = (Vin - Vc) / (R*C)
+    # --- RC circuit model: dVc/dt = (Vin - Vc)/(R*C) ---
     function rc_ode!(du, u, p, t)
         du[1] = (Vin - u[1]) / (R * C)
     end
 
-    # Initial capacitor/inductor voltage
-    u0 = [0.0, 0.0]  # [capacitor voltage, inductor current]
+    u0 = [0.0, 0.0]
     tspan = (0.0, tstop)
 
-    # Choose circuit type and solver with error handling + timing
     sol = nothing
     start_time = time_ns()
     if circuit_type_lower == "diode"
@@ -99,7 +111,6 @@ function solve_julia_circuit(circuit_json)
             return Dict{String,Any}("status" => "error", "error_type" => "solver_failure", "error_message" => string(e), "solve_time_ms" => elapsed_ms)
         end
     else
-        # Default to RC circuit
         try
             prob = ODEProblem(rc_ode!, u0, tspan)
             sol = solve(prob, Tsit5(); abstol=tolerance, reltol=tolerance)
@@ -111,22 +122,15 @@ function solve_julia_circuit(circuit_json)
 
     solve_time_ms = Float64(time_ns() - start_time) / 1_000_000
 
-    # Verify solver succeeded: check sol !== nothing and solution has data
     if sol === nothing || length(sol.t) == 0 || length(sol.u) == 0
         return Dict{String,Any}("status" => "error", "error_type" => "convergence_failure", "error_message" => "Solver returned no valid solution", "solve_time_ms" => solve_time_ms)
     end
 
-    # Prepare output times and voltages
-    # For single-variable circuits (RC, diode, RL): vout = u[1]
-    # For RLC: vout = u[1] (capacitor voltage)
     vout = Float64[sol.u[i][1] for i in 1:length(sol.u)]
-
-    # Compute summary stats
     final_vout = Float64(last(vout))
     avg_vout = Float64(mean(vout))
     vout_ripple = Float64(maximum(vout) - minimum(vout))
 
-    # Build result Dict with explicit types for JSON safety
     result = Dict{String,Any}(
         "status" => "success",
         "times" => Float64[sol.t[i] for i in 1:length(sol.t)],
@@ -136,9 +140,13 @@ function solve_julia_circuit(circuit_json)
         "vout_ripple" => vout_ripple,
         "steps_taken" => Int(length(sol.t)),
         "circuit_type" => circuit_type_lower,
-        "solve_time_ms" => solve_time_ms
+        "solve_time_ms" => solve_time_ms,
+        # Echo resolved parameters so callers can confirm what was simulated
+        "parameters" => Dict{String,Any}(
+            "R" => R, "C" => C, "L" => L, "Vin" => Vin,
+            "I_in" => I_in, "I_s" => I_s, "V_t" => V_t,
+        ),
     )
-
     return result
 end
 
@@ -150,7 +158,6 @@ if length(ARGS) > 0
         result = solve_julia_circuit(circuit_json)
         println(JSON.json(result))
     catch e
-        # Return error as JSON if JSON parse fails or solver fails
         if length(ARGS) > 0
             try
                 err_dict = Dict{String,Any}(
