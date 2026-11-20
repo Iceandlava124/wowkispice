@@ -16,6 +16,27 @@ The Rust core, the ngspice FFI layer, and the C++/Qt5 GUI are the shipped path.
 | **Environment gate** | `run_selfcheck.bat`: **SELF-CHECK: PASS**, all 5 checks (Rust core tests, Julia-feature tests, Julia solver script, deployment guide, Rust↔Julia bridge) |
 | **Installer** | `installer/wowkispice_installer.exe` exists (NSIS PE32, 124,773 bytes); the checked-in `.nsi` is a template with placeholder paths and is **not** reproducible as-is. Installation on a clean machine is **unverified** |
 | **Co-simulation path** | Rust `cosim_runner` + ngspice + Rust controller model (`crates/wowkispice-ffi/src/mock_controller.rs`). QEMU is **legacy, not the shipped path** |
+| **CLI simulator** (`crates/wosp-cli`) | `cargo run -p wosp-cli -- sim rc --r 2000 --c 1e-6 --vin 5` — simulate RC/RL/RLC/diode with custom values via the Julia backend from any directory; JSON output. `standalone` mode needs no Julia |
+
+## Quick start: simulate a circuit
+
+```bash
+# RC low-pass, R=2000 ohm, C=1uF -> final voltage 1.967V at t=1ms
+cargo run -p wosp-cli -- sim rc --r 2000 --c 1e-6 --vin 5 --tstop 0.001
+
+# RL series, 12V/50ohm -> 0.24A steady-state
+cargo run -p wosp-cli -- sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02
+
+# No Julia needed: built-in dependency-free simulator
+cargo run -p wosp-cli -- standalone rc --r 1000 --c 1e-6 --vin 5
+
+# See all options
+cargo run -p wosp-cli -- help
+```
+
+The `sim` command needs Julia with the pinned project installed once:
+`julia --project=bridge/julia -e 'using Pkg; Pkg.instantiate()'`. The `standalone`
+command has zero external dependencies.
 
 ## Plan status
 
