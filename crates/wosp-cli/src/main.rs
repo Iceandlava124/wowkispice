@@ -147,6 +147,10 @@ fn main() {
         println!("{}", include_str!("help.txt"));
         return;
     }
+    if args[0] == "--version" || args[0] == "version" {
+        println!("wosp-cli {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     match args[0].as_str() {
         "list" => {
             println!("rc   - RC low-pass  (flags: --r --c --vin --dt --tstop)");
