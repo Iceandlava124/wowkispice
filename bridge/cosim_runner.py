@@ -145,6 +145,10 @@ def run_cosim(
     if engine is None:
         try:
             engine = NgSpiceEngine(verbose=False)
+            # Singleton engine: clear per-run state from any prior run.
+            # Without this, callbacks/logs from a previous circuit leak into
+            # this solve and can crash ngspice on repeated runs (load sweeps).
+            engine.reset()
         except Exception as exc:
             run.warnings.append(f"cannot start ngspice: {exc}")
             return run

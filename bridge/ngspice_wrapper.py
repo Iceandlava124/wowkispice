@@ -184,36 +184,37 @@ class NgSpiceEngine:
         vsrc_callback: Optional[Callable[[float, str], float]] = None,
         data_callback: Optional[Callable[[float, Dict[str, float]], None]] = None
     ):
-        # Only run DLL/FFI initialization once (singleton)
-        if not getattr(self, '_init_done', False):
-            resolved, tried = resolve_ngspice_library(dll_path)
-            if resolved is None:
-                raise FileNotFoundError(
-                    "ngspice library not found. Tried:\n  " +
-                    "\n  ".join(tried) + _MISSING_DLL_HELP)
+        # ngspice is a process-global singleton: the C library and its
+        # registered ctypes callbacks are initialized ONCE. Re-running this
+        # block on every NgSpiceEngine() call rebinds self.output_logs /
+        # self.user_vsrc_callback and drops the ctypes callback references,
+        # leaving dangling C pointers -> "Fatal Python error: Aborted" in
+        # ngSpice_Command("run") on the second engine in one process.
+        # After first init, do nothing here; callers use reset() between runs.
+        if getattr(self, '_init_done', False):
+            return
+        resolved, tried = resolve_ngspice_library(dll_path)
+        if resolved is None:
+            raise FileNotFoundError(
+                "ngspice library not found. Tried:\n  " +
+                "\n  ".join(tried) + _MISSING_DLL_HELP)
+        self.dll_path = resolved
+        self._load_dll()
 
-            self.dll_path = resolved
-            self._load_dll()
-
-            # Initialize per-instance state BEFORE _init_ngspice() so that
-            # ngSpice_Init callbacks (which run during initialization) can
-            # access self.output_logs and other per-instance state.
-            self.verbose = verbose
-            self.output_logs: List[str] = []
-            self.user_vsrc_callback = vsrc_callback
-            self.user_data_callback = data_callback
-            self.progress_callback: Optional[Callable[[float, int], None]] = None
-            self.timestep_count = 0
-            self._stop_requested = False
-            self._tstop: Optional[float] = None
-
-            self._init_ngspice()
-            self._init_done = True
+        # Initialize per-instance state BEFORE _init_ngspice() so that
+        # ngSpice_Init callbacks (which run during initialization) can
+        # access self.output_logs and other per-instance state.
+        self.verbose = verbose
+        self.output_logs: List[str] = []
+        self.user_vsrc_callback = vsrc_callback
         self.user_data_callback = data_callback
         self.progress_callback: Optional[Callable[[float, int], None]] = None
         self.timestep_count = 0
         self._stop_requested = False
         self._tstop: Optional[float] = None
+
+        self._init_ngspice()
+        self._init_done = True
 
     def _load_dll(self):
         # find_library() can return a bare soname ("libngspice.so.0") with no
