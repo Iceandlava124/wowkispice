@@ -22,6 +22,14 @@ use wowkispice_core::standalone_sim::{
     build_buck_converter, build_rc_filter, Circuit, ComponentType, PassiveComponent,
 };
 
+fn parse_string_flag(args: &[String], flag: &str, default: &str) -> String {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
+}
+
 fn parse_flag(args: &[String], flag: &str, default: f64) -> Result<f64, String> {
     if let Some(pos) = args.iter().position(|a| a == flag) {
         let value = args
@@ -153,7 +161,8 @@ fn main() {
             };
             match build_circuit(model, &args[2..]) {
                 Ok((circuit, dt, tstop)) => {
-                    let result = solve_circuit_julia(&circuit, dt, tstop, "Tsit5", 1e-6);
+                    let method = parse_string_flag(&args[2..], "--method", "auto");
+                    let result = solve_circuit_julia(&circuit, dt, tstop, &method, 1e-6);
                     print_result(model, &result);
                     if result.is_err() { std::process::exit(1); }
                 }

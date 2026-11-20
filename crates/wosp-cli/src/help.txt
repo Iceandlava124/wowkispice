@@ -18,6 +18,9 @@ STANDALONE (dependency-free Rust sim -- no Julia required)
 COMMON FLAGS
   --dt <seconds>      time step (default 1e-6)
   --tstop <seconds>   simulation stop time (default 0.01)
+  --method <name>     solver: auto (default), tsit5, rosenbrock23,
+                      rodas5p, fbdf, vern7. 'auto' switches to a stiff
+                      solver when needed.
 
 EXAMPLES
   wosp-cli sim rc --r 2000 --c 1e-6 --vin 5 --tstop 0.001

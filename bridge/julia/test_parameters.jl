@@ -32,4 +32,21 @@ r4 = solve_julia_circuit(JSON.parse(j4))
 @assert isapprox(r4["parameters"]["L"], 1e-3)
 println("PASS RLC: status=$(r4["status"])")
 
+# ---- Layer 1: solver method selection tests ----
+expected_rc = 5*(1-exp(-0.5))
+for m in ["tsit5", "rosenbrock23", "rodas5p", "fbdf", "vern7", "auto"]
+    jm = """{"circuit":{"type":"rc","resistance":2000.0,"capacitance":1e-6,"input_voltage":5.0},"simulation":{"dt":1e-6,"tstop":0.001,"method":"$m"}}"""
+    rm = solve_julia_circuit(JSON.parse(jm))
+    @assert rm["status"] == "success" "method $m failed: $(rm["status"])"
+    @assert isapprox(rm["final_vout"], expected_rc, atol=0.02) "method $m wrong result: $(rm["final_vout"])"
+    @assert rm["method"] == m
+    println("PASS method $m: final=$(rm["final_vout"]) algo=$(rm["algorithm"])")
+end
+
+# Unknown method must return a structured error, not throw
+jbad = """{"circuit":{"type":"rc"},"simulation":{"dt":1e-6,"tstop":0.001,"method":"bogus"}}"""
+rbad = solve_julia_circuit(JSON.parse(jbad))
+@assert rbad["status"] == "error" && rbad["error_type"] == "invalid_method"
+println("PASS invalid method handled: $(rbad["error_message"])")
+
 println("ALL PARAMETER TESTS PASSED")

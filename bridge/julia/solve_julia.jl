@@ -5,6 +5,30 @@ using OrdinaryDiffEq
 using JSON
 using Statistics
 
+# Resolve the requested solver method. All algorithms come from the pinned
+# OrdinaryDiffEq project. "auto" uses AutoTsit5(Rosenbrock23()) which switches
+# to a stiff solver when the problem requires it -- this is the industry-grade
+# default because a fixed explicit method can fail on stiff circuits.
+function select_algorithm(method::String)
+    m = lowercase(method)
+    if m == "tsit5"
+        return Tsit5()
+    elseif m == "rosenbrock23"
+        return Rosenbrock23()
+    elseif m == "rodas5p"
+        return Rodas5P()
+    elseif m == "fbdf"
+        return FBDF()
+    elseif m == "vern7"
+        return Vern7()
+    elseif m == "auto" || m == "autotsit5"
+        return AutoTsit5(Rosenbrock23())
+    else
+        # Unknown method: fail loudly rather than silently use a different one
+        throw(ArgumentError("unknown solver method '$method' (supported: tsit5, rosenbrock23, rodas5p, fbdf, vern7, auto)"))
+    end
+end
+
 # Resolve a circuit parameter from the JSON protocol.
 #
 # Rust (julia_bridge.rs) sends BOTH explicit scalar keys and component arrays
@@ -38,8 +62,17 @@ function solve_julia_circuit(circuit_json)
 
     dt = simulation["dt"]
     tstop = simulation["tstop"]
-    method = get(simulation, "method", "Tsit5")
+    method = get(simulation, "method", "auto")
     tolerance = get(simulation, "tolerance", 1e-6)
+
+    # Resolve the solver; unknown methods return a structured error (not a throw).
+    local algorithm
+    try
+        algorithm = select_algorithm(method)
+    catch e
+        return Dict{String,Any}("status" => "error", "error_type" => "invalid_method",
+            "error_message" => string(e), "solve_time_ms" => 0.0)
+    end
 
     circuit_type_lower = lowercase(get(circuit, "type", "rc"))
 
@@ -89,7 +122,7 @@ function solve_julia_circuit(circuit_json)
     if circuit_type_lower == "diode"
         try
             prob = ODEProblem(diode_ode!, u0, tspan)
-            sol = solve(prob, Tsit5(); abstol=tolerance, reltol=tolerance)
+            sol = solve(prob, algorithm; abstol=tolerance, reltol=tolerance)
         catch e
             elapsed_ms = Float64(time_ns() - start_time) / 1_000_000
             return Dict{String,Any}("status" => "error", "error_type" => "solver_failure", "error_message" => string(e), "solve_time_ms" => elapsed_ms)
@@ -97,7 +130,7 @@ function solve_julia_circuit(circuit_json)
     elseif circuit_type_lower == "rl"
         try
             prob = ODEProblem(rl_ode!, u0, tspan)
-            sol = solve(prob, Tsit5(); abstol=tolerance, reltol=tolerance)
+            sol = solve(prob, algorithm; abstol=tolerance, reltol=tolerance)
         catch e
             elapsed_ms = Float64(time_ns() - start_time) / 1_000_000
             return Dict{String,Any}("status" => "error", "error_type" => "solver_failure", "error_message" => string(e), "solve_time_ms" => elapsed_ms)
@@ -105,7 +138,7 @@ function solve_julia_circuit(circuit_json)
     elseif circuit_type_lower == "rlc"
         try
             prob = ODEProblem(rlc_ode!, u0, tspan)
-            sol = solve(prob, Tsit5(); abstol=tolerance, reltol=tolerance)
+            sol = solve(prob, algorithm; abstol=tolerance, reltol=tolerance)
         catch e
             elapsed_ms = Float64(time_ns() - start_time) / 1_000_000
             return Dict{String,Any}("status" => "error", "error_type" => "solver_failure", "error_message" => string(e), "solve_time_ms" => elapsed_ms)
@@ -113,7 +146,7 @@ function solve_julia_circuit(circuit_json)
     else
         try
             prob = ODEProblem(rc_ode!, u0, tspan)
-            sol = solve(prob, Tsit5(); abstol=tolerance, reltol=tolerance)
+            sol = solve(prob, algorithm; abstol=tolerance, reltol=tolerance)
         catch e
             elapsed_ms = Float64(time_ns() - start_time) / 1_000_000
             return Dict{String,Any}("status" => "error", "error_type" => "solver_failure", "error_message" => string(e), "solve_time_ms" => elapsed_ms)
@@ -141,6 +174,8 @@ function solve_julia_circuit(circuit_json)
         "steps_taken" => Int(length(sol.t)),
         "circuit_type" => circuit_type_lower,
         "solve_time_ms" => solve_time_ms,
+        "method" => method,
+        "algorithm" => string(typeof(algorithm)),
         # Echo resolved parameters so callers can confirm what was simulated
         "parameters" => Dict{String,Any}(
             "R" => R, "C" => C, "L" => L, "Vin" => Vin,
