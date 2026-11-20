@@ -131,6 +131,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_stiff.jl
 
+      - name: Golden Trace Sign-off
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/golden_signoff.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -270,6 +274,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_stiff.jl
 
+      - name: Golden Trace Sign-off
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/golden_signoff.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -408,6 +416,10 @@ jobs:
       - name: Stiff Circuit Test (auto vs explicit solver)
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_stiff.jl
+
+      - name: Golden Trace Sign-off
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/golden_signoff.jl
 
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
