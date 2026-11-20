@@ -127,6 +127,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/validation_corpus.jl
 
+      - name: Stiff Circuit Test (auto vs explicit solver)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_stiff.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -262,6 +266,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/validation_corpus.jl
 
+      - name: Stiff Circuit Test (auto vs explicit solver)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_stiff.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -396,6 +404,10 @@ jobs:
       - name: Validation Corpus (closed-form physics)
         shell: bash
         run: julia --project=bridge/julia bridge/julia/validation_corpus.jl
+
+      - name: Stiff Circuit Test (auto vs explicit solver)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_stiff.jl
 
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
