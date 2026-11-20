@@ -47,10 +47,6 @@ def pytest(cmd_extra=None):
         "-rs",
         "-p",
         "no:randomly",
-        # Signal-based timeouts interrupt PyQt5 native calls (tests monkeypatch
-        # QMessageBox/QInputDialog sip wrappers) and segfault the interpreter on
-        # headless CI. Thread method is safe for Qt/native extension tests.
-        "--timeout-method=thread",
     ]
     if cmd_extra:
         cmd.extend(cmd_extra)
