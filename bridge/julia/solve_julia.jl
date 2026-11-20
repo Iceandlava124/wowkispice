@@ -88,11 +88,16 @@ function solve_julia_circuit(circuit_json)
     # (a diode's generic "value" field may encode a part number or Vf, not I_s).
     I_s = haskey(circuit, "saturation_current") ? Float64(circuit["saturation_current"]) : 1e-12
     V_t = haskey(circuit, "thermal_voltage") ? Float64(circuit["thermal_voltage"]) : 0.026
+    # Junction capacitance: the diode ODE is charge balance
+    # Cj*dV/dt = I_in - I_d(V). Without Cj the equation is dimensionally wrong
+    # (dV/dt in A) and the voltage ramps linearly instead of settling.
+    C_j = haskey(circuit, "junction_capacitance") ? Float64(circuit["junction_capacitance"]) : 1e-9
 
-    # --- Diode model (Shockley equation) ---
+    # --- Diode model (Shockley equation + junction capacitance) ---
+    # State u[1] = diode voltage V. du[1] = (I_in - I_s(e^(V/Vt)-1))/Cj
     function diode_ode!(du, u, p, t)
         V = u[1]
-        du[1] = I_in - I_s * (exp(V / V_t) - 1)
+        du[1] = (I_in - I_s * (exp(V / V_t) - 1)) / C_j
     end
 
     # --- RL circuit model: dI/dt = (Vin - I*R)/L ---
@@ -179,7 +184,7 @@ function solve_julia_circuit(circuit_json)
         # Echo resolved parameters so callers can confirm what was simulated
         "parameters" => Dict{String,Any}(
             "R" => R, "C" => C, "L" => L, "Vin" => Vin,
-            "I_in" => I_in, "I_s" => I_s, "V_t" => V_t,
+            "I_in" => I_in, "I_s" => I_s, "V_t" => V_t, "C_j" => C_j,
         ),
     )
     return result
