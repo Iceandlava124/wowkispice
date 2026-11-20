@@ -20,10 +20,12 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle("WOWKISPICE Studio — LTspice + Wokwi");
     resize(1400, 900);
 
+    // Central widget FIRST: the menu/toolbar connects below reference these
+    // widget pointers as connect() contexts, so they must exist before wiring.
+    setupCentralWidget();
     setupMenuBar();
     setupToolBar();
     setupStatusBar();
-    setupCentralWidget();
     setupDocks();
     setupPropertiesDock();
 
