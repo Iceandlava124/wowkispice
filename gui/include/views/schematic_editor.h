@@ -24,6 +24,7 @@ struct ComponentData {
     QPointF position;
     QMap<QString, QString> params;   // key=value pairs (e.g. "value"="10k", "model"="D1N4148")
     QMap<QString, QString> pinNets;  // pin name -> net name (e.g. "p1"="vin", "p2"="out")
+    QGraphicsSimpleTextItem *valueLabel = nullptr;  // live on-screen value text (owned by scene)
 };
 
 /// Represents a net (electrical node) connecting component pins.

@@ -62,6 +62,13 @@ void SchematicEditor::addComponent(const QString &id, const QString &type, qreal
     idLabel->setPos(-idLabel->boundingRect().width() / 2, 25);
     idLabel->setScale(0.6);
 
+    // Live value label below the component - updates when the value is edited
+    auto *valueLabel = new QGraphicsSimpleTextItem(comp.params["value"], rect);
+    valueLabel->setPos(-valueLabel->boundingRect().width() / 2, 40);
+    valueLabel->setScale(0.6);
+    valueLabel->setBrush(QColor("#2d6a4f"));
+    comp.valueLabel = valueLabel;
+
     // Draw pins (small circles on left and right)
     qreal pinSize = 6;
     auto *pin1 = new QGraphicsEllipseItem(-35 - pinSize/2, -pinSize/2, pinSize, pinSize, rect);
@@ -125,6 +132,13 @@ void SchematicEditor::setComponentParam(const QString &id, const QString &key, c
     auto it = m_components.find(id);
     if (it != m_components.end()) {
         it.value().params[key] = value;
+        // Keep the on-screen value label in sync with the edited parameter so
+        // users see their change immediately (not only in the netlist).
+        if (key == "value" && it.value().valueLabel) {
+            it.value().valueLabel->setText(value);
+            it.value().valueLabel->setPos(
+                -it.value().valueLabel->boundingRect().width() / 2, 40);
+        }
     }
 }
 
