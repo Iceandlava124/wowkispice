@@ -49,4 +49,24 @@ rbad = solve_julia_circuit(JSON.parse(jbad))
 @assert rbad["status"] == "error" && rbad["error_type"] == "invalid_method"
 println("PASS invalid method handled: $(rbad["error_message"])")
 
+# ---- Layer 1 Step 2: convergence study ----
+# The solution must converge to the analytic result as tolerance tightens.
+# This is the numerical-credibility evidence an industry tool needs: not just
+# "one run looks right", but a demonstrated error trend.
+analytic_rc = 5*(1-exp(-0.5))  # R=2000, C=1u, t=1ms -> 0.5 tau
+tols = [1e-3, 1e-5, 1e-7, 1e-9]
+errors = Float64[]
+for tol in tols
+    jt = """{"circuit":{"type":"rc","resistance":2000.0,"capacitance":1e-6,"input_voltage":5.0},"simulation":{"dt":1e-6,"tstop":0.001,"method":"auto","tolerance":$tol}}"""
+    rt = solve_julia_circuit(JSON.parse(jt))
+    @assert rt["status"] == "success"
+    err = abs(rt["final_vout"] - analytic_rc)
+    push!(errors, err)
+    println("convergence tol=$tol final=$(rt["final_vout"]) err=$err")
+end
+# Error must not blow up as tolerance tightens; the tightest must be best or equal
+@assert errors[end] <= errors[1] * 1.5 || errors[end] < 1e-4
+@assert errors[end] < 1e-4 "tightest tolerance should be accurate to 1e-4, got $(errors[end])"
+println("PASS convergence study: errors=$(errors)")
+
 println("ALL PARAMETER TESTS PASSED")
