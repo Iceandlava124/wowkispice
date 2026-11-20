@@ -60,8 +60,28 @@ function solve_julia_circuit(circuit_json)
     circuit = circuit_json["circuit"]
     simulation = circuit_json["simulation"]
 
-    dt = simulation["dt"]
-    tstop = simulation["tstop"]
+    # Validate simulation params: missing, non-numeric, or non-positive values
+    # must return structured errors, never throw/hang/NaN.
+    function sim_error(msg)
+        return Dict{String,Any}("status" => "error", "error_type" => "invalid_input",
+            "error_message" => msg, "solve_time_ms" => 0.0)
+    end
+    for key in ("dt", "tstop")
+        if !haskey(simulation, key) || !(simulation[key] isa Number)
+            return sim_error("missing or non-numeric simulation field '$key'")
+        end
+    end
+    dt = Float64(simulation["dt"])
+    tstop = Float64(simulation["tstop"])
+    if !(dt > 0) || isfinite(dt) == false
+        return sim_error("dt must be finite and positive, got $dt")
+    end
+    if !(tstop > 0) || isfinite(tstop) == false
+        return sim_error("tstop must be finite and positive, got $tstop")
+    end
+    if dt > tstop
+        return sim_error("dt ($dt) must not exceed tstop ($tstop)")
+    end
     method = get(simulation, "method", "auto")
     tolerance = get(simulation, "tolerance", 1e-6)
 
@@ -75,6 +95,21 @@ function solve_julia_circuit(circuit_json)
     end
 
     circuit_type_lower = lowercase(get(circuit, "type", "rc"))
+
+    # Validate explicit component values when present: a caller that supplies
+    # an explicit key with a non-numeric/NaN value is a contract violation.
+    # (Missing keys legitimately fall back to defaults via circuit_param.)
+    for (key, raw) in (("resistance", get(circuit, "resistance", nothing)),
+                       ("capacitance", get(circuit, "capacitance", nothing)),
+                       ("inductance", get(circuit, "inductance", nothing)),
+                       ("input_voltage", get(circuit, "input_voltage", nothing)))
+        if raw !== nothing
+            if !(raw isa Number) || !isfinite(Float64(raw)) || Float64(raw) <= 0
+                return Dict{String,Any}("status" => "error", "error_type" => "invalid_input",
+                    "error_message" => "circuit.$key must be a finite positive number, got $raw", "solve_time_ms" => 0.0)
+            end
+        end
+    end
 
     # --- Parameters resolved from JSON (with documented defaults) ---
     # Scalars are preferred; component arrays from julia_bridge.rs are the

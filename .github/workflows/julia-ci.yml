@@ -135,6 +135,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/golden_signoff.jl
 
+      - name: Input Validation (robustness)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_validation.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -278,6 +282,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/golden_signoff.jl
 
+      - name: Input Validation (robustness)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_validation.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -420,6 +428,10 @@ jobs:
       - name: Golden Trace Sign-off
         shell: bash
         run: julia --project=bridge/julia bridge/julia/golden_signoff.jl
+
+      - name: Input Validation (robustness)
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/test_validation.jl
 
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
