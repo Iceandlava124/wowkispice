@@ -18,6 +18,7 @@
  * robust parsing on the Julia side.
  */
 
+use std::path::Path;
 use std::process::Command;
 
 use crate::standalone_sim::{Circuit, VsSourceType};
@@ -296,9 +297,23 @@ fn to_json_string(input: &JuliaInput) -> String {
     let input_voltage = circuit.voltage_sources.first().map(|v| v.dc_value).unwrap_or(5.0);
     let input_current = circuit.current_sources.first().map(|i| i.value).unwrap_or(1e-3);
 
+    // Derive the circuit type from its components. The Julia solver selects
+    // its ODE by "type"; without this it silently defaults to RC for every
+    // circuit (RL/diode results were wrong).
+    let circuit_type = if !circuit.diodes.is_empty() {
+        "diode"
+    } else if !circuit.inductors.is_empty() && !circuit.capacitors.is_empty() {
+        "rlc"
+    } else if !circuit.inductors.is_empty() {
+        "rl"
+    } else {
+        "rc"
+    };
+
     format!(
-        r#"{{"circuit":{{"name":"{}","resistance":{},"capacitance":{},"inductance":{},"input_voltage":{},"input_current":{},"resistors":[{}],"capacitors":[{}],"inductors":[{}],"diodes":[{}],"mosfets_n":[{}],"mosfets_p":[{}],"switches":[{}],"voltage_sources":[{}],"current_sources":[{}],"ground_node":"{}"}},"simulation":{{"dt":{},"tstop":{},"method":"{}","tolerance":{}}}}}"#,
+        r#"{{"circuit":{{"name":"{}","type":"{}","resistance":{},"capacitance":{},"inductance":{},"input_voltage":{},"input_current":{},"resistors":[{}],"capacitors":[{}],"inductors":[{}],"diodes":[{}],"mosfets_n":[{}],"mosfets_p":[{}],"switches":[{}],"voltage_sources":[{}],"current_sources":[{}],"ground_node":"{}"}},"simulation":{{"dt":{},"tstop":{},"method":"{}","tolerance":{}}}}}"#,
         escape_json_string(&circuit.name),
+        circuit_type,
         resistance,
         capacitance,
         inductance,
@@ -610,6 +625,38 @@ fn parse_julia_output(json: &str) -> Result<JuliaOutput, String> {
     })
 }
 
+/// Resolve the Julia solver script path.
+///
+/// Uses the compile-time crate location so the bridge works from ANY working
+/// directory (not just the repo root). Falls back to a relative path for
+/// installed layouts where the source tree is not alongside the binary.
+fn solver_script_path() -> String {
+    // crates/wowkispice-core/src/julia_bridge.rs -> repo root is 3 levels up
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.ancestors().nth(2);
+    if let Some(root) = repo_root {
+        let script = root.join("bridge").join("julia").join("solve_julia.jl");
+        if script.is_file() {
+            return script.to_string_lossy().into_owned();
+        }
+    }
+    // Fallback: relative to current working directory
+    "bridge/julia/solve_julia.jl".to_string()
+}
+
+/// Resolve the Julia project directory for `--project=...`.
+/// Same logic as solver_script_path but points at the project root.
+fn julia_project_path() -> String {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if let Some(root) = manifest_dir.ancestors().nth(2) {
+        let project = root.join("bridge").join("julia");
+        if project.is_dir() {
+            return format!("--project={}", project.to_string_lossy());
+        }
+    }
+    "--project=bridge/julia".to_string()
+}
+
 /// Invoke the Julia circuit solver with the given circuit and simulation parameters
 ///
 /// # Arguments
@@ -635,9 +682,11 @@ pub fn solve_circuit_julia(
     // Serialize to JSON string
     let json_input = to_json_string(&input);
 
-    // Invoke Julia solver
+    // Invoke Julia solver with absolute paths (works from any working directory)
+    // and the pinned project so the locked dependencies are used.
     let output = Command::new("julia")
-        .arg("bridge/julia/solve_julia.jl")
+        .arg(julia_project_path())
+        .arg(solver_script_path())
         .arg(&json_input)
         .output();
 
@@ -733,6 +782,34 @@ mod tests {
     }
 
     // ---------- Round-trip / edge-case tests (added during code hardening) ----------
+
+    /// Circuit type must be derived from components so Julia picks the right
+    /// ODE (without this, every circuit silently ran as RC).
+    #[test]
+    fn test_circuit_type_derived() {
+        use crate::standalone_sim::{PassiveComponent, ComponentType};
+        let mut circuit = Circuit::default();
+        assert!(to_json_string(&circuit_to_julia_input(&circuit, 1e-6, 0.01, "Tsit5", 1e-6))
+            .contains("\"type\":\"rc\""));
+        circuit.inductors.push(PassiveComponent {
+            name: "L".into(), node1: "a".into(), node2: "b".into(), value: 1e-3,
+            kind: ComponentType::Inductor,
+        });
+        assert!(to_json_string(&circuit_to_julia_input(&circuit, 1e-6, 0.01, "Tsit5", 1e-6))
+            .contains("\"type\":\"rl\""));
+        circuit.capacitors.push(PassiveComponent {
+            name: "C".into(), node1: "b".into(), node2: "0".into(), value: 1e-6,
+            kind: ComponentType::Capacitor,
+        });
+        assert!(to_json_string(&circuit_to_julia_input(&circuit, 1e-6, 0.01, "Tsit5", 1e-6))
+            .contains("\"type\":\"rlc\""));
+        circuit.diodes.push(PassiveComponent {
+            name: "D".into(), node1: "a".into(), node2: "0".into(), value: 1e-12,
+            kind: ComponentType::Diode,
+        });
+        assert!(to_json_string(&circuit_to_julia_input(&circuit, 1e-6, 0.01, "Tsit5", 1e-6))
+            .contains("\"type\":\"diode\""));
+    }
 
     /// Custom component values must be serialized as explicit scalar keys so
     /// the Julia solver actually uses them (it prefers scalars over arrays).

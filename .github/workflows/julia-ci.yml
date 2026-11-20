@@ -123,6 +123,15 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_parameters.jl
 
+      - name: CLI end-to-end (custom RL simulation)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run -q -p wosp-cli -- sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02 > cli_out.txt
+          cat cli_out.txt
+          grep -q '"status":"success"' cli_out.txt
+          grep -q '"final_vout":2.4' cli_out.txt
+
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4
         if: always()
@@ -243,6 +252,15 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_parameters.jl
 
+      - name: CLI end-to-end (custom RL simulation)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run -q -p wosp-cli -- sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02 > cli_out.txt
+          cat cli_out.txt
+          grep -q '"status":"success"' cli_out.txt
+          grep -q '"final_vout":2.4' cli_out.txt
+
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4
         if: always()
@@ -362,6 +380,15 @@ jobs:
       - name: Julia Parameter Tests (custom component values)
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_parameters.jl
+
+      - name: CLI end-to-end (custom RL simulation)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run -q -p wosp-cli -- sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02 > cli_out.txt
+          cat cli_out.txt
+          grep -q '"status":"success"' cli_out.txt
+          grep -q '"final_vout":2.4' cli_out.txt
 
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4

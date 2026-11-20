@@ -11,7 +11,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/wowkispice-core", "crates/parity", "crates/wowkispice-ffi"]
+members = ["crates/wowkispice-core", "crates/parity", "crates/wowkispice-ffi", "crates/wosp-cli"]
 
 [workspace.package]
 version = "0.1.0"

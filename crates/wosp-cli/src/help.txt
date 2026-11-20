@@ -1,0 +1,34 @@
+WOWKISPICE Circuit Simulator (wosp-cli)
+
+USAGE
+  wosp-cli list
+  wosp-cli sim <model> [flags]
+  wosp-cli standalone <model> [flags]
+
+MODELS (via Julia backend -- supports custom component values)
+  rc      RC low-pass       --r <ohms> --c <farads> --vin <volts>
+  rl      RL series         --r <ohms> --l <henries> --vin <volts>
+  rlc     RLC series        --r <ohms> --l <henries> --c <farads> --vin <volts>
+  diode   Shockley diode    --i <amps> --is <amps>
+
+STANDALONE (dependency-free Rust sim -- no Julia required)
+  rc      RC filter         --r --c --vin
+  buck    Buck converter    --vin --l --c --r
+
+COMMON FLAGS
+  --dt <seconds>      time step (default 1e-6)
+  --tstop <seconds>   simulation stop time (default 0.01)
+
+EXAMPLES
+  wosp-cli sim rc --r 2000 --c 1e-6 --vin 5 --tstop 0.001
+  wosp-cli sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02
+  wosp-cli standalone rc --r 1000 --c 1e-6 --vin 5
+
+OUTPUT
+  JSON object on stdout: status, samples, final_vout, avg_vout,
+  vout_ripple, steps_taken. Errors return status:"error" and exit code 1.
+
+REQUIREMENTS
+  The 'sim' command needs Julia >= 1.9 with the pinned project at
+  bridge/julia (run: julia --project=bridge/julia -e 'using Pkg; Pkg.instantiate()').
+  The 'standalone' command needs no external dependencies.
