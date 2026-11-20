@@ -134,8 +134,9 @@ jobs:
           cargo run -q -p wosp-cli -- sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02 > cli_out.txt
           cat cli_out.txt
           grep -q '"status":"success"' cli_out.txt
-          # final_vout is 0.24 A (12V/50ohm); emitted as 2.399999e-1 in scientific notation
-          grep -q '2\.39' cli_out.txt
+          # final_vout is 0.24 A (12V/50ohm); emitted in scientific notation.
+          # Accept both 2.399999e-1 (tsit5) and 2.400000e-1 (auto method).
+          grep -qE '2\.(39|40)' cli_out.txt
 
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4
@@ -268,8 +269,9 @@ jobs:
           cargo run -q -p wosp-cli -- sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02 > cli_out.txt
           cat cli_out.txt
           grep -q '"status":"success"' cli_out.txt
-          # final_vout is 0.24 A (12V/50ohm); emitted as 2.399999e-1 in scientific notation
-          grep -q '2\.39' cli_out.txt
+          # final_vout is 0.24 A (12V/50ohm); emitted in scientific notation.
+          # Accept both 2.399999e-1 (tsit5) and 2.400000e-1 (auto method).
+          grep -qE '2\.(39|40)' cli_out.txt
 
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4
@@ -402,8 +404,9 @@ jobs:
           cargo run -q -p wosp-cli -- sim rl --r 50 --l 0.01 --vin 12 --tstop 0.02 > cli_out.txt
           cat cli_out.txt
           grep -q '"status":"success"' cli_out.txt
-          # final_vout is 0.24 A (12V/50ohm); emitted as 2.399999e-1 in scientific notation
-          grep -q '2\.39' cli_out.txt
+          # final_vout is 0.24 A (12V/50ohm); emitted in scientific notation.
+          # Accept both 2.399999e-1 (tsit5) and 2.400000e-1 (auto method).
+          grep -qE '2\.(39|40)' cli_out.txt
 
       - name: Upload Solver Logs (always)
         uses: actions/upload-artifact@v4
