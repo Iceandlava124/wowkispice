@@ -139,6 +139,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_validation.jl
 
+      - name: Performance Regression Gate
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/perf_gate.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -286,6 +290,10 @@ jobs:
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_validation.jl
 
+      - name: Performance Regression Gate
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/perf_gate.jl
+
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
         run: |
@@ -432,6 +440,10 @@ jobs:
       - name: Input Validation (robustness)
         shell: bash
         run: julia --project=bridge/julia bridge/julia/test_validation.jl
+
+      - name: Performance Regression Gate
+        shell: bash
+        run: julia --project=bridge/julia bridge/julia/perf_gate.jl
 
       - name: CLI end-to-end (custom RL simulation)
         shell: bash
