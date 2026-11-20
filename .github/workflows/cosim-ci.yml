@@ -69,18 +69,15 @@ jobs:
         run: |
           python tools/check_icons.py
 
-      - name: Requirements traceability gate (non-vacuous, informational)
-        # INFORMATIONAL: the combined pytest run loads multiple ngspice-using
-        # test modules in ONE process; libngspice's process-global state gets
-        # corrupted across them (the same test passes as a standalone sanity
-        # step but segfaults in the combined run). cosim tests ARE isolated
-        # via WOSP_COSIM_ISOLATED=1 below; direct NgSpiceEngine tests are not
-        # yet isolated. The checker runs and reports real gaps; promote to a
-        # hard gate once all ngspice tests are process-isolated.
-        continue-on-error: true
+      - name: Requirements traceability gate (non-vacuous, isolated)
         run: |
-          WOSP_COSIM_ISOLATED=1 python -m pytest tests -m "req or qemu or ngspice or integration or system" \
-            --junit-xml=tests/junit.xml -q -p no:randomly
+          # Run EACH ngspice-using test module in its own subprocess so
+          # libngspice's process-global state cannot corrupt across modules
+          # (the direct NgSpiceEngine tests pass alone but segfault together).
+          # pytest_isolated.py merges all child junit XML into one final file,
+          # preserving @pytest.mark.req markers for the checker.
+          python tools/pytest_isolated.py --junit-xml=tests/junit.xml -q -p no:randomly \
+            -m "req or qemu or ngspice or integration or system"
           python tools/check_traceability.py tests/junit.xml
 
       - name: Fault injection / boundary gate (mandatory)
