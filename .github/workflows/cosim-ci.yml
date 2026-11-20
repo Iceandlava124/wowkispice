@@ -69,6 +69,17 @@ jobs:
         run: |
           python tools/check_icons.py
 
+      - name: Requirements traceability gate (non-vacuous)
+        run: |
+          # Produce a junit xml listing real markers, then require that every
+          # requirement has a test that actually EXECUTED (not skipped/xfail).
+          python -m pytest tests -m "req or qemu or ngspice or integration or system" \
+            --junit-xml=tests/junit.xml -q -p no:randomly
+          python tools/check_traceability.py tests/junit.xml
+
+      - name: Fault injection / boundary gate (mandatory)
+        run: python -m pytest tests/test_fault_injection.py -q -p no:randomly
+
       - name: Upload Simulation Waveforms Artifact
         uses: actions/upload-artifact@v4
         if: always()
