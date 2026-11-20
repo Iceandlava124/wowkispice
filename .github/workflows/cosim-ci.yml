@@ -69,16 +69,13 @@ jobs:
         run: |
           python tools/check_icons.py
 
-      - name: Requirements traceability gate (non-vacuous, informational)
-        # Currently informational: producing the junit requires running req-marked
-        # tests, two of which (CO-06/CO-07 cosim) hit the known ngspice C-level
-        # segfault on headless runners. The checker still RUNS and prints any
-        # real gaps; it becomes a hard gate once those hardware tests are stable.
-        continue-on-error: true
+      - name: Requirements traceability gate (non-vacuous)
         run: |
           # Produce a junit xml listing real markers, then require that every
           # requirement has a test that actually EXECUTED (not skipped/xfail).
-          python -m pytest tests -m "req or qemu or ngspice or integration or system" \
+          # WOSP_COSIM_ISOLATED=1 runs ngspice co-sims in a child process so a
+          # C-level libngspice abort on external-source transients is contained.
+          WOSP_COSIM_ISOLATED=1 python -m pytest tests -m "req or qemu or ngspice or integration or system" \
             --junit-xml=tests/junit.xml -q -p no:randomly
           python tools/check_traceability.py tests/junit.xml
 

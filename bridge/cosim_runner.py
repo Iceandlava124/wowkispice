@@ -16,9 +16,12 @@ never fired, or a sense net was missing, the run says so in `warnings` rather
 than reporting a tidy-looking zero.
 """
 
+import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -118,7 +121,17 @@ def run_cosim(
     `progress_callback(sim_time_s, steps)` is called on every accepted timestep.
     `stop_flag()` is polled the same way; returning True ends the run early and
     the partial result is still returned.
+
+    When WOSP_COSIM_ISOLATED=1, the ngspice solve runs in a child process so
+    a C-level abort cannot kill the caller (used by CI on systems whose
+    libngspice crashes on external-source transients). All result views are
+    preserved via run_cosim_isolated's reconstruction.
     """
+    if os.environ.get("WOSP_COSIM_ISOLATED", "").lower() in ("1", "true", "yes") and engine is None:
+        return run_cosim_isolated(
+            model, laws, vin=vin, tstep_us=tstep_us, duration_ms=duration_ms,
+            probe_nets=probe_nets)
+
     run = CosimRun()
 
     lines, nets, netlist_warnings = model.compile_netlist(
@@ -323,3 +336,80 @@ def run_firmware_cosim(
     if pin:
         spec["pin"] = pin
     return run_cosim(model, {str(spec["pin"]): spec}, **kwargs)
+
+
+def run_cosim_isolated(
+    model,
+    laws: Dict[str, Dict[str, object]],
+    vin: float = 12.0,
+    tstep_us: float = 0.5,
+    duration_ms: float = 5.0,
+    probe_nets: Optional[List[str]] = None,
+    timeout_s: float = 120.0,
+) -> CosimRun:
+    """Process-isolated co-simulation (Layer 3 robustness).
+
+    Runs the ngspice solve in a CHILD process so a C-level abort in libngspice
+    cannot kill the caller (tests, GUI, CI). The child writes a complete
+    CosimRun-shaped JSON result; here we reconstruct a faithful CosimRun with
+    real ControlLaw objects so regulation()/stats()/summary_lines() work.
+    On crash or timeout, returns a CosimRun with a structured warning.
+    """
+    lines, nets, netlist_warnings = model.compile_netlist(
+        vin=vin, tstep_us=tstep_us, duration_ms=duration_ms)
+    run = CosimRun()
+    run.netlist = list(lines)
+    run.nets = list(probe_nets if probe_nets is not None else nets)
+    run.warnings.extend(netlist_warnings)
+
+    tmpdir = tempfile.mkdtemp(prefix="wosp_cosim_")
+    in_path = os.path.join(tmpdir, "input.json")
+    out_path = os.path.join(tmpdir, "output.json")
+    payload = {
+        "netlist": lines, "nets": run.nets, "laws": laws, "vin": vin,
+        "tstep_us": tstep_us, "duration_ms": duration_ms, "probe_nets": probe_nets,
+    }
+    with open(in_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+
+    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cosim_worker.py")
+    try:
+        proc = subprocess.run(
+            [sys.executable, worker, in_path, out_path],
+            capture_output=True, text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        run.warnings.append(f"ngspice co-sim timed out after {timeout_s}s")
+        return run
+    except Exception as exc:
+        run.warnings.append(f"ngspice co-sim could not start: {exc}")
+        return run
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()
+        tail = detail[-1] if detail else "no stderr"
+        run.warnings.append(f"ngspice co-sim crashed in isolated worker (exit {proc.returncode}): {tail}")
+        return run
+
+    try:
+        with open(out_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception as exc:
+        run.warnings.append(f"ngspice co-sim produced no readable result: {exc}")
+        return run
+
+    run.warnings.extend(data.get("warnings", []))
+    run.callback_hits = int(data.get("callback_hits", 0))
+    run.aborted = bool(data.get("aborted", False))
+    run.time = list(data.get("time", []))
+    run.traces = dict(data.get("traces", {}))
+    for pin, ldata in data.get("laws", {}).items():
+        law = make_law(ldata["spec"])
+        law.pin = ldata["pin"]
+        law.sense_net = ldata["sense_net"]
+        law.level = bool(ldata["level"])
+        law.switch_count = int(ldata["switch_count"])
+        law.history_time = list(ldata["history_time"])
+        law.history_pin = list(ldata["history_pin"])
+        law.history_counts = list(ldata["history_counts"])
+        run.laws[pin] = law
+    return run

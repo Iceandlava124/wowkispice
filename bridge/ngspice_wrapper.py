@@ -327,14 +327,25 @@ class NgSpiceEngine:
         """Callback for ADC voltage source."""
         if self.user_vsrc_callback:
             name_str = node_name.decode('utf-8', errors='replace') if node_name else ""
-            voltage[0] = float(self.user_vsrc_callback(time, name_str))
+            v = float(self.user_vsrc_callback(time, name_str))
+            # A non-finite voltage makes ngspice abort the transient with
+            # "Timestep too small" (observed as a C-level segfault on some
+            # builds). Clamp to a finite range instead of poisoning the solver.
+            import math
+            if not math.isfinite(v):
+                v = 0.0
+            voltage[0] = max(-1e6, min(1e6, v))
         return 0
 
     def _cb_get_isrc(self, current: Any, time: float, node_name: bytes, id_: int, user_data: Any) -> int:
         """Callback for ADC current source."""
         if self.user_vsrc_callback:
             name_str = node_name.decode('utf-8', errors='replace') if node_name else ""
-            current[0] = float(self.user_vsrc_callback(time, name_str))
+            i = float(self.user_vsrc_callback(time, name_str))
+            import math
+            if not math.isfinite(i):
+                i = 0.0
+            current[0] = max(-1e6, min(1e6, i))
         return 0
 
     def _cb_get_sync(self, time: float, delta_t: Any, old_delta: float,
