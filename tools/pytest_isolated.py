@@ -87,16 +87,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--junit-xml", default="tests/junit.xml")
     parser.add_argument("-m", default=None)
-    parser.add_argument("extra", nargs="*")
     args, unknown = parser.parse_known_args()
 
     extra = []
     if args.m:
         extra.extend(["-m", args.m])
-    # pytest flags (-q, -p no:randomly, etc.) arrive as 'unknown' to argparse;
-    # forward them all to each subprocess pytest invocation.
+    # All other pytest flags (-q, -p no:randomly, ...) come through 'unknown'.
     extra.extend(unknown)
-    args.extra = extra
 
     tmpdir = tempfile.mkdtemp(prefix="wosp_pytest_iso_")
     parts = []
@@ -134,7 +131,12 @@ def main():
 
     # Exit non-zero if any child failed/aborted (or merge shows failures) so a
     # hard CI gate is meaningful. Generated junit still lets traceability run.
-    bad = [name for name, rc in results if rc != 0]
+    # Exit 5 ("no tests collected") is normal when a module has no tests
+    # matching the -m marker filter; other modules cover those requirements.
+    def is_bad(rc):
+        return rc != 0 and rc != 5
+
+    bad = [name for name, rc in results if is_bad(rc)]
     if bad or failures or errors:
         print(f"[pytest_isolated] FAILED modules: {bad}", flush=True)
         return 1
