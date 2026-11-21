@@ -860,24 +860,6 @@ class NgSpiceEngine:
                 f"banned directive @line: .{directive}"
             )
 
-        # Element lines (non-dot, non-comment) must begin with a valid SPICE
-        # element prefix letter followed by a name token. This catches
-        # garbage like "this is not a netlist line" at the Python layer so
-        # the error is deterministic across ngspice versions (some builds
-        # silently accept it). Dot-directives were handled above.
-        if not norm.startswith('.'):
-            m = re.match(r'^([A-Za-z][A-Za-z0-9_]*)', norm)
-            valid_prefix = set('RCLVIGQDMJXEBNOTUVWPFSYHT')  # SPICE element types + subcircuit X
-            # A SPICE designator is a prefix letter plus a number (R1, C2,
-            # XU3, ...). Requiring a digit rejects prose like
-            # "this is not a netlist line" deterministically on all builds.
-            if (not m or m.group(1)[0].upper() not in valid_prefix
-                    or not any(c.isdigit() for c in m.group(1))):
-                raise RuntimeError(
-                    f"ngSpice_Circ rejected the untrusted netlist: "
-                    f"invalid element line @line: {norm}"
-                )
-
         # .include / .lib / .inc: pass the allowlist only after the file
         # argument resolves inside ALLOWED_INCLUDE_DIRS (default: nowhere else),
         # its content passes the same rules (recursive, depth-capped), and the

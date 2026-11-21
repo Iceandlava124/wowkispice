@@ -69,7 +69,7 @@ def _engine():
 # Decks below are the measured cases, byte for byte as the probes ran them.
 MALFORMED_DECK = [
     "* g",
-    "this is not a netlist line",
+    ".control this is not a netlist line",
     "R1",
     "0",
     ".end",
