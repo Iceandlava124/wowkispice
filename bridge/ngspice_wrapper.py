@@ -423,6 +423,17 @@ class NgSpiceEngine:
         # _failure_report(), which also knows the deck's stop time.
         analyse = text.split()[0].lower() in NgSpiceEngine.ANALYSING_VERBS
         before = len(self.output_logs)
+        # Deterministic pre-check: two DC voltage sources between the same
+        # node pair produce an unsolvable operating point. Some ngspice builds
+        # silently return rc 0 for this, so detect it in Python.
+        if analyse and getattr(self, '_last_netlist', None):
+            conflict = NgSpiceEngine._conflicting_dc_sources(self._last_netlist)
+            if conflict:
+                raise RuntimeError(
+                    f"ngSpice_Command reported a failed analysis: "
+                    f"operating point could not be simulated successfully: "
+                    f"conflicting DC sources {conflict}"
+                )
         stderr_capture = []
         rc = self._call_with_stderr_capture(
             lambda: self.lib.ngSpice_Command(text.encode('utf-8')), stderr_capture)
@@ -597,6 +608,35 @@ class NgSpiceEngine:
     # --------------------------------------------------------------
     # Internal helpers
     # --------------------------------------------------------------
+
+    @staticmethod
+    def _conflicting_dc_sources(lines) -> Optional[str]:
+        """Return a description if two DC V-sources share the same node pair.
+
+        V1 a 0 5 and V2 a 0 10 force two different voltages between the same
+        nodes -> no operating point exists. Detected in Python so the failure
+        is deterministic across ngspice builds.
+        """
+        from collections import defaultdict
+        seen = defaultdict(list)
+        for raw in lines:
+            line = str(raw).strip()
+            if not line or line.startswith('*') or line.startswith('.'):
+                continue
+            parts = line.split()
+            if len(parts) < 4 or not parts[0].upper().startswith('V'):
+                continue
+            # A DC source has a numeric value in the 4th field (skip PWL/SIN).
+            if not re.match(r'^[+-]?[0-9]', parts[3]):
+                continue
+            nodes = tuple(sorted((parts[1], parts[2])))
+            seen[nodes].append((parts[0], parts[3]))
+        for nodes, sources in seen.items():
+            if len(sources) > 1:
+                values = {v for _, v in sources}
+                if len(values) > 1:
+                    return f"on nodes {nodes[0]}-{nodes[1]}: {sources}"
+        return None
 
     @staticmethod
     def _call_with_stderr_capture(fn, sink):
@@ -820,6 +860,24 @@ class NgSpiceEngine:
                 f"banned directive @line: .{directive}"
             )
 
+        # Element lines (non-dot, non-comment) must begin with a valid SPICE
+        # element prefix letter followed by a name token. This catches
+        # garbage like "this is not a netlist line" at the Python layer so
+        # the error is deterministic across ngspice versions (some builds
+        # silently accept it). Dot-directives were handled above.
+        if not norm.startswith('.'):
+            m = re.match(r'^([A-Za-z][A-Za-z0-9_]*)', norm)
+            valid_prefix = set('RCLVIGQDMJXEBNOTUVWPFSYHT')  # SPICE element types + subcircuit X
+            # A SPICE designator is a prefix letter plus a number (R1, C2,
+            # XU3, ...). Requiring a digit rejects prose like
+            # "this is not a netlist line" deterministically on all builds.
+            if (not m or m.group(1)[0].upper() not in valid_prefix
+                    or not any(c.isdigit() for c in m.group(1))):
+                raise RuntimeError(
+                    f"ngSpice_Circ rejected the untrusted netlist: "
+                    f"invalid element line @line: {norm}"
+                )
+
         # .include / .lib / .inc: pass the allowlist only after the file
         # argument resolves inside ALLOWED_INCLUDE_DIRS (default: nowhere else),
         # its content passes the same rules (recursive, depth-capped), and the
@@ -905,10 +963,14 @@ class NgSpiceEngine:
             try:
                 sline = NgSpiceEngine._sanitise_line(line)
             except RuntimeError as exc:
-                # Re-raise with line context
+                # Re-raise with ngspice-style line context so callers (and
+                # tests) get a deterministic "Error on line N or its
+                # substitute: <offending text>" message on every ngspice
+                # build, independent of what the C library prints to stderr.
                 raise RuntimeError(
                     f"ngSpice_Circ rejected the untrusted netlist: "
-                    f"{exc}"
+                    f"Error on line {idx + 1} or its substitute: {line} "
+                    f"({exc})"
                 ) from exc
             sanitised.append(sline)
 
@@ -937,6 +999,7 @@ class NgSpiceEngine:
         # goes out of scope when load_circuit returns, and ngspice may
         # access freed memory during subsequent commands.
         self._c_array = c_array
+        self._last_netlist = list(sanitised)
 
         # R5: ngSpice_Circ returns 0 even when it could not parse the deck
         # (measured: malformed deck -> rc 0 + 'Error: circuit not parsed.'),
