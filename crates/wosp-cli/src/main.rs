@@ -19,7 +19,7 @@
 
 use wowkispice_core::julia_bridge::solve_circuit_julia;
 use wowkispice_core::standalone_sim::{
-    build_buck_converter, build_rc_filter, Circuit, ComponentType, PassiveComponent,
+    build_buck_converter, build_rc_filter, BuckCoSim, Circuit, ComponentType, PassiveComponent,
 };
 
 fn parse_string_flag(args: &[String], flag: &str, default: &str) -> String {
@@ -192,8 +192,45 @@ fn main() {
             println!("{{\"mode\":\"standalone\",\"model\":\"{}\",\"name\":\"{}\",\"components\":{},\"tstop\":{},\"dt\":{},\"status\":\"configured\"}}",
                 model, circuit.name, circuit.resistors.len() + circuit.capacitors.len() + circuit.inductors.len(), tstop, dt);
         }
+        "cosim" => {
+            // Dependency-free closed-loop hardware/software co-simulation:
+            // a firmware-derived hysteretic controller drives the buck switch
+            // in lockstep with the circuit solver. No Julia, no ngspice, no
+            // QEMU needed -- fully deterministic std-only Rust.
+            let model = args.get(1).map(|s| s.as_str()).unwrap_or("buck");
+            if model != "buck" {
+                eprintln!("error: cosim currently supports 'buck' (closed-loop controller)");
+                std::process::exit(2);
+            }
+            let vin = parse_flag(&args, "--vin", 12.0).unwrap_or(12.0);
+            let l = parse_flag(&args, "--l", 10e-6).unwrap_or(10e-6);
+            let c = parse_flag(&args, "--c", 10e-6).unwrap_or(10e-6);
+            let r_load = parse_flag(&args, "--r", 10.0).unwrap_or(10.0);
+            let target = parse_flag(&args, "--target", 3.0).unwrap_or(3.0);
+            let hyst = parse_flag(&args, "--hysteresis", 0.05).unwrap_or(0.05);
+            let dt = parse_flag(&args, "--dt", 1e-6).unwrap_or(1e-6);
+            let tstop = parse_flag(&args, "--tstop", 0.05).unwrap_or(0.05);
+            let circuit = build_buck_converter(vin, l, c, r_load, 100_000.0);
+            match BuckCoSim::new(circuit, "vout".into(), "sw".into(), "0".into(),
+                                 target, hyst, 1.0, 3.3, dt, tstop) {
+                Ok(mut cosim) => match cosim.run() {
+                    Ok(results) => {
+                        let avg = cosim.avg_vout_last_fifth();
+                        let ripple = cosim.vout_ripple_last_fifth();
+                        let switches = results.windows(2)
+                            .filter(|w| w[0].gate != w[1].gate).count();
+                        let final_v = cosim.final_vout();
+                        // Emit a compact JSON summary (full trace available via the Rust API)
+                        println!("{{\"mode\":\"cosim\",\"model\":\"buck\",\"status\":\"success\",\"samples\":{},\"switch_events\":{},\"final_vout\":{:.6e},\"avg_vout_last_fifth\":{:.6e},\"ripple_last_fifth\":{:.6e},\"target\":{},\"vin\":{}}}",
+                            results.len(), switches, final_v, avg, ripple, target, vin);
+                    }
+                    Err(e) => { eprintln!("error: cosim run failed: {}", e); std::process::exit(1); }
+                },
+                Err(e) => { eprintln!("error: cosim init failed: {}", e); std::process::exit(1); }
+            }
+        }
         other => {
-            eprintln!("error: unknown command '{}' (try: list, sim, standalone)", other);
+            eprintln!("error: unknown command '{}' (try: list, sim, standalone, cosim)", other);
             std::process::exit(2);
         }
     }

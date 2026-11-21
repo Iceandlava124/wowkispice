@@ -15,6 +15,11 @@ STANDALONE (dependency-free Rust sim -- no Julia required)
   rc      RC filter         --r --c --vin
   buck    Buck converter    --vin --l --c --r
 
+CO-SIM (closed-loop, dependency-free -- firmware-derived controller)
+  cosim buck                --vin --l --c --r --target --hysteresis --dt --tstop
+  The controller's ADC uses Vref=3.3V, so --target must be < 3.3V.
+  Example: cosim buck --vin 12 --l 10e-6 --c 10e-6 --r 10 --target 2.5
+
 COMMON FLAGS
   --dt <seconds>      time step (default 1e-6)
   --tstop <seconds>   simulation stop time (default 0.01)
