@@ -423,7 +423,12 @@ class NgSpiceEngine:
         # _failure_report(), which also knows the deck's stop time.
         analyse = text.split()[0].lower() in NgSpiceEngine.ANALYSING_VERBS
         before = len(self.output_logs)
-        rc = self.lib.ngSpice_Command(text.encode('utf-8'))
+        stderr_capture = []
+        rc = self._call_with_stderr_capture(
+            lambda: self.lib.ngSpice_Command(text.encode('utf-8')), stderr_capture)
+        for line in stderr_capture:
+            if line and line not in self.output_logs:
+                self.output_logs.append(line)
         if analyse:
             report = self._failure_report(self.output_logs[before:], self._tstop)
             if report:
@@ -592,6 +597,36 @@ class NgSpiceEngine:
     # --------------------------------------------------------------
     # Internal helpers
     # --------------------------------------------------------------
+
+    @staticmethod
+    def _call_with_stderr_capture(fn, sink):
+        """Run a C call with fd 2 redirected into a temporary file.
+
+        ngspice writes some diagnostics (parse errors, op failures) directly
+        to stderr rather than through the SendChar callback. Capturing fd 2
+        ensures _failure_report sees them on every ngspice build.
+        """
+        import tempfile
+        saved = os.dup(2)
+        try:
+            with tempfile.TemporaryFile(mode="w+b") as cap:
+                os.dup2(cap.fileno(), 2)
+                try:
+                    result = fn()
+                finally:
+                    os.dup2(saved, 2)
+                    os.close(saved)
+                cap.seek(0)
+                for raw in cap.read().decode("utf-8", errors="replace").splitlines():
+                    sink.append(raw)
+            return result
+        except Exception:
+            try:
+                os.dup2(saved, 2)
+                os.close(saved)
+            except OSError:
+                pass
+            return fn()
 
     @staticmethod
     def _strip_normalize(line: str) -> str:
@@ -907,7 +942,14 @@ class NgSpiceEngine:
         # (measured: malformed deck -> rc 0 + 'Error: circuit not parsed.'),
         # so the captured output, not the return code, decides success here.
         before = len(self.output_logs)
-        ret = self.lib.ngSpice_Circ(c_array)
+        # Some ngspice builds write parse diagnostics straight to fd 2 instead
+        # of through the SendChar callback. Redirect stderr into a pipe during
+        # the C call so those errors are captured and can be reported.
+        stderr_capture = []
+        ret = self._call_with_stderr_capture(lambda: self.lib.ngSpice_Circ(c_array), stderr_capture)
+        for line in stderr_capture:
+            if line and line not in self.output_logs:
+                self.output_logs.append(line)
         if ret != 0:
             raise RuntimeError(f"ngSpice_Circ failed to load circuit (code {ret})")
         report = self._failure_report(self.output_logs[before:], self._tstop)
