@@ -124,6 +124,11 @@ def main():
         print(f"[pytest_isolated] {mod}: {marker}", flush=True)
         if proc.returncode < 0 or "Segmentation" in proc.stderr:
             print(f"  (ngspice C-abort contained in child; other tests unaffected)", flush=True)
+        if proc.returncode not in (0, 5):
+            # Surface the real test failure so CI logs show WHICH test failed.
+            for line in (proc.stdout or "").splitlines():
+                if any(k in line for k in ("FAILED", "assert", "Error", "short test summary")):
+                    print(f"    {line}", flush=True)
 
     total, failures, errors, skipped = merge_junit(args.junit_xml, parts)
     print(f"[pytest_isolated] junit merged: tests={total} failures={failures} "

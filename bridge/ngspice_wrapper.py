@@ -852,6 +852,15 @@ class NgSpiceEngine:
         Citations: ngspice manual section for the installed version (UNVERIFIED)
         if no manual available.
         """
+        # Each new circuit load starts a fresh run on the singleton engine.
+        # Clear per-run state so a prior circuit's logs/callbacks/flags cannot
+        # leak into this one (observed as wrong test results when several
+        # error-analysis tests run in one process).
+        self.output_logs = []
+        self._stop_requested = False
+        # Do NOT clear user_vsrc_callback here: callers (cosim_runner) set it
+        # before load_circuit, and the control law must survive the load.
+
         # Strip, normalise, and validate every line before passing to ngspice
         sanitised: List[str] = []
         for idx, line in enumerate(netlist_lines):
