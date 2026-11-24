@@ -67,7 +67,9 @@ Evidence: `docs/LAYER1_NUMERICAL_CREDIBILITY.md`
 
 ## Summary
 7/7 layers have concrete, verified deliverables. All three GitHub Actions
-workflows are green on the latest push. One external item remains: re-running
+workflows are green on the latest push (`02d6b5c`): Rust CI `45405779524`,
+Julia CI `45405779476`, Co-Sim CI `45405779592`. Self-check reports 5/5 PASS.
+One external item remains: re-running
 the rebuilt (runtime-complete) installer in the clean VM and confirming the GUI
 and self-check launch. No false "complete" claims: that blocked item is stated
 explicitly.
