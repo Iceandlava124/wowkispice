@@ -33,10 +33,19 @@ Section "Core Installation"
     ; CLI simulator (staged from cargo build)
     File "${STAGING_DIR}\wosp-cli.exe"
 
-    ; Firmware controller DLL (optional - staged if present)
-    !if /FILEEXISTS "${STAGING_DIR}\firmware_control.dll"
-        File "${STAGING_DIR}\firmware_control.dll"
+    ; Qt5 / MinGW-w64 runtime DLLs (libstdc++-6, libgcc_s_seh-1, Qt5Core,
+    ; Qt5Gui, Qt5Widgets, Qt5Charts, ICU, ...). Staged by build_installer.ps1
+    ; as the transitive dependency closure of the GUI. Without these the GUI
+    ; fails on a clean Windows machine with "libstdc++-6.dll was not found".
+    File "${STAGING_DIR}\*.dll"
+
+    ; Qt platform plugin - Qt looks for platforms/qwindows.dll next to the exe.
+    !if /FILEEXISTS "${STAGING_DIR}\platforms\qwindows.dll"
+        SetOutPath "$INSTDIR\platforms"
+        File "${STAGING_DIR}\platforms\qwindows.dll"
     !endif
+
+    SetOutPath "$INSTDIR"
 
     ; Self-check utility
     SetOutPath "$INSTDIR\tools"
@@ -74,7 +83,9 @@ SectionEnd
 Section "Uninstall"
     Delete "$INSTDIR\wowkispice_gui.exe"
     Delete "$INSTDIR\wosp-cli.exe"
-    Delete "$INSTDIR\firmware_control.dll"
+    Delete "$INSTDIR\*.dll"
+    Delete "$INSTDIR\platforms\qwindows.dll"
+    RMDir "$INSTDIR\platforms"
     Delete "$INSTDIR\tools\run_selfcheck.bat"
     Delete "$INSTDIR\tools\ngspice_dll\Spice64_dll\dll-vs\ngspice.dll"
     Delete "$INSTDIR\uninstall.exe"

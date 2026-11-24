@@ -14,7 +14,7 @@ The Rust core, the ngspice FFI layer, and the C++/Qt5 GUI are the shipped path.
 | **Qt5 GUI** (`gui/`) | Clean rebuild verified 2026-11-07: `cmake --build gui/build --clean-first` exit 0, **0 warnings** (`-Wall -Wextra -Werror -pedantic`), 390,252-byte `wowkispice_gui.exe`. Requires Qt5 Charts |
 | **Hysteretic controller** | Rust tests reproduce the firmware thresholds 1995/2030; parity with the Python mock is tested at the logic level |
 | **Environment gate** | `run_selfcheck.bat`: **SELF-CHECK: PASS**, all 5 checks (Rust core tests, Julia-feature tests, Julia solver script, deployment guide, Rust↔Julia bridge) |
-| **Installer** | `installer/wowkispice_installer.exe` exists (NSIS PE32, 124,773 bytes); the checked-in `.nsi` is a template with placeholder paths and is **not** reproducible as-is. Installation on a clean machine is **unverified** |
+| **Installer** | `installer/build_installer.ps1` rebuilds the NSIS installer from source (GUI + CLI + ngspice). The installer bundles the full Qt5/MinGW runtime closure (including `libstdc++-6.dll`, `libgcc_s_seh-1.dll`, ICU, and `platforms/qwindows.dll`) so the GUI runs on a Windows machine with no MSYS2/Qt installed. Clean-VM verification pending |
 | **Co-simulation path** | Rust `cosim_runner` + ngspice + Rust controller model (`crates/wowkispice-ffi/src/mock_controller.rs`). QEMU is **legacy, not the shipped path** |
 | **CLI simulator** (`crates/wosp-cli`) | `cargo run -p wosp-cli -- sim rc --r 2000 --c 1e-6 --vin 5` — simulate RC/RL/RLC/diode with custom values via the Julia backend from any directory; JSON output. `standalone` mode needs no Julia |
 
@@ -118,16 +118,16 @@ The Julia solver is **not** bundled: it is a user-installed runtime dependency.
 
 - **Core functionality** is verified and test-backed (369 Rust core tests, FFI bridge,
   Qt5 GUI, controller parity).
-- **Distribution**: source+build. An NSIS installer artifact exists, but it is not
-  reproducible from the checked-in `.nsi` template and has not been verified on a
-  clean machine. No PyPI, no pipx.
+- **Distribution**: source+build plus a reproducible NSIS installer that bundles
+  all Qt5/MinGW runtime DLLs. Installation on a machine with no developer
+  toolchains is pending final verification. No PyPI, no pipx.
 - **Platform**: Windows + MSYS2/MinGW; POSIX shell scripts exist but are not the
   verified primary path.
 - **Emulator**: QEMU is deprecated and not part of the shipped co-simulation path.
   The shipped path is single-process ngspice + Rust controller.
 - **Not a calibrated instrument**: this is an engineering laboratory tool, not a
   measurement-grade product.
-- **Ongoing work**: parameter-sweep automation, a reproducible installer, and
+- **Ongoing work**: parameter-sweep automation, clean-VM installer sign-off, and
   firmware migration to `esp-hal` + `rtic`.
 
 ## Reports

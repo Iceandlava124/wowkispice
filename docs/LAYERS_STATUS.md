@@ -32,9 +32,17 @@ Evidence: `docs/LAYER1_NUMERICAL_CREDIBILITY.md`
 ## Layer 4 — Distribution & reproducibility: CODE COMPLETE (VM test pending)
 - one-command bootstrap scripts (bootstrap-julia.bat/.sh), Windows verified
 - reproducible NSIS installer: `installer/build_installer.ps1` builds GUI+CLI
-  from source, fetches ngspice, stages inputs, compiles valid 3.1 MB PE exe
+  from source, fetches ngspice, stages inputs, compiles valid NSIS PE exe
+- **clean-VM bug fixed**: the first clean-VM run failed with
+  "libstdc++-6.dll was not found". The build script now computes the GUI's
+  transitive DLL closure with `objdump -p` and stages every Qt5/MinGW runtime
+  DLL (libstdc++-6, libgcc_s_seh-1, libwinpthread, Qt5Core/Gui/Widgets/Charts,
+  ICU, harfbuzz, freetype, ...) plus `platforms/qwindows.dll`; the NSIS script
+  installs them next to the GUI. Rebuilt installer: 23.6 MB, verified to contain
+  all 28 runtime files in its archive.
 - real CycloneDX 1.6 SBOM (117 components, 129KB) uploaded as CI artifact
-- remaining external step: clean-VM Windows install test (needs a fresh VM)
+- remaining external step: re-run the rebuilt installer in the clean VM and
+  confirm the GUI + self-check launch without any developer toolchains
 
 ## Layer 5 — Quality system: COMPLETE
 - VERSION + wosp-cli --version, requirements traceability (Layer 2),
@@ -51,6 +59,7 @@ Evidence: `docs/LAYER1_NUMERICAL_CREDIBILITY.md`
 
 ## Summary
 7/7 layers have concrete, verified deliverables. All three GitHub Actions
-workflows are green on the latest push. Exactly one item remains external and
-needs user hardware: the clean-VM Windows installer verification (Layer 4).
-No false "complete" claims: that single blocked item is stated explicitly.
+workflows are green on the latest push. One external item remains: re-running
+the rebuilt (runtime-complete) installer in the clean VM and confirming the GUI
+and self-check launch. No false "complete" claims: that blocked item is stated
+explicitly.
