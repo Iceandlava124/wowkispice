@@ -53,6 +53,14 @@ Evidence: `docs/LAYER1_NUMERICAL_CREDIBILITY.md`
   --version, JSON output, runs from any cwd
 - GUI clean rebuild from source exit 0, 0 warnings; launches with 0 stderr
   warnings (init-order bug fixed); component value editing updates on-screen label
+- **component palette + clarity fixed**: toolbar is generated from
+  `SchematicEditor::availableComponentTypes()` so all 11 supported parts are
+  exposed (R, C, L, V, I, D, NMOS, PMOS, NPN, PNP, op-amp) instead of 5. Each
+  type now draws its own symbol (zigzag/plates/coil/source circle/diode/transistor/
+  op-amp triangle) with the ID above, live value below, named pin tooltips and a
+  status-bar usage hint - no more identical boxes with overlapping labels.
+  Verified: `cmake --build gui/build_release` exit 0 with `-Werror`, GUI launched
+  on host and placement of parts exercised.
 
 ## Layer 7 — Support/lifecycle: COMPLETE
 - docs/SUPPORT_POLICY.md, performance regression gate (3.9s vs 30s budget)

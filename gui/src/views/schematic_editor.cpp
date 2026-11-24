@@ -3,7 +3,11 @@
 #include <QtWidgets/QGraphicsRectItem>
 #include <QtWidgets/QGraphicsSimpleTextItem>
 #include <QtWidgets/QGraphicsEllipseItem>
+#include <QtWidgets/QGraphicsPolygonItem>
+#include <QtWidgets/QGraphicsPathItem>
 #include <QtGui/QMouseEvent>
+#include <QtGui/QPainterPath>
+#include <QtGui/QFont>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QInputDialog>
 #include <QtWidgets/QMessageBox>
@@ -17,6 +21,14 @@
 #include <QtCore/QDebug>
 #include <QtCore/QStringLiteral>
 #include <QtCore/QTextStream>
+
+namespace {
+// Body geometry shared by symbol drawing, pin placement and label layout.
+constexpr qreal kBodyHalfW = 44.0;
+constexpr qreal kBodyHalfH = 26.0;
+constexpr qreal kPinOffset = 6.0;
+constexpr qreal kPinSize = 8.0;
+} // namespace
 
 SchematicEditor::SchematicEditor(QWidget *parent)
     : QGraphicsView(parent)
@@ -39,6 +51,112 @@ SchematicEditor::SchematicEditor(QWidget *parent)
     }
 }
 
+void SchematicEditor::drawComponentSymbol(QGraphicsRectItem *body, const QString &type,
+                                          const QString &value)
+{
+    Q_UNUSED(value)
+    const QString t = type.toLower();
+    const QPen symbolPen(QColor("#1b3a6b"), 2, Qt::SolidLine, Qt::RoundCap);
+    const qreal inner = kBodyHalfW - 10;
+
+    auto addLine = [&](qreal x1, qreal y1, qreal x2, qreal y2) {
+        auto *line = new QGraphicsLineItem(x1, y1, x2, y2, body);
+        line->setPen(symbolPen);
+        line->setZValue(1);
+    };
+    // Leads from the body to the pins on both sides.
+    addLine(-kBodyHalfW - kPinOffset, 0, -inner, 0);
+    addLine(inner, 0, kBodyHalfW + kPinOffset, 0);
+
+    if (t.contains("resistor")) {
+        QPainterPath zig;
+        zig.moveTo(-inner, 0);
+        const int bends = 6;
+        const qreal step = (2 * inner) / (bends + 1);
+        for (int i = 0; i < bends; ++i)
+            zig.lineTo(-inner + step * (i + 1), (i % 2 == 0) ? -8 : 8);
+        zig.lineTo(inner, 0);
+        auto *path = new QGraphicsPathItem(zig, body);
+        path->setPen(symbolPen);
+        path->setZValue(1);
+    } else if (t.contains("capacitor")) {
+        addLine(-8, -14, -8, 14);
+        addLine(8, -14, 8, 14);
+        addLine(-inner, 0, -8, 0);
+        addLine(8, 0, inner, 0);
+    } else if (t.contains("inductor")) {
+        QPainterPath coil;
+        coil.moveTo(-inner, 0);
+        const qreal seg = (2 * inner) / 4.0;
+        for (int i = 0; i < 4; ++i)
+            coil.arcTo(-inner + i * seg, -10, seg, 20, 180, -180);
+        auto *path = new QGraphicsPathItem(coil, body);
+        path->setPen(symbolPen);
+        path->setZValue(1);
+    } else if (t.contains("voltage")) {
+        auto *circle = new QGraphicsEllipseItem(-14, -14, 28, 28, body);
+        circle->setPen(symbolPen);
+        circle->setBrush(QBrush(QColor("#ffffff")));
+        auto *plus = new QGraphicsSimpleTextItem("+", body);
+        plus->setPos(-4, -13);
+        plus->setBrush(QColor("#1b3a6b"));
+        auto *minus = new QGraphicsSimpleTextItem("-", body);
+        minus->setPos(-4, 2);
+        minus->setBrush(QColor("#1b3a6b"));
+    } else if (t.contains("current")) {
+        auto *circle = new QGraphicsEllipseItem(-14, -14, 28, 28, body);
+        circle->setPen(symbolPen);
+        circle->setBrush(QBrush(QColor("#ffffff")));
+        addLine(0, 9, 0, -7);
+        QPolygonF arrow;
+        arrow << QPointF(0, -13) << QPointF(-4, -5) << QPointF(4, -5);
+        auto *head = new QGraphicsPolygonItem(arrow, body);
+        head->setBrush(QBrush(QColor("#1b3a6b")));
+    } else if (t.contains("diode")) {
+        QPolygonF tri;
+        tri << QPointF(-10, -12) << QPointF(-10, 12) << QPointF(10, 0);
+        auto *triangle = new QGraphicsPolygonItem(tri, body);
+        triangle->setPen(symbolPen);
+        triangle->setBrush(QBrush(QColor("#dbe9ff")));
+        addLine(11, -13, 11, 13);
+    } else if (t.contains("mosfet")) {
+        addLine(-14, -16, -14, 16);   // gate
+        addLine(-6, -14, -6, 14);     // channel
+        addLine(-6, -10, 24, -10);    // drain
+        addLine(-6, 10, 24, 10);      // source
+        auto *tag = new QGraphicsSimpleTextItem(t.contains("_p") ? "P" : "N", body);
+        tag->setPos(-25, -6);
+        tag->setBrush(QColor("#1b3a6b"));
+    } else if (t.contains("bjt")) {
+        auto *circle = new QGraphicsEllipseItem(-18, -18, 36, 36, body);
+        circle->setPen(symbolPen);
+        addLine(-12, 0, 2, 0);
+        addLine(2, 0, 14, -12);
+        addLine(2, 0, 14, 12);
+        auto *tag = new QGraphicsSimpleTextItem(t.contains("pnp") ? "PNP" : "NPN", body);
+        tag->setPos(-10, 5);
+        tag->setScale(0.7);
+        tag->setBrush(QColor("#1b3a6b"));
+    } else if (t.contains("opamp")) {
+        QPolygonF tri;
+        tri << QPointF(-18, -16) << QPointF(-18, 16) << QPointF(20, 0);
+        auto *amp = new QGraphicsPolygonItem(tri, body);
+        amp->setPen(symbolPen);
+        amp->setBrush(QBrush(QColor("#e8f5e9")));
+        auto *plus = new QGraphicsSimpleTextItem("+", body);
+        plus->setPos(-14, -12);
+        auto *minus = new QGraphicsSimpleTextItem("-", body);
+        minus->setPos(-14, 3);
+        plus->setBrush(QColor("#1b3a6b"));
+        minus->setBrush(QColor("#1b3a6b"));
+        addLine(-kBodyHalfW - kPinOffset, -9, -18, -9);
+        addLine(-kBodyHalfW - kPinOffset, 9, -18, 9);
+        addLine(20, 0, kBodyHalfW + kPinOffset, 0);
+    } else {
+        addLine(-14, 0, 14, 0);
+    }
+}
+
 void SchematicEditor::addComponent(const QString &id, const QString &type, qreal x, qreal y)
 {
     ComponentData comp;
@@ -48,36 +166,47 @@ void SchematicEditor::addComponent(const QString &id, const QString &type, qreal
     comp.position = QPointF(x, y);
     comp.params["value"] = defaultValueForType(type);
 
-    auto *rect = new QGraphicsRectItem(x - 30, y - 20, 60, 40);
-    rect->setPen(QPen(Qt::darkBlue, 2));
-    rect->setBrush(QBrush(QColor("#f0f8ff")));
+    auto *rect = new QGraphicsRectItem(x - kBodyHalfW, y - kBodyHalfH,
+                                       2 * kBodyHalfW, 2 * kBodyHalfH);
+    rect->setPen(QPen(QColor("#9fb3c8"), 1, Qt::DashLine));
+    rect->setBrush(QBrush(QColor("#ffffff")));
     rect->setFlag(QGraphicsItem::ItemIsMovable, true);
     rect->setFlag(QGraphicsItem::ItemIsSelectable, true);
     rect->setData(0, id);  // store component id in item data
+    rect->setToolTip(QString("%1 - %2 (value: %3)").arg(id, type, comp.params["value"]));
 
-    auto *label = new QGraphicsSimpleTextItem(type, rect);
-    label->setPos(-label->boundingRect().width() / 2, -label->boundingRect().height() / 2);
+    drawComponentSymbol(rect, type, comp.params["value"]);
 
+    // ID above the symbol, value below it: no overlap with the symbol or pins.
+    QFont idFont;
+    idFont.setPointSize(9);
+    idFont.setBold(true);
     auto *idLabel = new QGraphicsSimpleTextItem(id, rect);
-    idLabel->setPos(-idLabel->boundingRect().width() / 2, 25);
-    idLabel->setScale(0.6);
+    idLabel->setFont(idFont);
+    idLabel->setBrush(QColor("#1b3a6b"));
+    idLabel->setPos(-idLabel->boundingRect().width() / 2, -kBodyHalfH - 17);
 
-    // Live value label below the component - updates when the value is edited
+    QFont valueFont;
+    valueFont.setPointSize(8);
     auto *valueLabel = new QGraphicsSimpleTextItem(comp.params["value"], rect);
-    valueLabel->setPos(-valueLabel->boundingRect().width() / 2, 40);
-    valueLabel->setScale(0.6);
+    valueLabel->setFont(valueFont);
     valueLabel->setBrush(QColor("#2d6a4f"));
+    valueLabel->setPos(-valueLabel->boundingRect().width() / 2, kBodyHalfH + 4);
     comp.valueLabel = valueLabel;
 
-    // Draw pins (small circles on left and right)
-    qreal pinSize = 6;
-    auto *pin1 = new QGraphicsEllipseItem(-35 - pinSize/2, -pinSize/2, pinSize, pinSize, rect);
+    auto *pin1 = new QGraphicsEllipseItem(
+        -kBodyHalfW - kPinOffset - kPinSize / 2, -kPinSize / 2,
+        kPinSize, kPinSize, rect);
     pin1->setBrush(QBrush(Qt::black));
     pin1->setData(0, id + ".p1");
+    pin1->setToolTip(id + ".p1");
 
-    auto *pin2 = new QGraphicsEllipseItem(30 + pinSize/2, -pinSize/2, pinSize, pinSize, rect);
+    auto *pin2 = new QGraphicsEllipseItem(
+        kBodyHalfW + kPinOffset - kPinSize / 2, -kPinSize / 2,
+        kPinSize, kPinSize, rect);
     pin2->setBrush(QBrush(Qt::black));
     pin2->setData(0, id + ".p2");
+    pin2->setToolTip(id + ".p2");
 
     m_scene->addItem(rect);
     m_components[id] = comp;
@@ -137,7 +266,7 @@ void SchematicEditor::setComponentParam(const QString &id, const QString &key, c
         if (key == "value" && it.value().valueLabel) {
             it.value().valueLabel->setText(value);
             it.value().valueLabel->setPos(
-                -it.value().valueLabel->boundingRect().width() / 2, 40);
+                -it.value().valueLabel->boundingRect().width() / 2, kBodyHalfH + 4);
         }
     }
 }
@@ -292,9 +421,9 @@ QPointF SchematicEditor::pinPosition(const QString &compId, const QString &pinNa
     // Fallback: estimate pin position based on component position
     QPointF compPos = it.value().position;
     if (pinName == "p1")
-        return QPointF(compPos.x() - 35, compPos.y());
+        return QPointF(compPos.x() - kBodyHalfW - kPinOffset, compPos.y());
     else if (pinName == "p2")
-        return QPointF(compPos.x() + 30, compPos.y());
+        return QPointF(compPos.x() + kBodyHalfW + kPinOffset, compPos.y());
     return compPos;
 }
 
@@ -470,6 +599,7 @@ QString SchematicEditor::defaultValueForType(const QString &type) const
     if (t.contains("diode")) return "";
     if (t.contains("mosfet")) return "";
     if (t.contains("bjt")) return "";
+    if (t.contains("opamp") || t.contains("amplifier")) return "";
     return "1k";
 }
 

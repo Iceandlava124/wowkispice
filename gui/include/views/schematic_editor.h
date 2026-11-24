@@ -110,6 +110,8 @@ private:
 
     void importWAVStimulus(const QString &filePath);
     void showModelManagementDialog();
+    void drawComponentSymbol(QGraphicsRectItem *body, const QString &type,
+                             const QString &value);
     QString resolveModelForType(const QString &type);
     QString spicePrefixForType(const QString &type) const;
     QString defaultValueForType(const QString &type) const;

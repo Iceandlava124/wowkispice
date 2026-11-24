@@ -11,7 +11,7 @@ The Rust core, the ngspice FFI layer, and the C++/Qt5 GUI are the shipped path.
 |---|---|
 | **Rust core** (`crates/wowkispice-core`) | `cargo test -p wowkispice-core`: **369 passed, 0 failed**; `cargo test -p wowkispice-core --features julia`: **379 passed, 0 failed** (adds 10 Julia-bridge tests; baseline stays zero-dependency, `default = []`) |
 | **FFI bridge** (`crates/wowkispice-ffi`) | **27 passed, 0 failed** (26 lib + 1 integration); DLL load uses `LOAD_WITH_ALTERED_SEARCH_PATH`, and `ngGetVSRCData` is optional because this build does not export it |
-| **Qt5 GUI** (`gui/`) | Clean rebuild verified 2026-11-07: `cmake --build gui/build --clean-first` exit 0, **0 warnings** (`-Wall -Wextra -Werror -pedantic`), 390,252-byte `wowkispice_gui.exe`. Requires Qt5 Charts |
+| **Qt5 GUI** (`gui/`) | Clean rebuild with `-Werror` exit 0, **0 warnings**. 11-part palette (R/C/L/V/I/D/NMOS/PMOS/NPN/PNP/op-amp) with distinct symbols, non-overlapping ID/value labels, named pin tooltips and a status-bar usage hint. Requires Qt5 Charts |
 | **Hysteretic controller** | Rust tests reproduce the firmware thresholds 1995/2030; parity with the Python mock is tested at the logic level |
 | **Environment gate** | `run_selfcheck.bat`: **SELF-CHECK: PASS**, all 5 checks (Rust core tests, Julia-feature tests, Julia solver script, deployment guide, Rust↔Julia bridge) |
 | **Installer** | `installer/build_installer.ps1` rebuilds the NSIS installer from source (GUI + CLI + ngspice). The installer bundles the full Qt5/MinGW runtime closure (including `libstdc++-6.dll`, `libgcc_s_seh-1.dll`, ICU, and `platforms/qwindows.dll`) so the GUI runs on a Windows machine with no MSYS2/Qt installed. Clean-VM verification pending |

@@ -12,6 +12,8 @@
 #include <QtWidgets/QButtonGroup>
 #include <QtCore/QDebug>
 #include <QtCore/QTextStream>
+#include <QtCore/QMap>
+#include <QtCore/QPair>
 #include <QtGui/QColor>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -102,45 +104,36 @@ void MainWindow::setupToolBar()
     toolBar->setObjectName("MainToolbar");
 
     // --- Component placement group ---
+    // Built from SchematicEditor::availableComponentTypes() so the palette can
+    // never drift behind the types the editor already knows how to draw.
     toolBar->addSeparator();
     auto *compLabel = new QLabel("Components: ", this);
     toolBar->addWidget(compLabel);
 
-    auto *btnResistor = new QToolButton(this);
-    btnResistor->setText("R");
-    btnResistor->setToolTip("Place Resistor");
-    btnResistor->setCheckable(true);
-    connect(btnResistor, &QToolButton::clicked, this, [this](){ placeComponent("resistor"); });
+    const QMap<QString, QPair<QString, QString>> palette = {
+        {"resistor",       {"R",    "Place resistor"}},
+        {"capacitor",      {"C",    "Place capacitor"}},
+        {"inductor",       {"L",    "Place inductor"}},
+        {"voltage_source", {"V",    "Place voltage source"}},
+        {"current_source", {"I",    "Place current source"}},
+        {"diode",          {"D",    "Place diode"}},
+        {"mosfet_n",       {"NMOS", "Place N-channel MOSFET"}},
+        {"mosfet_p",       {"PMOS", "Place P-channel MOSFET"}},
+        {"bjt_npn",        {"NPN",  "Place NPN BJT"}},
+        {"bjt_pnp",        {"PNP",  "Place PNP BJT"}},
+        {"opamp",          {"OP",   "Place op-amp (needs a SPICE macromodel)"}},
+    };
 
-    auto *btnCapacitor = new QToolButton(this);
-    btnCapacitor->setText("C");
-    btnCapacitor->setToolTip("Place Capacitor");
-    btnCapacitor->setCheckable(true);
-    connect(btnCapacitor, &QToolButton::clicked, this, [this](){ placeComponent("capacitor"); });
-
-    auto *btnInductor = new QToolButton(this);
-    btnInductor->setText("L");
-    btnInductor->setToolTip("Place Inductor");
-    btnInductor->setCheckable(true);
-    connect(btnInductor, &QToolButton::clicked, this, [this](){ placeComponent("inductor"); });
-
-    auto *btnVoltage = new QToolButton(this);
-    btnVoltage->setText("V");
-    btnVoltage->setToolTip("Place Voltage Source");
-    btnVoltage->setCheckable(true);
-    connect(btnVoltage, &QToolButton::clicked, this, [this](){ placeComponent("voltage_source"); });
-
-    auto *btnDiode = new QToolButton(this);
-    btnDiode->setText("D");
-    btnDiode->setToolTip("Place Diode");
-    btnDiode->setCheckable(true);
-    connect(btnDiode, &QToolButton::clicked, this, [this](){ placeComponent("diode"); });
-
-    toolBar->addWidget(btnResistor);
-    toolBar->addWidget(btnCapacitor);
-    toolBar->addWidget(btnInductor);
-    toolBar->addWidget(btnVoltage);
-    toolBar->addWidget(btnDiode);
+    for (const QString &type : m_schematicEditor->availableComponentTypes()) {
+        const auto info = palette.value(type, {type.left(2).toUpper(), "Place " + type});
+        auto *btn = new QToolButton(this);
+        btn->setText(info.first);
+        btn->setToolTip(info.second);
+        btn->setStatusTip(info.second + " - click the button, then click the canvas");
+        btn->setCheckable(true);
+        connect(btn, &QToolButton::clicked, this, [this, type](){ placeComponent(type); });
+        toolBar->addWidget(btn);
+    }
 
     // --- Wire mode ---
     toolBar->addSeparator();
@@ -171,7 +164,9 @@ void MainWindow::setupToolBar()
 
 void MainWindow::setupStatusBar()
 {
-    statusBar()->showMessage("Ready");
+    statusBar()->showMessage(
+        "Click a component, then click the canvas to place it | "
+        "double-click to edit its value | Wire: click one pin, then another");
     statusBar()->addPermanentWidget(new QLabel("WOWKISPICE v0.1"));
 }
 
